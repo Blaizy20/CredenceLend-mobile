@@ -21,11 +21,16 @@ export default defineConfig(({ mode }) => {
     build: {
       rollupOptions: {
         input: { main: 'index.html' },
-        external: ['fsevents'], // 👈 this is what it's asking for
+        external: [
+          /^node:/,      // 👈 blocks ALL node:* built-ins (path, fs, etc.)
+          'fsevents',
+          'vite',
+          'rollup',
+        ],
       },
     },
     optimizeDeps: {
-      exclude: ['vite', 'express', 'mysql2', 'bcrypt', 'cors'],
+      exclude: ['vite', 'rollup', 'express', 'mysql2', 'bcrypt', 'cors'],
     },
   };
 });

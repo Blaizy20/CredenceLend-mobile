@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { motion } from 'motion/react';
-import { authAPI } from '../server';
+import { authAPI } from '../lib/api';
 
 export default function Login() {
   const navigate = useNavigate();

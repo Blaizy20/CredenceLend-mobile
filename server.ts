@@ -4,170 +4,127 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
-import mysql, { RowDataPacket } from "mysql2/promise";
+import mysql, { ResultSetHeader, RowDataPacket } from "mysql2/promise";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// ── MySQL Pool ────────────────────────────────────────────────────────────────
+const PORT = Number(process.env.PORT || 3000);
+const DEFAULT_TENANT_ID = Number(process.env.DEFAULT_TENANT_ID || 1);
+
 const pool = mysql.createPool({
-  host:               process.env.DB_HOST,
-  port:               Number(process.env.DB_PORT),
-  database:           process.env.DB_NAME,
-  user:               process.env.DB_USER,
-  password:           process.env.DB_PASSWORD,
+  host: process.env.DB_HOST,
+  port: Number(process.env.DB_PORT),
+  database: process.env.DB_NAME,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
   waitForConnections: true,
-  connectionLimit:    10,
-  ssl:                { rejectUnauthorized: false },
+  connectionLimit: 10,
+  queueLimit: 0,
+  ssl: { rejectUnauthorized: false },
 });
+
+type CustomerRow = RowDataPacket & {
+  customer_id: number;
+  tenant_id: number | null;
+  user_id: number | null;
+  username: string;
+  password: string;
+  customer_no: string;
+  first_name: string;
+  last_name: string;
+  contact_no: string | null;
+  email: string | null;
+  province: string | null;
+  city: string | null;
+  barangay: string | null;
+  street: string | null;
+  created_at: string;
+  is_active: number;
+};
+
+function getNextCustomerNo(lastCustomerNo: string | null, year: number) {
+  if (!lastCustomerNo) return `CUST-${year}-0001`;
+  const parts = lastCustomerNo.split("-");
+  const lastSeq = Number(parts[2] || 0);
+  return `CUST-${year}-${String(lastSeq + 1).padStart(4, "0")}`;
+}
 
 async function startServer() {
   const app = express();
-  const PORT = process.env.PORT || 3000;
 
-  app.use(express.json());
+  app.use(express.json({ limit: "10mb" }));
+  app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+  app.use(cors({ origin: true, credentials: true }));
 
-  app.use(cors({
-    origin: [
-      "https://localhost",
-      "http://localhost:3000",
-      "capacitor://localhost",
-      "https://your-app.up.railway.app", // 👈 replace with your actual Railway URL
-    ],
-    credentials: true,
-  }));
-
-  // ── Health ──────────────────────────────────────────────────────────────────
+  // ── Health ────────────────────────────────────────────────────────────────
   app.get("/api/health", async (_req, res) => {
     try {
       await pool.query("SELECT 1");
       res.json({ status: "ok", database: "connected ✅" });
     } catch (err: any) {
-      res.status(500).json({ status: "error", database: "disconnected ❌", error: err.message });
+      console.error("Health error:", err.message);
+      res.status(500).json({
+        status: "error",
+        database: "disconnected ❌",
+        error: err.message,
+      });
     }
   });
 
-  // ── Auth: Login ─────────────────────────────────────────────────────────────
-  app.post("/api/auth/login", async (req, res) => {
+  // ── Availability Checks ───────────────────────────────────────────────────
+  app.get("/api/auth/check-username", async (req, res) => {
     try {
-      const { username, password } = req.body;
-
-      if (!username || !password)
-        return res.status(400).json({ success: false, message: "Username and password required" });
-
+      const username = String(req.query.username || "").trim();
+      if (!username)
+        return res.status(400).json({ taken: false, message: "Username is required" });
       const [rows] = await pool.query<RowDataPacket[]>(
-        `SELECT customer_id, tenant_id, user_id, username, password,
-                customer_no, first_name, last_name, contact_no, email,
-                province, city, barangay, street, created_at, is_active
-         FROM customers
-         WHERE username = ? AND is_active = 1
-         LIMIT 1`,
-        [username]
-      );
-
-      if (rows.length === 0)
-        return res.status(401).json({ success: false, message: "Invalid credentials" });
-
-      const customer = rows[0];
-      const match = await bcrypt.compare(password, customer.password);
-
-      if (!match)
-        return res.status(401).json({ success: false, message: "Invalid credentials" });
-
-      const { password: _pw, ...safeCustomer } = customer;
-      res.json({ success: true, customer: safeCustomer });
-
-    } catch (err: any) {
-      console.error("Login error:", err.message);
-      res.status(500).json({ success: false, message: "Server error", error: err.message });
-    }
-  });
-
-  // ── Auth: Register ──────────────────────────────────────────────────────────
-  app.post("/api/auth/register", async (req, res) => {
-    try {
-      const {
-        first_name, last_name, username, contact_no,
-        email, password, province, city, barangay, street
-      } = req.body;
-
-      // Validate required fields
-      if (!first_name || !last_name || !username || !email || !password)
-        return res.status(400).json({ success: false, message: "Please fill in all required fields" });
-
-      // Check if username already exists
-      const [existingUsername] = await pool.query<RowDataPacket[]>(
         "SELECT customer_id FROM customers WHERE username = ? LIMIT 1",
         [username]
       );
-      if (existingUsername.length > 0)
-        return res.status(409).json({ success: false, message: "Username already taken" });
-
-      // Check if email already exists
-      const [existingEmail] = await pool.query<RowDataPacket[]>(
-        "SELECT customer_id FROM customers WHERE email = ? LIMIT 1",
-        [email]
-      );
-      if (existingEmail.length > 0)
-        return res.status(409).json({ success: false, message: "Email already registered" });
-
-      // Generate sequential customer_no: CUST-2026-0001
-      const year = new Date().getFullYear();
-      const [lastCustomer] = await pool.query<RowDataPacket[]>(
-        "SELECT customer_no FROM customers WHERE customer_no LIKE ? ORDER BY customer_id DESC LIMIT 1",
-        [`CUST-${year}-%`]
-      );
-
-      let sequence = 1;
-      if (lastCustomer.length > 0) {
-        const lastNo = lastCustomer[0].customer_no; // e.g. CUST-2026-0042
-        const lastSeq = parseInt(lastNo.split("-")[2]);
-        sequence = lastSeq + 1;
-      }
-      const customer_no = `CUST-${year}-${sequence.toString().padStart(4, "0")}`;
-
-      // Hash password
-      const hashedPassword = await bcrypt.hash(password, 10);
-
-      // Insert new customer
-      const [result]: any = await pool.query(
-        `INSERT INTO customers
-          (tenant_id, username, password, customer_no, first_name, last_name,
-           contact_no, email, province, city, barangay, street, is_active)
-         VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-        [
-          username, hashedPassword, customer_no, first_name, last_name,
-          contact_no || null, email, province || null, city || null,
-          barangay || null, street || null
-        ]
-      );
-
-      res.json({
-        success: true,
-        message: "Registration successful",
-        customer: {
-          customer_id: result.insertId,
-          customer_no,
-          first_name,
-          last_name,
-          username,
-          email,
-        }
-      });
-
+      res.json({ taken: rows.length > 0 });
     } catch (err: any) {
-      console.error("Register error FULL:", JSON.stringify(err, null, 2));
-      console.error("Register error message:", err.message);
-      console.error("Register error code:", err.code);
-      res.status(500).json({ success: false, message: "Server error", error: err.message, code: err.code });
+      console.error("Check username error:", err.message);
+      res.status(500).json({ taken: false, message: "Server error" });
     }
   });
 
-  // ── Auth: Send OTP ──────────────────────────────────────────────────────────
+  app.get("/api/auth/check-email", async (req, res) => {
+    try {
+      const email = String(req.query.email || "").trim();
+      if (!email)
+        return res.status(400).json({ taken: false, message: "Email is required" });
+      const [rows] = await pool.query<RowDataPacket[]>(
+        "SELECT customer_id FROM customers WHERE email = ? LIMIT 1",
+        [email]
+      );
+      res.json({ taken: rows.length > 0 });
+    } catch (err: any) {
+      console.error("Check email error:", err.message);
+      res.status(500).json({ taken: false, message: "Server error" });
+    }
+  });
+
+  app.get("/api/auth/check-contact", async (req, res) => {
+    try {
+      const contactNo = String(req.query.contactNo || "").trim();
+      if (!contactNo)
+        return res.status(400).json({ taken: false, message: "Contact number is required" });
+      const [rows] = await pool.query<RowDataPacket[]>(
+        "SELECT customer_id FROM customers WHERE contact_no = ? LIMIT 1",
+        [contactNo]
+      );
+      res.json({ taken: rows.length > 0 });
+    } catch (err: any) {
+      console.error("Check contact error:", err.message);
+      res.status(500).json({ taken: false, message: "Server error" });
+    }
+  });
+
+  // ── Auth: Send OTP ────────────────────────────────────────────────────────
   app.post("/api/auth/send-otp", async (req, res) => {
     try {
       const { email } = req.body;
-
       if (!email)
         return res.status(400).json({ success: false, message: "Email is required" });
 
@@ -175,7 +132,6 @@ async function startServer() {
         "SELECT customer_id FROM customers WHERE email = ? AND is_active = 1 LIMIT 1",
         [email]
       );
-
       if (customers.length === 0)
         return res.status(404).json({ success: false, message: "Email not found" });
 
@@ -189,41 +145,155 @@ async function startServer() {
 
       console.log(`[OTP] ${email} → ${otp}`);
       res.json({ success: true, message: "OTP sent successfully" });
-
     } catch (err: any) {
       console.error("Send OTP error:", err.message);
       res.status(500).json({ success: false, message: "Server error" });
     }
   });
 
-  // ── Auth: Verify OTP ────────────────────────────────────────────────────────
+  // ── Auth: Verify OTP ──────────────────────────────────────────────────────
   app.post("/api/auth/verify-otp", async (req, res) => {
     try {
       const { email, otp } = req.body;
-
       if (!email || !otp)
         return res.status(400).json({ success: false, message: "Email and OTP are required" });
 
-      const now = Date.now();
-
       const [rows] = await pool.query<RowDataPacket[]>(
         "SELECT * FROM otps WHERE email = ? AND otp = ? AND expires_at > ? LIMIT 1",
-        [email, otp, now]
+        [email, otp, Date.now()]
       );
-
       if (rows.length === 0)
         return res.status(400).json({ success: false, message: "Invalid or expired OTP" });
 
       await pool.query("DELETE FROM otps WHERE email = ?", [email]);
       res.json({ success: true, message: "OTP verified" });
-
     } catch (err: any) {
       console.error("Verify OTP error:", err.message);
       res.status(500).json({ success: false, message: "Server error" });
     }
   });
 
-  // ── Profile ─────────────────────────────────────────────────────────────────
+  // ── Auth: Register ────────────────────────────────────────────────────────
+  app.post("/api/auth/register", async (req, res) => {
+    try {
+      const first_name = String(req.body.first_name ?? req.body.firstName ?? "").trim();
+      const last_name  = String(req.body.last_name  ?? req.body.lastName  ?? "").trim();
+      const username   = String(req.body.username   ?? "").trim();
+      const contact_no = String(req.body.contact_no ?? req.body.contactNo ?? "").trim();
+      const email      = String(req.body.email      ?? "").trim().toLowerCase();
+      const password   = String(req.body.password   ?? "");
+      const province   = String(req.body.province   ?? "").trim();
+      const city       = String(req.body.city       ?? "").trim();
+      const barangay   = String(req.body.barangay   ?? "").trim();
+      const street     = String(req.body.street     ?? "").trim();
+
+      if (!first_name || !last_name || !username || !contact_no ||
+          !email || !password || !province || !city || !barangay || !street)
+        return res.status(400).json({ success: false, message: "Please fill in all required fields" });
+
+      if (!/^09\d{9}$/.test(contact_no))
+        return res.status(400).json({ success: false, message: "Contact number must be in PH format (09XXXXXXXXX)" });
+
+      if (!/\S+@\S+\.\S+/.test(email))
+        return res.status(400).json({ success: false, message: "Invalid email address" });
+
+      const [duplicateRows] = await pool.query<RowDataPacket[]>(
+        `SELECT customer_id, username, email, contact_no
+         FROM customers
+         WHERE username = ? OR email = ? OR contact_no = ?
+         LIMIT 1`,
+        [username, email, contact_no]
+      );
+
+      if (duplicateRows.length > 0) {
+        const dup = duplicateRows[0];
+        if (dup.username === username)
+          return res.status(409).json({ success: false, message: "Username already taken" });
+        if (dup.email === email)
+          return res.status(409).json({ success: false, message: "Email already registered" });
+        if (dup.contact_no === contact_no)
+          return res.status(409).json({ success: false, message: "Contact number already registered" });
+      }
+
+      const year = new Date().getFullYear();
+      const [lastCustomerRows] = await pool.query<RowDataPacket[]>(
+        `SELECT customer_no FROM customers
+         WHERE customer_no LIKE ?
+         ORDER BY customer_id DESC LIMIT 1`,
+        [`CUST-${year}-%`]
+      );
+
+      const lastCustomerNo = lastCustomerRows.length > 0
+        ? String(lastCustomerRows[0].customer_no)
+        : null;
+
+      const customer_no    = getNextCustomerNo(lastCustomerNo, year);
+      const hashedPassword = await bcrypt.hash(password, 10);
+
+      const [result] = await pool.query<ResultSetHeader>(
+        `INSERT INTO customers
+          (tenant_id, username, password, customer_no, first_name, last_name,
+           contact_no, email, province, city, barangay, street, is_active)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+        [DEFAULT_TENANT_ID, username, hashedPassword, customer_no,
+         first_name, last_name, contact_no, email,
+         province, city, barangay, street]
+      );
+
+      res.status(201).json({
+        success: true,
+        message: "Registration successful",
+        customer: {
+          customer_id: result.insertId,
+          tenant_id: DEFAULT_TENANT_ID,
+          username, customer_no, first_name, last_name,
+          contact_no, email, province, city, barangay, street,
+          is_active: 1,
+        },
+      });
+    } catch (err: any) {
+      console.error("Register error:", err);
+      res.status(500).json({ success: false, message: "Server error", error: err.message, code: err.code });
+    }
+  });
+
+  // ── Auth: Login ───────────────────────────────────────────────────────────
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const usernameOrEmail = String(req.body.username ?? req.body.email ?? "").trim();
+      const password        = String(req.body.password ?? "");
+
+      if (!usernameOrEmail || !password)
+        return res.status(400).json({ success: false, message: "Username and password required" });
+
+      const [rows] = await pool.query<CustomerRow[]>(
+        `SELECT customer_id, tenant_id, user_id, username, password,
+                customer_no, first_name, last_name, contact_no, email,
+                province, city, barangay, street, created_at, is_active
+         FROM customers
+         WHERE (username = ? OR email = ?) AND is_active = 1
+         LIMIT 1`,
+        [usernameOrEmail, usernameOrEmail]
+      );
+
+      if (rows.length === 0)
+        return res.status(401).json({ success: false, message: "Invalid credentials" });
+
+      const customer = rows[0];
+      const match    = await bcrypt.compare(password, customer.password);
+
+      if (!match)
+        return res.status(401).json({ success: false, message: "Invalid credentials" });
+
+      const { password: _pw, ...safeCustomer } = customer;
+      res.json({ success: true, customer: safeCustomer });
+    } catch (err: any) {
+      console.error("Login error:", err.message);
+      res.status(500).json({ success: false, message: "Server error", error: err.message });
+    }
+  });
+
+  // ── Profile ───────────────────────────────────────────────────────────────
   app.get("/api/profile/:customerId", async (req, res) => {
     try {
       const [rows] = await pool.query<RowDataPacket[]>(
@@ -235,22 +305,19 @@ async function startServer() {
          LIMIT 1`,
         [req.params.customerId]
       );
-
       if (rows.length === 0)
-        return res.status(404).json({ message: "Customer not found" });
-
+        return res.status(404).json({ success: false, message: "Customer not found" });
       res.json(rows[0]);
-
     } catch (err: any) {
       console.error("Profile error:", err.message);
       res.status(500).json({ success: false, message: "Server error" });
     }
   });
 
-  // ── Loans ───────────────────────────────────────────────────────────────────
+  // ── Loans ─────────────────────────────────────────────────────────────────
   app.get("/api/loans/:customerId", async (req, res) => {
     try {
-      const [rows] = await pool.query(
+      const [rows] = await pool.query<RowDataPacket[]>(
         `SELECT loan_id, reference_no, principal_amount, interest_rate,
                 payment_term, term_months, total_payable, remaining_balance,
                 status, due_date, activated_at, created_at, is_active
@@ -260,7 +327,6 @@ async function startServer() {
         [req.params.customerId]
       );
       res.json(rows);
-
     } catch (err: any) {
       console.error("Loans error:", err.message);
       res.status(500).json({ success: false, message: "Server error" });
@@ -279,22 +345,19 @@ async function startServer() {
          LIMIT 1`,
         [req.params.loanId]
       );
-
       if (rows.length === 0)
-        return res.status(404).json({ message: "Loan not found" });
-
+        return res.status(404).json({ success: false, message: "Loan not found" });
       res.json(rows[0]);
-
     } catch (err: any) {
       console.error("Loan error:", err.message);
       res.status(500).json({ success: false, message: "Server error" });
     }
   });
 
-  // ── Payments ─────────────────────────────────────────────────────────────────
+  // ── Payments ──────────────────────────────────────────────────────────────
   app.get("/api/payments/:loanId", async (req, res) => {
     try {
-      const [rows] = await pool.query(
+      const [rows] = await pool.query<RowDataPacket[]>(
         `SELECT payment_id, loan_id, amount, payment_date, method,
                 or_no, notes, created_at
          FROM payments
@@ -303,17 +366,16 @@ async function startServer() {
         [req.params.loanId]
       );
       res.json(rows);
-
     } catch (err: any) {
       console.error("Payments error:", err.message);
       res.status(500).json({ success: false, message: "Server error" });
     }
   });
 
-  // ── Transactions ─────────────────────────────────────────────────────────────
+  // ── Transactions ──────────────────────────────────────────────────────────
   app.get("/api/transactions/:customerId", async (req, res) => {
     try {
-      const [rows] = await pool.query(
+      const [rows] = await pool.query<RowDataPacket[]>(
         `SELECT id, loan_id, type, amount, date, status
          FROM transactions
          WHERE customer_id = ?
@@ -321,14 +383,13 @@ async function startServer() {
         [req.params.customerId]
       );
       res.json(rows);
-
     } catch (err: any) {
       console.error("Transactions error:", err.message);
       res.status(500).json({ success: false, message: "Server error" });
     }
   });
 
-  // ── Vite / Static ───────────────────────────────────────────────────────────
+  // ── Static / Vite ─────────────────────────────────────────────────────────
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -338,9 +399,7 @@ async function startServer() {
   } else {
     const distPath = path.join(process.cwd(), "dist");
     app.use(express.static(distPath));
-    app.get("*", (_req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
+    app.get("*", (_req, res) => res.sendFile(path.join(distPath, "index.html")));
   }
 
   app.listen(PORT, "0.0.0.0", () => {
@@ -348,4 +407,7 @@ async function startServer() {
   });
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error("Fatal startup error:", err);
+  process.exit(1);
+});
