@@ -32,7 +32,7 @@ async function startServer() {
   const PORT = process.env.PORT || 3000;
   
   app.use(cors({
-    origin: ["https://localhost", "http://localhost:3000", "capacitor://localhost"],
+    origin: ["https://localhost", "http://localhost:3000", "capacitor://localhost", "https://credencelend-mobile-production.up.railway.app"],
     credentials: true,
   }));
 
@@ -61,8 +61,36 @@ async function startServer() {
   // Uses: customers table
   // Columns confirmed: customer_id, tenant_id, username, password, first_name,
   //   last_name, email, contact_no, customer_no, is_active
+  // ✅ Fixed
   app.post("/api/auth/login", async (req, res) => {
-    const { username, password } = req.body;
+    try {
+      const { username, password } = req.body;
+      if (!username || !password)
+        return res.status(400).json({ success: false, message: "Username and password required" });
+
+      const [rows] = await pool.query<RowDataPacket[]>(
+        `SELECT customer_id, tenant_id, username, password, first_name, last_name,
+                email, contact_no, customer_no, is_active
+         FROM customers WHERE username = ? AND is_active = 1 LIMIT 1`,
+        [username]
+      );
+
+      if (rows.length === 0)
+        return res.status(401).json({ success: false, message: "Invalid credentials" });
+
+      const customer = rows[0];
+      const match = await bcrypt.compare(password, customer.password);
+      if (!match)
+        return res.status(401).json({ success: false, message: "Invalid credentials" });
+
+      const { password: _pw, ...safeCustomer } = customer;
+      res.json({ success: true, customer: safeCustomer });
+
+    } catch (err: any) {
+      console.error("Login error:", err.message);
+      res.status(500).json({ success: false, message: "Server error", error: err.message });
+    }
+  });
 
     if (!username || !password)
       return res.status(400).json({ success: false, message: "Username and password required" });
@@ -88,7 +116,7 @@ async function startServer() {
     // Never send password back to the client
     const { password: _pw, ...safeCustomer } = customer;
     res.json({ success: true, customer: safeCustomer });
-  });
+  
 
   // ── Auth: Send OTP ──────────────────────────────────────────────────────────
   // ✅ CONFIRMED: otps → email (PK), otp, expires_at (BIGINT ms)
