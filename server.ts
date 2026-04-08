@@ -156,12 +156,10 @@ async function startServer() {
       });
 
     } catch (err: any) {
-      console.log("Attempting insert with:", {
-  username, customer_no, first_name, last_name,
-  email, province, city, barangay, street
-});
-      console.error("Register error:", err.message);
-      res.status(500).json({ success: false, message: "Server error", error: err.message });
+      console.error("Register error FULL:", JSON.stringify(err, null, 2));
+      console.error("Register error message:", err.message);
+      console.error("Register error code:", err.code);
+      res.status(500).json({ success: false, message: "Server error", error: err.message, code: err.code });
     }
   });
 
