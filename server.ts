@@ -83,6 +83,84 @@ async function startServer() {
     }
   });
 
+  // ── Auth: Register ──────────────────────────────────────────────────────────
+  app.post("/api/auth/register", async (req, res) => {
+    try {
+      const {
+        first_name, last_name, username, contact_no,
+        email, password, province, city, barangay, street
+      } = req.body;
+
+      // Validate required fields
+      if (!first_name || !last_name || !username || !email || !password)
+        return res.status(400).json({ success: false, message: "Please fill in all required fields" });
+
+      // Check if username already exists
+      const [existingUsername] = await pool.query<RowDataPacket[]>(
+        "SELECT customer_id FROM customers WHERE username = ? LIMIT 1",
+        [username]
+      );
+      if (existingUsername.length > 0)
+        return res.status(409).json({ success: false, message: "Username already taken" });
+
+      // Check if email already exists
+      const [existingEmail] = await pool.query<RowDataPacket[]>(
+        "SELECT customer_id FROM customers WHERE email = ? LIMIT 1",
+        [email]
+      );
+      if (existingEmail.length > 0)
+        return res.status(409).json({ success: false, message: "Email already registered" });
+
+      // Generate sequential customer_no: CUST-2026-0001
+      const year = new Date().getFullYear();
+      const [lastCustomer] = await pool.query<RowDataPacket[]>(
+        "SELECT customer_no FROM customers WHERE customer_no LIKE ? ORDER BY customer_id DESC LIMIT 1",
+        [`CUST-${year}-%`]
+      );
+
+      let sequence = 1;
+      if (lastCustomer.length > 0) {
+        const lastNo = lastCustomer[0].customer_no; // e.g. CUST-2026-0042
+        const lastSeq = parseInt(lastNo.split("-")[2]);
+        sequence = lastSeq + 1;
+      }
+      const customer_no = `CUST-${year}-${sequence.toString().padStart(4, "0")}`;
+
+      // Hash password
+      const hashedPassword = await bcrypt.hash(password, 10);
+
+      // Insert new customer
+      const [result]: any = await pool.query(
+        `INSERT INTO customers
+          (username, password, customer_no, first_name, last_name,
+           contact_no, email, province, city, barangay, street, is_active)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+        [
+          username, hashedPassword, customer_no, first_name, last_name,
+          contact_no || null, email, province || null, city || null,
+          barangay || null, street || null
+        ]
+      );
+
+      res.json({
+        success: true,
+        message: "Registration successful",
+        customer: {
+          customer_id: result.insertId,
+          customer_no,
+          first_name,
+          last_name,
+          username,
+          email,
+        }
+      });
+
+    } catch (err: any) {
+      console.error("Register error:", err.message);
+      res.status(500).json({ success: false, message: "Server error", error: err.message });
+    }
+  });
+
   // ── Auth: Send OTP ──────────────────────────────────────────────────────────
   app.post("/api/auth/send-otp", async (req, res) => {
     try {
