@@ -28,7 +28,7 @@ const pool = mysql.createPool({
 async function startServer() {
   const app = express();
   const PORT = process.env.PORT || 3000;
-
+  
   app.use(express.json());
 
   // Nodemailer — replace with real SMTP when ready
@@ -47,8 +47,8 @@ async function startServer() {
     try {
       await pool.query("SELECT 1");
       res.json({ status: "ok", database: "connected" });
-    } catch {
-      res.status(500).json({ status: "error", database: "disconnected" });
+    } catch (err: any) {
+      res.status(500).json({ status: "error", database: "disconnected", error: err.message });
     }
   });
 
