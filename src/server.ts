@@ -2,7 +2,7 @@
 // Frontend API client — uses fetch() to talk to the Express backend
 // DO NOT import mysql2 here — this runs in the browser/Capacitor, not Node.js
 
-const BASE_URL = '/api';
+const BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export interface Customer {

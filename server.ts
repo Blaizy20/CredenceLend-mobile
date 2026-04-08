@@ -1,3 +1,4 @@
+import cors from "cors";
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
@@ -30,7 +31,10 @@ async function startServer() {
   const app = express();
   const PORT = process.env.PORT || 3000;
   
-  app.use(express.json());
+  app.use(cors({
+    origin: ["https://localhost", "http://localhost:3000", "capacitor://localhost"],
+    credentials: true,
+  }));
 
   // Nodemailer — replace with real SMTP when ready
   const transporter = nodemailer.createTransport({
