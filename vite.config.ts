@@ -21,6 +21,7 @@ export default defineConfig(({ mode }) => {
     build: {
       rollupOptions: {
         input: { main: 'index.html' },
+        external: ['fsevents'], // 👈 this is what it's asking for
       },
     },
     optimizeDeps: {
