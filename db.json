@@ -1,0 +1,18 @@
+// ✅ Replace your current getDB with this
+const getDB = () => {
+  try {
+    if (!fs.existsSync(DB_PATH)) {
+      fs.writeFileSync(DB_PATH, JSON.stringify(DEFAULT_DB, null, 2));
+      return DEFAULT_DB;
+    }
+    const content = fs.readFileSync(DB_PATH, "utf-8").trim();
+    if (!content) {
+      fs.writeFileSync(DB_PATH, JSON.stringify(DEFAULT_DB, null, 2));
+      return DEFAULT_DB;
+    }
+    return JSON.parse(content);
+  } catch {
+    fs.writeFileSync(DB_PATH, JSON.stringify(DEFAULT_DB, null, 2));
+    return DEFAULT_DB;
+  }
+};
