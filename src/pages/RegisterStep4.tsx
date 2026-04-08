@@ -17,11 +17,9 @@ export default function RegisterStep4() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    // Always reload the latest facePhoto from localStorage and show preview
     const savedData = localStorage.getItem('registerData');
     if (savedData) {
       const parsed = JSON.parse(savedData);
-      // Always get the latest facePhoto
       const regData = JSON.parse(localStorage.getItem('registerData') || '{}');
       if (regData.facePhoto) parsed.facePhoto = regData.facePhoto;
       setData(parsed);
@@ -33,60 +31,53 @@ export default function RegisterStep4() {
       alert('Please agree to the Terms and Conditions');
       return;
     }
-    // Debug: Show which field is missing
+
     if (!data) {
       setError('Registration data is missing.');
       return;
     }
+
     const requiredFields = [
-      'firstName', 'lastName', 'username', 'password', 'email', 'contactNo', 'province', 'city', 'barangay', 'street', 'facePhoto'
+      'firstName', 'lastName', 'username', 'password',
+      'email', 'contactNo', 'province', 'city', 'barangay', 'street'
     ];
     const missing = requiredFields.filter(f => !data[f]);
     if (missing.length > 0) {
       setError('Registration data is incomplete. Missing: ' + missing.join(', '));
       return;
     }
+
     setLoading(true);
     setError('');
+
     try {
-      // Check for duplicate username or email
-      let users = [];
-      try {
-        users = JSON.parse(localStorage.getItem('users') || '[]');
-      } catch {}
-      const usernameExists = users.some((u: any) => u.username === data.username);
-      const emailExists = users.some((u: any) => u.email === data.email);
-      const contactExists = users.some((u: any) => u.contactNo === data.contactNo);
-      if (usernameExists || emailExists || contactExists) {
-        let msg = 'Account already exists:';
-        if (usernameExists) msg += ' Username';
-        if (emailExists) msg += ' Email';
-        if (contactExists) msg += ' Contact number';
-        setError(msg + '. Please use different credentials.');
-        setLoading(false);
+      const response = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          first_name:  data.firstName,
+          last_name:   data.lastName,
+          username:    data.username,
+          password:    data.password,
+          email:       data.email,
+          contact_no:  data.contactNo,
+          province:    data.province,
+          city:        data.city,
+          barangay:    data.barangay,
+          street:      data.street,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        setError(result.message || 'Registration failed. Please try again.');
         return;
       }
-      const userProfile = {
-        firstName: data.firstName,
-        lastName: data.lastName,
-        username: data.username,
-        password: data.password || '',
-        email: data.email,
-        contactNo: data.contactNo,
-        province: data.province,
-        city: data.city,
-        barangay: data.barangay,
-        street: data.street,
-        facePhoto: data.facePhoto || '',
-        role: 'client',
-        customerNo: `CUST-${Math.floor(100000 + Math.random() * 900000)}`,
-        createdAt: new Date().toISOString(),
-      };
-      users.push(userProfile);
-      localStorage.setItem('users', JSON.stringify(users));
+
       localStorage.removeItem('registerData');
-      // Redirect to login after registration
       navigate('/login', { replace: true });
+
     } catch (err: any) {
       setError('Registration failed. Please try again.');
     } finally {
@@ -124,7 +115,7 @@ export default function RegisterStep4() {
         </header>
 
         <div className="grid grid-cols-1 gap-6">
-          {/* Face Photo Preview (always show if available) */}
+          {/* Face Photo Preview */}
           <motion.div 
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -143,6 +134,7 @@ export default function RegisterStep4() {
               <div className="text-xs text-error font-bold">No face photo found. Please go back and capture your photo.</div>
             )}
           </motion.div>
+
           {/* Personal Details */}
           <motion.div 
             initial={{ opacity: 0, y: 10 }}
@@ -248,7 +240,10 @@ export default function RegisterStep4() {
               className="mt-1 h-4 w-4 rounded border-outline-variant bg-surface-container-high text-primary focus:ring-primary/30" 
             />
             <label className="text-xs text-on-surface-variant leading-relaxed text-left">
-              By clicking "Complete Registration", you agree to our <button onClick={() => setShowTerms(true)} className="text-primary font-medium hover:underline">Terms of Service</button> and <button onClick={() => setShowPrivacy(true)} className="text-primary font-medium hover:underline">Privacy Policy</button>.
+              By clicking "Complete Registration", you agree to our{' '}
+              <button onClick={() => setShowTerms(true)} className="text-primary font-medium hover:underline">Terms of Service</button>
+              {' '}and{' '}
+              <button onClick={() => setShowPrivacy(true)} className="text-primary font-medium hover:underline">Privacy Policy</button>.
             </label>
           </div>
         </div>
@@ -267,11 +262,7 @@ export default function RegisterStep4() {
       </footer>
 
       {/* Terms of Service Modal */}
-      <Modal 
-        isOpen={showTerms} 
-        onClose={() => setShowTerms(false)} 
-        title="Terms of Service"
-      >
+      <Modal isOpen={showTerms} onClose={() => setShowTerms(false)} title="Terms of Service">
         <section>
           <h4 className="font-bold text-on-surface mb-2">1. Eligibility</h4>
           <p>You must be at least 18 years old and a resident of the Philippines to use this service. You agree to provide accurate and complete information during the registration process.</p>
@@ -295,11 +286,7 @@ export default function RegisterStep4() {
       </Modal>
 
       {/* Privacy Policy Modal */}
-      <Modal 
-        isOpen={showPrivacy} 
-        onClose={() => setShowPrivacy(false)} 
-        title="Privacy Policy"
-      >
+      <Modal isOpen={showPrivacy} onClose={() => setShowPrivacy(false)} title="Privacy Policy">
         <section>
           <h4 className="font-bold text-on-surface mb-2">1. Data Collection</h4>
           <p>We collect personal information such as your name, contact details, address, and financial information to process your loan application and verify your identity.</p>

@@ -1,124 +1,492 @@
-// src/server.ts
-// Frontend API client — uses fetch() to talk to the Express backend
-// DO NOT import mysql2 here — this runs in the browser/Capacitor, not Node.js
+import cors from "cors";
+import bcrypt from "bcrypt";
+import express from "express";
+import { createServer as createViteServer } from "vite";
+import path from "path";
+import { fileURLToPath } from "url";
+import mysql, { ResultSetHeader, RowDataPacket } from "mysql2/promise";
 
-const BASE_URL = import.meta.env.VITE_API_URL || '/api';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-export interface Customer {
+const PORT = Number(process.env.PORT || 3000);
+const DEFAULT_TENANT_ID = Number(process.env.DEFAULT_TENANT_ID || 1);
+
+const pool = mysql.createPool({
+  host: process.env.DB_HOST,
+  port: Number(process.env.DB_PORT),
+  database: process.env.DB_NAME,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+  ssl: { rejectUnauthorized: false },
+});
+
+type CustomerRow = RowDataPacket & {
   customer_id: number;
-  tenant_id: number;
-  user_id?: number;
+  tenant_id: number | null;
+  user_id: number | null;
   username: string;
+  password: string;
   customer_no: string;
   first_name: string;
   last_name: string;
-  contact_no?: string;
-  email: string;
-  province?: string;
-  city?: string;
-  barangay?: string;
-  street?: string;
-  is_active: number;
-  created_at: string;
-}
-
-export interface Loan {
-  loan_id: number;
-  reference_no: string;
-  principal_amount: number;
-  interest_rate: number;
-  payment_term: string;
-  term_months: number;
-  total_payable: number;
-  remaining_balance: number;
-  status: string;
-  due_date: string;
-  activated_at: string;
+  contact_no: string | null;
+  email: string | null;
+  province: string | null;
+  city: string | null;
+  barangay: string | null;
+  street: string | null;
   created_at: string;
   is_active: number;
+};
+
+function getNextCustomerNo(lastCustomerNo: string | null, year: number) {
+  if (!lastCustomerNo) return `CUST-${year}-0001`;
+
+  const parts = lastCustomerNo.split("-");
+  const lastSeq = Number(parts[2] || 0);
+  const nextSeq = String(lastSeq + 1).padStart(4, "0");
+  return `CUST-${year}-${nextSeq}`;
 }
 
-export interface Payment {
-  payment_id: number;
-  loan_id: number;
-  amount: number;
-  payment_date: string;
-  method: string;
-  or_no: string;
-  notes?: string;
-  created_at: string;
-}
+async function startServer() {
+  const app = express();
 
-export interface Transaction {
-  id: string;
-  loan_id: string;
-  type: string;
-  amount: number;
-  date: string;
-  status: string;
-}
+  app.use(express.json({ limit: "10mb" }));
+  app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-async function request<T>(endpoint: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE_URL}${endpoint}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options,
+  app.use(
+    cors({
+      origin: true,
+      credentials: true,
+    })
+  );
+
+  // ── Health ────────────────────────────────────────────────────────────────
+  app.get("/api/health", async (_req, res) => {
+    try {
+      await pool.query("SELECT 1");
+      res.json({ status: "ok", database: "connected ✅" });
+    } catch (err: any) {
+      console.error("Health error:", err.message);
+      res.status(500).json({
+        status: "error",
+        database: "disconnected ❌",
+        error: err.message,
+      });
+    }
   });
 
-  const data = await res.json();
+  // ── Availability Checks ───────────────────────────────────────────────────
+  app.get("/api/auth/check-username", async (req, res) => {
+    try {
+      const username = String(req.query.username || "").trim();
 
-  if (!res.ok) {
-    throw new Error(data.message || 'Request failed');
+      if (!username) {
+        return res.status(400).json({ taken: false, message: "Username is required" });
+      }
+
+      const [rows] = await pool.query<RowDataPacket[]>(
+        "SELECT customer_id FROM customers WHERE username = ? LIMIT 1",
+        [username]
+      );
+
+      res.json({ taken: rows.length > 0 });
+    } catch (err: any) {
+      console.error("Check username error:", err.message);
+      res.status(500).json({ taken: false, message: "Server error" });
+    }
+  });
+
+  app.get("/api/auth/check-email", async (req, res) => {
+    try {
+      const email = String(req.query.email || "").trim();
+
+      if (!email) {
+        return res.status(400).json({ taken: false, message: "Email is required" });
+      }
+
+      const [rows] = await pool.query<RowDataPacket[]>(
+        "SELECT customer_id FROM customers WHERE email = ? LIMIT 1",
+        [email]
+      );
+
+      res.json({ taken: rows.length > 0 });
+    } catch (err: any) {
+      console.error("Check email error:", err.message);
+      res.status(500).json({ taken: false, message: "Server error" });
+    }
+  });
+
+  app.get("/api/auth/check-contact", async (req, res) => {
+    try {
+      const contactNo = String(req.query.contactNo || "").trim();
+
+      if (!contactNo) {
+        return res.status(400).json({ taken: false, message: "Contact number is required" });
+      }
+
+      const [rows] = await pool.query<RowDataPacket[]>(
+        "SELECT customer_id FROM customers WHERE contact_no = ? LIMIT 1",
+        [contactNo]
+      );
+
+      res.json({ taken: rows.length > 0 });
+    } catch (err: any) {
+      console.error("Check contact error:", err.message);
+      res.status(500).json({ taken: false, message: "Server error" });
+    }
+  });
+
+  // ── Register ───────────────────────────────────────────────────────────────
+  app.post("/api/auth/register", async (req, res) => {
+    try {
+      const first_name = String(req.body.first_name ?? req.body.firstName ?? "").trim();
+      const last_name = String(req.body.last_name ?? req.body.lastName ?? "").trim();
+      const username = String(req.body.username ?? "").trim();
+      const contact_no = String(req.body.contact_no ?? req.body.contactNo ?? "").trim();
+      const email = String(req.body.email ?? "").trim().toLowerCase();
+      const password = String(req.body.password ?? "");
+      const province = String(req.body.province ?? "").trim();
+      const city = String(req.body.city ?? "").trim();
+      const barangay = String(req.body.barangay ?? "").trim();
+      const street = String(req.body.street ?? "").trim();
+
+      if (
+        !first_name ||
+        !last_name ||
+        !username ||
+        !contact_no ||
+        !email ||
+        !password ||
+        !province ||
+        !city ||
+        !barangay ||
+        !street
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Please fill in all required fields",
+        });
+      }
+
+      if (!/^09\d{9}$/.test(contact_no)) {
+        return res.status(400).json({
+          success: false,
+          message: "Contact number must be in PH format (09XXXXXXXXX)",
+        });
+      }
+
+      if (!/\S+@\S+\.\S+/.test(email)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid email address",
+        });
+      }
+
+      const [duplicateRows] = await pool.query<RowDataPacket[]>(
+        `SELECT customer_id, username, email, contact_no
+         FROM customers
+         WHERE username = ? OR email = ? OR contact_no = ?
+         LIMIT 1`,
+        [username, email, contact_no]
+      );
+
+      if (duplicateRows.length > 0) {
+        const duplicate = duplicateRows[0];
+
+        if (duplicate.username === username) {
+          return res.status(409).json({
+            success: false,
+            message: "Username already taken",
+          });
+        }
+
+        if (duplicate.email === email) {
+          return res.status(409).json({
+            success: false,
+            message: "Email already registered",
+          });
+        }
+
+        if (duplicate.contact_no === contact_no) {
+          return res.status(409).json({
+            success: false,
+            message: "Contact number already registered",
+          });
+        }
+      }
+
+      const year = new Date().getFullYear();
+
+      const [lastCustomerRows] = await pool.query<RowDataPacket[]>(
+        `SELECT customer_no
+         FROM customers
+         WHERE customer_no LIKE ?
+         ORDER BY customer_id DESC
+         LIMIT 1`,
+        [`CUST-${year}-%`]
+      );
+
+      const lastCustomerNo =
+        lastCustomerRows.length > 0 ? String(lastCustomerRows[0].customer_no) : null;
+
+      const customer_no = getNextCustomerNo(lastCustomerNo, year);
+      const hashedPassword = await bcrypt.hash(password, 10);
+
+      const [result] = await pool.query<ResultSetHeader>(
+        `INSERT INTO customers
+          (
+            tenant_id,
+            username,
+            password,
+            customer_no,
+            first_name,
+            last_name,
+            contact_no,
+            email,
+            province,
+            city,
+            barangay,
+            street,
+            is_active
+          )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+        [
+          DEFAULT_TENANT_ID,
+          username,
+          hashedPassword,
+          customer_no,
+          first_name,
+          last_name,
+          contact_no,
+          email,
+          province,
+          city,
+          barangay,
+          street,
+        ]
+      );
+
+      res.status(201).json({
+        success: true,
+        message: "Registration successful",
+        customer: {
+          customer_id: result.insertId,
+          tenant_id: DEFAULT_TENANT_ID,
+          username,
+          customer_no,
+          first_name,
+          last_name,
+          contact_no,
+          email,
+          province,
+          city,
+          barangay,
+          street,
+          is_active: 1,
+        },
+      });
+    } catch (err: any) {
+      console.error("Register error FULL:", err);
+      console.error("Register error message:", err.message);
+      console.error("Register error code:", err.code);
+
+      res.status(500).json({
+        success: false,
+        message: "Server error",
+        error: err.message,
+        code: err.code,
+      });
+    }
+  });
+
+  // ── Login ──────────────────────────────────────────────────────────────────
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const usernameOrEmail = String(req.body.username ?? req.body.email ?? "").trim();
+      const password = String(req.body.password ?? "");
+
+      if (!usernameOrEmail || !password) {
+        return res.status(400).json({
+          success: false,
+          message: "Username and password required",
+        });
+      }
+
+      const [rows] = await pool.query<CustomerRow[]>(
+        `SELECT customer_id, tenant_id, user_id, username, password,
+                customer_no, first_name, last_name, contact_no, email,
+                province, city, barangay, street, created_at, is_active
+         FROM customers
+         WHERE (username = ? OR email = ?) AND is_active = 1
+         LIMIT 1`,
+        [usernameOrEmail, usernameOrEmail]
+      );
+
+      if (rows.length === 0) {
+        return res.status(401).json({
+          success: false,
+          message: "Invalid credentials",
+        });
+      }
+
+      const customer = rows[0];
+      const match = await bcrypt.compare(password, customer.password);
+
+      if (!match) {
+        return res.status(401).json({
+          success: false,
+          message: "Invalid credentials",
+        });
+      }
+
+      const { password: _pw, ...safeCustomer } = customer;
+
+      res.json({
+        success: true,
+        customer: safeCustomer,
+      });
+    } catch (err: any) {
+      console.error("Login error:", err.message);
+      res.status(500).json({
+        success: false,
+        message: "Server error",
+        error: err.message,
+      });
+    }
+  });
+
+  // ── Profile ────────────────────────────────────────────────────────────────
+  app.get("/api/profile/:customerId", async (req, res) => {
+    try {
+      const [rows] = await pool.query<RowDataPacket[]>(
+        `SELECT customer_id, tenant_id, user_id, username, customer_no,
+                first_name, last_name, contact_no, email,
+                province, city, barangay, street, created_at, is_active
+         FROM customers
+         WHERE customer_id = ? AND is_active = 1
+         LIMIT 1`,
+        [req.params.customerId]
+      );
+
+      if (rows.length === 0) {
+        return res.status(404).json({ success: false, message: "Customer not found" });
+      }
+
+      res.json(rows[0]);
+    } catch (err: any) {
+      console.error("Profile error:", err.message);
+      res.status(500).json({ success: false, message: "Server error" });
+    }
+  });
+
+  // ── Loans ──────────────────────────────────────────────────────────────────
+  app.get("/api/loans/:customerId", async (req, res) => {
+    try {
+      const [rows] = await pool.query<RowDataPacket[]>(
+        `SELECT loan_id, reference_no, principal_amount, interest_rate,
+                payment_term, term_months, total_payable, remaining_balance,
+                status, due_date, activated_at, created_at, is_active
+         FROM loans
+         WHERE customer_id = ? AND is_active = 1
+         ORDER BY created_at DESC`,
+        [req.params.customerId]
+      );
+
+      res.json(rows);
+    } catch (err: any) {
+      console.error("Loans error:", err.message);
+      res.status(500).json({ success: false, message: "Server error" });
+    }
+  });
+
+  app.get("/api/loan/:loanId", async (req, res) => {
+    try {
+      const [rows] = await pool.query<RowDataPacket[]>(
+        `SELECT loan_id, reference_no, principal_amount, interest_rate,
+                payment_term, term_months, total_payable, remaining_balance,
+                status, due_date, denial_reason, notes,
+                activated_at, created_at, is_active
+         FROM loans
+         WHERE loan_id = ?
+         LIMIT 1`,
+        [req.params.loanId]
+      );
+
+      if (rows.length === 0) {
+        return res.status(404).json({ success: false, message: "Loan not found" });
+      }
+
+      res.json(rows[0]);
+    } catch (err: any) {
+      console.error("Loan error:", err.message);
+      res.status(500).json({ success: false, message: "Server error" });
+    }
+  });
+
+  // ── Payments ───────────────────────────────────────────────────────────────
+  app.get("/api/payments/:loanId", async (req, res) => {
+    try {
+      const [rows] = await pool.query<RowDataPacket[]>(
+        `SELECT payment_id, loan_id, amount, payment_date, method,
+                or_no, notes, created_at
+         FROM payments
+         WHERE loan_id = ?
+         ORDER BY payment_date DESC`,
+        [req.params.loanId]
+      );
+
+      res.json(rows);
+    } catch (err: any) {
+      console.error("Payments error:", err.message);
+      res.status(500).json({ success: false, message: "Server error" });
+    }
+  });
+
+  // ── Transactions ───────────────────────────────────────────────────────────
+  app.get("/api/transactions/:customerId", async (req, res) => {
+    try {
+      const [rows] = await pool.query<RowDataPacket[]>(
+        `SELECT id, loan_id, type, amount, date, status
+         FROM transactions
+         WHERE customer_id = ?
+         ORDER BY date DESC`,
+        [req.params.customerId]
+      );
+
+      res.json(rows);
+    } catch (err: any) {
+      console.error("Transactions error:", err.message);
+      res.status(500).json({ success: false, message: "Server error" });
+    }
+  });
+
+  // ── Static / Vite ──────────────────────────────────────────────────────────
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), "dist");
+    app.use(express.static(distPath));
+
+    app.get("*", (_req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
+    });
   }
 
-  return data as T;
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
 }
 
-// ── Auth ──────────────────────────────────────────────────────────────────────
-export const authAPI = {
-  login: (username: string, password: string) =>
-    request<{ success: boolean; customer: Customer }>('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ username, password }),
-    }),
-
-  sendOTP: (email: string) =>
-    request<{ success: boolean; message: string }>('/auth/send-otp', {
-      method: 'POST',
-      body: JSON.stringify({ email }),
-    }),
-
-  verifyOTP: (email: string, otp: string) =>
-    request<{ success: boolean; message: string }>('/auth/verify-otp', {
-      method: 'POST',
-      body: JSON.stringify({ email, otp }),
-    }),
-};
-
-// ── Customer ──────────────────────────────────────────────────────────────────
-export const customerAPI = {
-  getProfile: (customerId: number) =>
-    request<Customer>(`/profile/${customerId}`),
-};
-
-// ── Loans ─────────────────────────────────────────────────────────────────────
-export const loanAPI = {
-  getAll: (customerId: number) =>
-    request<Loan[]>(`/loans/${customerId}`),
-
-  getOne: (loanId: number) =>
-    request<Loan>(`/loan/${loanId}`),
-};
-
-// ── Payments ──────────────────────────────────────────────────────────────────
-export const paymentAPI = {
-  getByLoan: (loanId: number) =>
-    request<Payment[]>(`/payments/${loanId}`),
-};
-
-// ── Transactions ──────────────────────────────────────────────────────────────
-export const transactionAPI = {
-  getAll: (customerId: number) =>
-    request<Transaction[]>(`/transactions/${customerId}`),
-};
+startServer().catch((err) => {
+  console.error("Fatal startup error:", err);
+  process.exit(1);
+});

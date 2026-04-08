@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { ArrowRight, Mail, Phone, User, Lock, Eye, EyeOff, ShieldCheck, RefreshCw } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { ArrowRight, Mail, Phone, Lock, Eye, EyeOff } from 'lucide-react';
 import { TopBar } from '../components/TopBar';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
@@ -8,11 +8,8 @@ import { motion } from 'motion/react';
 
 export default function RegisterStep1() {
   const navigate = useNavigate();
-  const location = useLocation();
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  
 
   const [formData, setFormData] = useState({
     firstName: '',
@@ -24,100 +21,112 @@ export default function RegisterStep1() {
     confirmPassword: ''
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [usernameTaken, setUsernameTaken] = useState(false);
-  const [emailTaken, setEmailTaken] = useState(false);
-  const [passwordStrength, setPasswordStrength] = useState<'weak'|'okay'|'strong'>('weak');
+  const [passwordStrength, setPasswordStrength] = useState<'weak' | 'okay' | 'strong'>('weak');
 
-
-
-
-
-  // Password requirements
   const passwordRequirements = [
-    { label: '8+ chars', test: (pw: string) => pw.length >= 8 },
+    { label: '8+ chars',    test: (pw: string) => pw.length >= 8 },
     { label: '1 uppercase', test: (pw: string) => /[A-Z]/.test(pw) },
     { label: '1 lowercase', test: (pw: string) => /[a-z]/.test(pw) },
-    { label: '1 number', test: (pw: string) => /[0-9]/.test(pw) },
-    { label: '1 symbol', test: (pw: string) => /[^A-Za-z0-9 ]/.test(pw) },
+    { label: '1 number',    test: (pw: string) => /[0-9]/.test(pw) },
+    { label: '1 symbol',    test: (pw: string) => /[^A-Za-z0-9 ]/.test(pw) },
   ];
 
   // Password strength
   useEffect(() => {
     const pw = formData.password;
     let score = 0;
-    if (pw.length >= 8) score++;
-    if (/[A-Z]/.test(pw)) score++;
-    if (/[a-z]/.test(pw)) score++;
-    if (/[0-9]/.test(pw)) score++;
+    if (pw.length >= 8)          score++;
+    if (/[A-Z]/.test(pw))        score++;
+    if (/[a-z]/.test(pw))        score++;
+    if (/[0-9]/.test(pw))        score++;
     if (/[^A-Za-z0-9]/.test(pw)) score++;
-    if (score <= 2) setPasswordStrength('weak');
+    if (score <= 2)                   setPasswordStrength('weak');
     else if (score === 3 || score === 4) setPasswordStrength('okay');
-    else setPasswordStrength('strong');
+    else                              setPasswordStrength('strong');
   }, [formData.password]);
-
-  // Live username/email check
-  useEffect(() => {
-    let users: any[] = [];
-    try {
-      users = JSON.parse(localStorage.getItem('users') || '[]');
-    } catch {}
-    setUsernameTaken(users.some(u => u.username === formData.username));
-    setEmailTaken(users.some(u => u.email === formData.email));
-  }, [formData.username, formData.email]);
 
   const validate = () => {
     const newErrors: Record<string, string> = {};
+
     if (!formData.firstName) newErrors.firstName = 'First name is required';
     else if (!/^[A-Za-z ]+$/.test(formData.firstName)) newErrors.firstName = 'First name must contain only letters and spaces';
+
     if (!formData.lastName) newErrors.lastName = 'Last name is required';
     else if (!/^[A-Za-z ]+$/.test(formData.lastName)) newErrors.lastName = 'Last name must contain only letters and spaces';
+
     if (!formData.username) newErrors.username = 'Username is required';
     else if (!/^[a-zA-Z0-9_]{3,16}$/.test(formData.username)) newErrors.username = 'Username must be 3-16 characters, letters, numbers, or _';
-    else if (usernameTaken) newErrors.username = 'Username is already taken';
+
     if (!formData.contactNo) newErrors.contactNo = 'Contact number is required';
     else if (!/^09\d{9}$/.test(formData.contactNo)) newErrors.contactNo = 'Contact number must be PH format (09XXXXXXXXX)';
+
     if (!formData.email) newErrors.email = 'Email is required';
     else if (!/\S+@\S+\.\S+/.test(formData.email)) newErrors.email = 'Email is invalid';
-    else if (emailTaken) newErrors.email = 'Email is already taken';
+
     if (!formData.password) newErrors.password = 'Password is required';
     else {
-      passwordRequirements.forEach(req => {
-        if (!req.test(formData.password)) newErrors.password = 'Password does not meet requirements';
-      });
+      const failedReq = passwordRequirements.find(req => !req.test(formData.password));
+      if (failedReq) newErrors.password = 'Password does not meet all requirements';
     }
-    if (formData.password !== formData.confirmPassword) {
+
+    if (formData.password !== formData.confirmPassword)
       newErrors.confirmPassword = 'Passwords do not match';
-    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-
-
-
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (validate()) {
+    if (!validate()) return;
+
+    setLoading(true);
+    try {
+      // ✅ Check username/email against MySQL via API
+      const checkUsername = await fetch(`/api/auth/check-username?username=${encodeURIComponent(formData.username)}`);
+      const usernameResult = await checkUsername.json();
+      if (usernameResult.taken) {
+        setErrors(prev => ({ ...prev, username: 'Username is already taken' }));
+        setLoading(false);
+        return;
+      }
+
+      const checkEmail = await fetch(`/api/auth/check-email?email=${encodeURIComponent(formData.email)}`);
+      const emailResult = await checkEmail.json();
+      if (emailResult.taken) {
+        setErrors(prev => ({ ...prev, email: 'Email is already registered' }));
+        setLoading(false);
+        return;
+      }
+
+      // Save to localStorage and proceed
       localStorage.setItem('registerData', JSON.stringify({
         ...JSON.parse(localStorage.getItem('registerData') || '{}'),
         ...formData
       }));
       navigate('/register/step2');
+
+    } catch (err) {
+      // If API check fails, still allow proceeding — backend will catch duplicates on submit
+      localStorage.setItem('registerData', JSON.stringify({
+        ...JSON.parse(localStorage.getItem('registerData') || '{}'),
+        ...formData
+      }));
+      navigate('/register/step2');
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
-    if (errors[e.target.name]) {
-      setErrors({ ...errors, [e.target.name]: '' });
-    }
+    if (errors[e.target.name]) setErrors({ ...errors, [e.target.name]: '' });
   };
 
   return (
     <div className="min-h-screen bg-background pb-12">
       <TopBar title="Registration" />
-      
+
       <main className="pt-24 px-6 max-w-lg mx-auto w-full">
         <div className="mb-10">
           <div className="flex justify-between items-end mb-2">
@@ -129,7 +138,7 @@ export default function RegisterStep1() {
           </div>
         </div>
 
-        <motion.div 
+        <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           className="space-y-8"
@@ -142,111 +151,96 @@ export default function RegisterStep1() {
           </header>
 
           <form className="space-y-6" onSubmit={handleSubmit}>
-            {error && (
-              <div className="p-4 bg-error/10 border border-error/20 rounded-xl text-error text-xs font-bold text-center">
-                {error}
-              </div>
-            )}
-
             <div className="grid grid-cols-2 gap-4">
-              <Input 
-                label="First Name" 
-                placeholder="Enter first name" 
+              <Input
+                label="First Name"
+                placeholder="Enter first name"
                 name="firstName"
                 value={formData.firstName}
                 onChange={handleChange}
                 error={errors.firstName}
               />
-              <Input 
-                label="Last Name" 
-                placeholder="Enter last name" 
+              <Input
+                label="Last Name"
+                placeholder="Enter last name"
                 name="lastName"
                 value={formData.lastName}
                 onChange={handleChange}
                 error={errors.lastName}
               />
             </div>
-            <Input 
-              label="Username" 
-              placeholder="Choose a username" 
+
+            <Input
+              label="Username"
+              placeholder="Choose a username"
               name="username"
               value={formData.username}
               onChange={handleChange}
               error={errors.username}
             />
 
-            <Input 
-              label="Contact No" 
-              placeholder="09XX XXX XXXX" 
-              type="tel" 
+            <Input
+              label="Contact No"
+              placeholder="09XX XXX XXXX"
+              type="tel"
               name="contactNo"
-              icon={<Phone size={20} />} 
+              icon={<Phone size={20} />}
               value={formData.contactNo}
               onChange={handleChange}
               error={errors.contactNo}
             />
-            
-            <Input 
-              label="Email Address" 
-              placeholder="your@email.com" 
-              type="email" 
+
+            <Input
+              label="Email Address"
+              placeholder="your@email.com"
+              type="email"
               name="email"
-              icon={<Mail size={20} />} 
+              icon={<Mail size={20} />}
               value={formData.email}
               onChange={handleChange}
               error={errors.email}
             />
 
             <div>
-              <Input 
-                label="Password" 
-                placeholder="Create a password" 
-                type={showPassword ? "text" : "password"}
+              <Input
+                label="Password"
+                placeholder="Create a password"
+                type={showPassword ? 'text' : 'password'}
                 name="password"
-                icon={<Lock size={20} />} 
+                icon={<Lock size={20} />}
                 value={formData.password}
                 onChange={handleChange}
                 error={errors.password}
                 rightElement={
-                  <button 
-                    type="button" 
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="text-outline/40 hover:text-primary transition-colors"
-                  >
+                  <button type="button" onClick={() => setShowPassword(!showPassword)} className="text-outline/40 hover:text-primary transition-colors">
                     {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                   </button>
                 }
               />
-                <div className="mt-2">
-                  <div className="text-xs text-on-surface-variant font-bold">
-                    Password must be at least 8 characters, include 1 uppercase, 1 lowercase, 1 number, and 1 special character.
-                  </div>
-                  <div className="mt-1 text-xs font-bold">
-                    Password strength: {' '}
-                    <span style={{
-                      color: passwordStrength === 'strong' ? '#22c55e' : passwordStrength === 'okay' ? '#eab308' : '#ef4444',
-                    }}>
-                      {passwordStrength === 'strong' ? 'Strong' : passwordStrength === 'okay' ? 'Okay' : 'Weak'}
-                    </span>
-                  </div>
+              <div className="mt-2">
+                <div className="text-xs text-on-surface-variant font-bold">
+                  Must be 8+ chars with uppercase, lowercase, number, and symbol.
                 </div>
+                <div className="mt-1 text-xs font-bold">
+                  Password strength:{' '}
+                  <span style={{ color: passwordStrength === 'strong' ? '#22c55e' : passwordStrength === 'okay' ? '#eab308' : '#ef4444' }}>
+                    {passwordStrength === 'strong' ? 'Strong' : passwordStrength === 'okay' ? 'Okay' : 'Weak'}
+                  </span>
+                </div>
+              </div>
             </div>
 
-            <Input 
-              label="Confirm Password" 
-              placeholder="Repeat password" 
-              type={showPassword ? "text" : "password"}
+            <Input
+              label="Confirm Password"
+              placeholder="Repeat password"
+              type={showPassword ? 'text' : 'password'}
               name="confirmPassword"
-              icon={<Lock size={20} />} 
+              icon={<Lock size={20} />}
               value={formData.confirmPassword}
               onChange={handleChange}
               error={errors.confirmPassword}
               rightElement={
-                <button 
-                  type="button" 
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="text-outline/40 hover:text-primary transition-colors"
-                >
+                <button type="button" onClick={() => setShowPassword(!showPassword)} className="text-outline/40 hover:text-primary transition-colors">
                   {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                 </button>
               }
@@ -254,7 +248,7 @@ export default function RegisterStep1() {
 
             <div className="pt-6">
               <Button type="submit" disabled={loading}>
-                Next <ArrowRight size={20} />
+                {loading ? 'Checking...' : <> Next <ArrowRight size={20} /> </>}
               </Button>
             </div>
           </form>
@@ -262,7 +256,7 @@ export default function RegisterStep1() {
 
         <footer className="mt-12 text-center">
           <p className="text-on-surface-variant text-sm">
-            Already have an account? 
+            Already have an account?
             <button onClick={() => navigate('/login')} className="text-primary font-bold ml-1 hover:underline">Login</button>
           </p>
         </footer>
