@@ -156,10 +156,10 @@ async function startServer() {
       });
 
     } catch (err: any) {
-      console.error("Register error:", err.message);
-      res.status(500).json({ success: false, message: "Server error", error: err.message });
-    }
-  });
+      console.log("Attempting insert with:", {
+        username, customer_no, first_name, last_name,
+        email, province, city, barangay, street
+      });
 
   // ── Auth: Send OTP ──────────────────────────────────────────────────────────
   app.post("/api/auth/send-otp", async (req, res) => {
