@@ -49,7 +49,16 @@ async function startServer() {
       await pool.query("SELECT 1");
       res.json({ status: "ok", database: "connected" });
     } catch (err: any) {
-      res.status(500).json({ status: "error", database: "disconnected", error: err.message });
+      res.status(500).json({ 
+        status: "error", 
+        database: "disconnected", 
+        error: err.message,
+        code: err.code,
+        host: process.env.DB_HOST,
+        port: process.env.DB_PORT,
+        db: process.env.DB_NAME,
+        user: process.env.DB_USER,
+      });
     }
   });
 
