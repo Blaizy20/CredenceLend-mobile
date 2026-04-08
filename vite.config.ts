@@ -20,8 +20,11 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       rollupOptions: {
-        input: { main: 'index.html' }, // 👈 ONLY build the frontend
+        input: { main: 'index.html' },
       },
+    },
+    optimizeDeps: {
+      exclude: ['vite', 'express', 'mysql2', 'bcrypt', 'cors'],
     },
   };
 });
