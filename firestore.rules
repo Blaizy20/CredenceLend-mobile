@@ -1,0 +1,119 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {uid}
+    // Fields:
+    //   - uid: string (required) - The unique identifier for the user from Firebase Auth.
+    //   - firstName: string (optional) - The user's first name.
+    //   - lastName: string (optional) - The user's last name.
+    //   - email: string (required, email format) - The user's email address.
+    //   - customerNo: string (optional) - A unique customer number.
+    //   - role: string (required, enum: ["client", "admin"]) - The user's role.
+    //   - createdAt: timestamp (optional) - When the user profile was created.
+    //
+    // Collection: loans
+    // Document ID: {loanId}
+    // Fields:
+    //   - id: string (required) - The unique identifier for the loan.
+    //   - userId: string (required) - The UID of the user who applied for the loan.
+    //   - amount: number (required) - The principal amount.
+    //   - interest: number (optional) - The interest rate percentage.
+    //   - term: string (optional) - The repayment term.
+    //   - status: string (required, enum: ["Pending", "Active", "Paid", "Rejected"]) - The status.
+    //   - balance: number (optional) - The remaining balance.
+    //   - totalAmount: number (optional) - The total amount including interest.
+    //   - paidInstallments: int (optional) - The number of installments already paid.
+    //   - installments: int (optional) - The total number of installments.
+    //   - nextPayment: string (optional, date format) - The date of the next scheduled payment.
+    //   - createdAt: timestamp (optional) - When the loan was created.
+    //
+    // Collection: transactions
+    // Document ID: {transactionId}
+    // Fields:
+    //   - id: string (required) - The unique identifier for the transaction.
+    //   - userId: string (required) - The UID of the user.
+    //   - loanId: string (optional) - The ID of the associated loan.
+    //   - type: string (required, enum: ["Loan Received", "Loan Payment"]) - The type.
+    //   - amount: number (required) - The amount of the transaction.
+    //   - date: timestamp (required) - When the transaction occurred.
+    //   - status: string (optional) - The status.
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "john0515lloyd03engay@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'role']) &&
+             data.uid is string && data.uid == request.auth.uid &&
+             isValidEmail(data.email) &&
+             data.role in ['client', 'admin'] &&
+             data.keys().hasOnly(['uid', 'firstName', 'lastName', 'email', 'customerNo', 'role', 'createdAt']);
+    }
+
+    function isValidLoan(data) {
+      return data.keys().hasAll(['id', 'userId', 'amount', 'status']) &&
+             data.id is string &&
+             data.userId is string &&
+             data.amount is number && data.amount > 0 &&
+             data.status in ["Pending", "Active", "Paid", "Rejected"] &&
+             data.keys().hasOnly(['id', 'userId', 'amount', 'interest', 'term', 'status', 'balance', 'totalAmount', 'paidInstallments', 'installments', 'nextPayment', 'createdAt']);
+    }
+
+    function isValidTransaction(data) {
+      return data.keys().hasAll(['id', 'userId', 'type', 'amount', 'date']) &&
+             data.id is string &&
+             data.userId is string &&
+             data.type in ["Loan Received", "Loan Payment"] &&
+             data.amount is number && data.amount > 0 &&
+             data.date is timestamp &&
+             data.keys().hasOnly(['id', 'userId', 'loanId', 'type', 'amount', 'date', 'status']);
+    }
+
+    // ===============================================================
+    // Match Rules
+    // ===============================================================
+
+    match /users/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (request.resource.data.role == 'client' || isAdmin());
+      allow update: if (isOwner(uid) && isValidUser(request.resource.data) && request.resource.data.role == resource.data.role) || isAdmin();
+    }
+
+    match /loans/{loanId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isValidLoan(request.resource.data) && (request.resource.data.userId == request.auth.uid || isAdmin());
+      allow update: if isAuthenticated() && isValidLoan(request.resource.data) && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && isValidTransaction(request.resource.data) && (request.resource.data.userId == request.auth.uid || isAdmin());
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+  }
+}

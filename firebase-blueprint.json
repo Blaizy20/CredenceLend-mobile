@@ -1,0 +1,68 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "Information about a user in the system.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "The unique identifier for the user from Firebase Auth." },
+        "firstName": { "type": "string", "description": "The user's first name." },
+        "lastName": { "type": "string", "description": "The user's last name." },
+        "email": { "type": "string", "format": "email", "description": "The user's email address." },
+        "customerNo": { "type": "string", "description": "A unique customer number generated for the user." },
+        "role": { "type": "string", "enum": ["client", "admin"], "description": "The user's role in the system." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the user profile was created." }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Loan": {
+      "title": "Loan Application",
+      "description": "Details of a loan application or active loan.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The unique identifier for the loan." },
+        "userId": { "type": "string", "description": "The UID of the user who applied for the loan." },
+        "amount": { "type": "number", "description": "The principal amount of the loan." },
+        "interest": { "type": "number", "description": "The interest rate percentage." },
+        "term": { "type": "string", "description": "The repayment term (e.g., '12 Months')." },
+        "status": { "type": "string", "enum": ["Pending", "Active", "Paid", "Rejected"], "description": "The current status of the loan." },
+        "balance": { "type": "number", "description": "The remaining balance to be paid." },
+        "totalAmount": { "type": "number", "description": "The total amount to be paid including interest." },
+        "paidInstallments": { "type": "integer", "description": "The number of installments already paid." },
+        "installments": { "type": "integer", "description": "The total number of installments." },
+        "nextPayment": { "type": "string", "format": "date", "description": "The date of the next scheduled payment." },
+        "createdAt": { "type": "string", "format": "date-time", "description": "When the loan application was created." }
+      },
+      "required": ["id", "userId", "amount", "status"]
+    },
+    "Transaction": {
+      "title": "Transaction Record",
+      "description": "A record of a financial transaction (loan disbursement or payment).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The unique identifier for the transaction." },
+        "userId": { "type": "string", "description": "The UID of the user involved in the transaction." },
+        "loanId": { "type": "string", "description": "The ID of the associated loan." },
+        "type": { "type": "string", "enum": ["Loan Received", "Loan Payment"], "description": "The type of transaction." },
+        "amount": { "type": "number", "description": "The amount of the transaction." },
+        "date": { "type": "string", "format": "date-time", "description": "When the transaction occurred." },
+        "status": { "type": "string", "description": "The status of the transaction (e.g., 'Success')." }
+      },
+      "required": ["id", "userId", "type", "amount", "date"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "UserProfile",
+      "description": "User profile documents indexed by their Firebase Auth UID."
+    },
+    "/loans/{loanId}": {
+      "schema": "Loan",
+      "description": "Loan application and active loan documents."
+    },
+    "/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Transaction history records."
+    }
+  }
+}

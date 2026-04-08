@@ -1,0 +1,128 @@
+import { useNavigate } from 'react-router-dom';
+import React from 'react';
+import { User, Verified, MapPin, LogOut } from 'lucide-react';
+import { TopBar } from '../components/TopBar';
+import { BottomNav } from '../components/BottomNav';
+import { motion } from 'motion/react';
+
+export default function Profile() {
+  const navigate = useNavigate();
+  const [user, setUser] = React.useState<any>(null);
+
+  React.useEffect(() => {
+    const storedUser = localStorage.getItem('user');
+    if (storedUser) {
+      setUser(JSON.parse(storedUser));
+    } else {
+      navigate('/login');
+    }
+  }, [navigate]);
+
+  const handleLogout = () => {
+    localStorage.removeItem('user');
+    navigate('/login');
+  };
+
+  if (!user) return null;
+
+  return (
+    <div className="min-h-screen bg-background pb-32">
+      <TopBar 
+        title="My Profile" 
+      />
+      
+      <main className="pt-24 pb-12 px-6 max-w-md mx-auto space-y-8">
+        {/* Profile Header */}
+        <section className="flex flex-col items-center text-center space-y-4">
+          <div className="relative group">
+            <div className="absolute -inset-1 bg-gradient-to-tr from-primary to-primary-container rounded-full blur opacity-25"></div>
+            <div className="relative w-28 h-28 rounded-full flex items-center justify-center border-2 border-primary-container/30 bg-surface-container-high">
+              <User className="text-primary" size={60} strokeWidth={1.5} />
+            </div>
+            <div className="absolute bottom-1 right-1 bg-primary text-on-primary p-1.5 rounded-full shadow-lg">
+              <Verified size={18} fill="currentColor" />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-3xl font-extrabold tracking-tight text-on-surface">{user.firstName} {user.lastName}</h2>
+            <p className="text-primary font-medium tracking-wide text-sm bg-primary/10 px-3 py-0.5 rounded-full inline-block">PREMIUM MEMBER</p>
+          </div>
+        </section>
+
+        {/* Personal Info */}
+        <section className="space-y-4">
+          <div className="flex items-center gap-2 px-1">
+            <User className="text-primary" size={18} />
+            <h3 className="text-sm font-bold uppercase tracking-widest text-on-surface-variant">Personal Information</h3>
+          </div>
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-surface-container-high rounded-xl p-6 space-y-6 shadow-xl"
+          >
+            <div className="grid grid-cols-1 gap-6">
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-outline tracking-wider uppercase">Customer ID</p>
+                <p className="text-on-surface font-mono text-base">{user.customerNo || 'N/A'}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-outline tracking-wider uppercase">Contact No.</p>
+                <p className="text-on-surface text-base">{user.contactNo || 'N/A'}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-outline tracking-wider uppercase">Email Address</p>
+                <p className="text-on-surface text-base">{user.email}</p>
+              </div>
+            </div>
+          </motion.div>
+        </section>
+
+        {/* Address */}
+        <section className="space-y-4">
+          <div className="flex items-center gap-2 px-1">
+            <MapPin className="text-primary" size={18} />
+            <h3 className="text-sm font-bold uppercase tracking-widest text-on-surface-variant">Residential Address</h3>
+          </div>
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.98 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.1 }}
+            className="bg-surface-container-high rounded-xl p-6 relative overflow-hidden shadow-xl"
+          >
+            <div className="relative z-10 grid grid-cols-1 gap-6">
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-outline tracking-wider uppercase">Street / House No.</p>
+                <p className="text-on-surface text-base leading-relaxed">{user.street || 'N/A'}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-outline tracking-wider uppercase">Barangay</p>
+                <p className="text-on-surface text-base">{user.barangay || 'N/A'}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-outline tracking-wider uppercase">City</p>
+                <p className="text-on-surface text-base">{user.city || 'N/A'}</p>
+              </div>
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-outline tracking-wider uppercase">Province</p>
+                <p className="text-on-surface text-base">{user.province || 'N/A'}</p>
+              </div>
+            </div>
+          </motion.div>
+        </section>
+
+        {/* Logout */}
+        <section className="pt-6">
+          <button 
+            onClick={() => navigate('/login')}
+            className="w-full flex items-center justify-center gap-2 py-4 px-6 rounded-full bg-secondary-container/10 border border-secondary-container/20 text-secondary hover:bg-secondary-container/20 transition-all duration-300 font-bold active:scale-95"
+          >
+            <LogOut size={20} />
+            <span>Logout from Credence</span>
+          </button>
+        </section>
+      </main>
+
+      <BottomNav />
+    </div>
+  );
+}

@@ -1,0 +1,7 @@
+{
+  "name": "CredenceLend",
+  "description": "Professional Loan Management System with a modern, atmospheric precision design.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

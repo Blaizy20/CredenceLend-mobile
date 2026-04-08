@@ -1,0 +1,56 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+// Removed Firebase auth for localStorage-only auth
+import Login from './pages/Login';
+import ForgotPassword from './pages/ForgotPassword';
+import RegisterStep1 from './pages/RegisterStep1';
+import RegisterStep2 from './pages/RegisterStep2';
+import RegisterStep3 from './pages/RegisterStep3';
+import RegisterStep4 from './pages/RegisterStep4';
+import Dashboard from './pages/Dashboard';
+import TrackLoan from './pages/TrackLoan';
+import LoanDetails from './pages/LoanDetails';
+import AdminLoans from './pages/AdminLoans';
+import ApplyLoanStep1 from './pages/ApplyLoanStep1';
+import ApplyLoanStep2 from './pages/ApplyLoanStep2';
+import PaymentOptions from './pages/PaymentOptions';
+import Payment from './pages/Payment';
+import Profile from './pages/Profile';
+import Inbox from './pages/Inbox';
+import Transactions from './pages/Transactions';
+
+// Removed ProtectedRoute, use localStorage checks in pages
+
+export default function App() {
+  return (
+    <Router>
+      <Routes>
+        <Route path="/" element={<Navigate to="/login" replace />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/register" element={<RegisterStep1 />} />
+        <Route path="/register/step2" element={<RegisterStep2 />} />
+        <Route path="/register/step3" element={<RegisterStep3 />} />
+        <Route path="/register/step4" element={<RegisterStep4 />} />
+        
+        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/track" element={<TrackLoan />} />
+        <Route path="/loan/:id" element={<LoanDetails />} />
+        <Route path="/admin/loans" element={<AdminLoans />} />
+        <Route path="/apply" element={<ApplyLoanStep1 />} />
+        <Route path="/apply/step2" element={<ApplyLoanStep2 />} />
+        <Route path="/payment-options/:id" element={<PaymentOptions />} />
+        <Route path="/payment/:id" element={<Payment />} />
+        <Route path="/profile" element={<Profile />} />
+        <Route path="/inbox" element={<Inbox />} />
+        <Route path="/transactions" element={<Transactions />} />
+      </Routes>
+    </Router>
+  );
+}
+
