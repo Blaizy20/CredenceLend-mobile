@@ -132,9 +132,9 @@ async function startServer() {
       // Insert new customer
       const [result]: any = await pool.query(
         `INSERT INTO customers
-          (username, password, customer_no, first_name, last_name,
+          (tenant_id, username, password, customer_no, first_name, last_name,
            contact_no, email, province, city, barangay, street, is_active)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+         VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
         [
           username, hashedPassword, customer_no, first_name, last_name,
           contact_no || null, email, province || null, city || null,
