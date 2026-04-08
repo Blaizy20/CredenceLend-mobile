@@ -20,11 +20,8 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       rollupOptions: {
-        external: ['fsevents'],
+        input: { main: 'index.html' }, // 👈 ONLY build the frontend
       },
-    },
-    optimizeDeps: {
-      exclude: ['server.ts'],
     },
   };
 });
