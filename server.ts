@@ -7,54 +7,82 @@ import { fileURLToPath } from "url";
 import mysql, { ResultSetHeader, RowDataPacket } from "mysql2/promise";
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname  = path.dirname(__filename);
 
-const PORT = Number(process.env.PORT || 3000);
-const DEFAULT_TENANT_ID = Number(process.env.DEFAULT_TENANT_ID || 1);
+const PORT               = Number(process.env.PORT               || 3000);
+const DEFAULT_TENANT_ID  = Number(process.env.DEFAULT_TENANT_ID  || 1);
 
 const pool = mysql.createPool({
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT),
-  database: process.env.DB_NAME,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
+  host:             process.env.DB_HOST,
+  port:             Number(process.env.DB_PORT),
+  database:         process.env.DB_NAME,
+  user:             process.env.DB_USER,
+  password:         process.env.DB_PASSWORD,
   waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
+  connectionLimit:  10,
+  queueLimit:       0,
   ssl: { rejectUnauthorized: false },
 });
 
 type CustomerRow = RowDataPacket & {
   customer_id: number;
-  tenant_id: number | null;
-  user_id: number | null;
-  username: string;
-  password: string;
+  tenant_id:   number | null;
+  user_id:     number | null;
+  username:    string;
+  password:    string;
   customer_no: string;
-  first_name: string;
-  last_name: string;
-  contact_no: string | null;
-  email: string | null;
-  province: string | null;
-  city: string | null;
-  barangay: string | null;
-  street: string | null;
-  created_at: string;
-  is_active: number;
+  first_name:  string;
+  last_name:   string;
+  contact_no:  string | null;
+  email:       string | null;
+  province:    string | null;
+  city:        string | null;
+  barangay:    string | null;
+  street:      string | null;
+  created_at:  string;
+  is_active:   number;
 };
 
 function getNextCustomerNo(lastCustomerNo: string | null, year: number) {
   if (!lastCustomerNo) return `CUST-${year}-0001`;
-  const parts = lastCustomerNo.split("-");
+  const parts   = lastCustomerNo.split("-");
   const lastSeq = Number(parts[2] || 0);
   return `CUST-${year}-${String(lastSeq + 1).padStart(4, "0")}`;
 }
 
 function getNextReferenceNo(lastRef: string | null, year: number) {
   if (!lastRef) return `LOAN-${year}-0001`;
-  const parts = lastRef.split("-");
+  const parts   = lastRef.split("-");
   const lastSeq = Number(parts[2] || 0);
   return `LOAN-${year}-${String(lastSeq + 1).padStart(4, "0")}`;
+}
+
+// ── Notification helper ───────────────────────────────────────────────────────
+async function insertNotification(
+  customerId: number,
+  tenantId:   number,
+  title:      string,
+  message:    string,
+  type:       string
+): Promise<void> {
+  try {
+    // Deduplicate — skip if the same title was inserted within the last hour
+    const [existing] = await pool.query<RowDataPacket[]>(
+      `SELECT notification_id FROM notifications
+       WHERE customer_id = ? AND title = ? AND created_at > NOW() - INTERVAL 1 HOUR
+       LIMIT 1`,
+      [customerId, title]
+    );
+    if ((existing as RowDataPacket[]).length > 0) return;
+
+    await pool.query(
+      `INSERT INTO notifications (customer_id, tenant_id, title, message, type)
+       VALUES (?, ?, ?, ?, ?)`,
+      [customerId, tenantId, title, message, type]
+    );
+  } catch (err: any) {
+    console.warn("Notification insert skipped:", err.message);
+  }
 }
 
 async function startServer() {
@@ -72,9 +100,9 @@ async function startServer() {
     } catch (err: any) {
       console.error("Health error:", err.message);
       res.status(500).json({
-        status: "error",
+        status:   "error",
         database: "disconnected ❌",
-        error: err.message,
+        error:    err.message,
       });
     }
   });
@@ -134,7 +162,7 @@ async function startServer() {
       method: "POST",
       headers: {
         "accept":       "application/json",
-        "api-key":      process.env.BREVO_API_KEY ?? "",
+        "api-key":      process.env.BREVO_API_KEY      ?? "",
         "content-type": "application/json",
       },
       body: JSON.stringify({
@@ -189,7 +217,6 @@ async function startServer() {
         [email, otp, expiresAt]
       );
 
-      // Send via Brevo — if it fails, don't save OTP
       await sendOtpEmail(email, otp);
 
       console.log(`[OTP] Sent to ${email}`);
@@ -253,7 +280,6 @@ async function startServer() {
         "SELECT customer_id FROM customers WHERE email = ? AND is_active = 1 LIMIT 1",
         [email]
       );
-
       if (rows.length === 0)
         return res.status(404).json({
           success: false,
@@ -261,7 +287,6 @@ async function startServer() {
         });
 
       const hashed = await bcrypt.hash(newPassword, 10);
-
       await pool.query(
         "UPDATE customers SET password = ? WHERE email = ? AND is_active = 1",
         [hashed, email]
@@ -320,21 +345,12 @@ async function startServer() {
 
       if (duplicateRows.length > 0) {
         const dup = duplicateRows[0];
-        if (dup.username === username)
-          return res.status(409).json({
-            success: false,
-            message: "This username is already taken. Please choose a different one.",
-          });
-        if (dup.email === email)
-          return res.status(409).json({
-            success: false,
-            message: "An account with this email address already exists.",
-          });
+        if (dup.username   === username)
+          return res.status(409).json({ success: false, message: "This username is already taken. Please choose a different one." });
+        if (dup.email      === email)
+          return res.status(409).json({ success: false, message: "An account with this email address already exists." });
         if (dup.contact_no === contact_no)
-          return res.status(409).json({
-            success: false,
-            message: "An account with this contact number already exists.",
-          });
+          return res.status(409).json({ success: false, message: "An account with this contact number already exists." });
       }
 
       const year = new Date().getFullYear();
@@ -379,7 +395,7 @@ async function startServer() {
         success: false,
         message: "An unexpected error occurred during registration. Please try again.",
         error: err.message,
-        code: err.code,
+        code:  err.code,
       });
     }
   });
@@ -455,7 +471,7 @@ async function startServer() {
   });
 
   // ── Loans: Apply ──────────────────────────────────────────────────────────
-  // NOTE: This route MUST be defined before /api/loans/:customerId
+  // NOTE: Must be defined before GET /api/loans/:customerId
   app.post("/api/loans/apply", async (req, res) => {
     try {
       const {
@@ -483,7 +499,6 @@ async function startServer() {
           message: "Loan amount must be between ₱1,000 and ₱500,000.",
         });
 
-      // Generate reference number
       const year = new Date().getFullYear();
       const [lastLoanRows] = await pool.query<RowDataPacket[]>(
         `SELECT reference_no FROM loans
@@ -491,19 +506,13 @@ async function startServer() {
          ORDER BY loan_id DESC LIMIT 1`,
         [`LOAN-${year}-%`]
       );
-      const lastRef = lastLoanRows.length > 0
-        ? String(lastLoanRows[0].reference_no)
-        : null;
+      const lastRef      = lastLoanRows.length > 0 ? String(lastLoanRows[0].reference_no) : null;
       const reference_no = getNextReferenceNo(lastRef, year);
 
-      // Calculate total payable
-      const rate        = Number(interest_rate) || 0;
-      const months      = Number(term_months)   || 1;
-      const total_payable = Number(
-        (amount + (amount * (rate / 100) * months)).toFixed(2)
-      );
+      const rate          = Number(interest_rate) || 0;
+      const months        = Number(term_months)   || 1;
+      const total_payable = Number((amount + (amount * (rate / 100) * months)).toFixed(2));
 
-      // Insert loan
       const [loanResult] = await pool.query<ResultSetHeader>(
         `INSERT INTO loans
           (tenant_id, customer_id, reference_no, principal_amount, interest_rate,
@@ -512,22 +521,15 @@ async function startServer() {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', 1)`,
         [
           tenant_id ?? DEFAULT_TENANT_ID,
-          customer_id,
-          reference_no,
-          amount,
-          rate,
-          payment_term,
-          months,
-          total_payable,
-          total_payable,
-          id_type       ?? null,
-          collateral_type,
+          customer_id, reference_no, amount, rate,
+          payment_term, months, total_payable, total_payable,
+          id_type ?? null, collateral_type,
         ]
       );
 
       const loan_id = loanResult.insertId;
 
-      // Insert co-maker — non-fatal if it fails
+      // Insert co-maker — non-fatal
       if (co_maker?.first_name && co_maker?.last_name) {
         try {
           await pool.query(
@@ -536,8 +538,7 @@ async function startServer() {
                email, province, city, barangay, street)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
-              loan_id,
-              customer_id,
+              loan_id, customer_id,
               String(co_maker.first_name).trim(),
               String(co_maker.last_name).trim(),
               co_maker.contact_no || null,
@@ -549,25 +550,28 @@ async function startServer() {
             ]
           );
         } catch (coMakerErr: any) {
-          // Non-fatal — loan is saved, co-maker is skipped
           console.warn("Co-maker insert skipped:", coMakerErr.message);
         }
       }
 
-      // Notify customer that application was received
+      // Notify customer — application received
+      await insertNotification(
+        customer_id,
+        tenant_id ?? DEFAULT_TENANT_ID,
+        "Loan Application Received",
+        `Your application (${reference_no}) for ₱${amount.toLocaleString()} has been submitted and is pending review.`,
+        "general"
+      );
+
+      // Seed status cache so future fetches can detect changes
       try {
         await pool.query(
-          `INSERT INTO notifications (customer_id, tenant_id, title, message, type)
-           VALUES (?, ?, ?, ?, 'general')`,
-          [
-            customer_id,
-            tenant_id ?? DEFAULT_TENANT_ID,
-            'Loan Application Received',
-            `Your application (${reference_no}) for ₱${amount.toLocaleString()} has been submitted and is pending review.`,
-          ]
+          `INSERT INTO loan_status_cache (loan_id, last_status) VALUES (?, 'Pending')
+           ON DUPLICATE KEY UPDATE last_status = 'Pending'`,
+          [loan_id]
         );
-      } catch (notifErr: any) {
-        console.warn("Notification insert skipped:", notifErr.message);
+      } catch (cacheErr: any) {
+        console.warn("Status cache seed skipped:", cacheErr.message);
       }
 
       res.status(201).json({
@@ -581,24 +585,101 @@ async function startServer() {
         success: false,
         message: "An unexpected error occurred while submitting your application. Please try again.",
         error: err.message,
-        code: err.code,
+        code:  err.code,
       });
     }
   });
 
-  // ── Loans: List by Customer ───────────────────────────────────────────────
+  // ── Loans: List by Customer (with status change detection) ────────────────
   app.get("/api/loans/:customerId", async (req, res) => {
     try {
+      const customerId = req.params.customerId;
+
       const [rows] = await pool.query<RowDataPacket[]>(
-        `SELECT loan_id, reference_no, principal_amount, interest_rate,
-                payment_term, term_months, total_payable, remaining_balance,
-                status, due_date, activated_at, created_at, is_active
-         FROM loans
-         WHERE customer_id = ? AND is_active = 1
-         ORDER BY created_at DESC`,
-        [req.params.customerId]
+        `SELECT l.loan_id, l.reference_no, l.principal_amount, l.interest_rate,
+                l.payment_term, l.term_months, l.total_payable, l.remaining_balance,
+                l.status, l.due_date, l.activated_at, l.created_at, l.is_active,
+                c.tenant_id
+         FROM loans l
+         JOIN customers c ON c.customer_id = l.customer_id
+         WHERE l.customer_id = ? AND l.is_active = 1
+         ORDER BY l.created_at DESC`,
+        [customerId]
       );
-      res.json(rows);
+
+      // ── Status change detection ─────────────────────────────────────────
+      for (const loan of rows) {
+        const loanId    = loan.loan_id;
+        const newStatus = String(loan.status ?? "").toLowerCase();
+        const tenantId  = loan.tenant_id ?? DEFAULT_TENANT_ID;
+
+        const [cached] = await pool.query<RowDataPacket[]>(
+          `SELECT last_status FROM loan_status_cache WHERE loan_id = ? LIMIT 1`,
+          [loanId]
+        );
+
+        const lastStatus = cached.length > 0
+          ? String(cached[0].last_status).toLowerCase()
+          : null;
+
+        // First time seeing this loan — cache it, no notification
+        if (!lastStatus) {
+          await pool.query(
+            `INSERT INTO loan_status_cache (loan_id, last_status) VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE last_status = VALUES(last_status)`,
+            [loanId, loan.status]
+          );
+          continue;
+        }
+
+        // Status changed — fire appropriate notification
+        if (lastStatus !== newStatus) {
+          const notifMap: Record<string, { title: string; message: string; type: string }> = {
+            active: {
+              title:   "Loan Approved ✅",
+              message: `Your loan (${loan.reference_no}) has been approved. View your payment schedule now.`,
+              type:    "approved",
+            },
+            denied: {
+              title:   "Loan Application Denied",
+              message: `Your loan application (${loan.reference_no}) was not approved. Please contact your cooperative for details.`,
+              type:    "denied",
+            },
+            paid: {
+              title:   "Loan Fully Paid 🎉",
+              message: `Congratulations! Your loan (${loan.reference_no}) has been fully paid.`,
+              type:    "payment",
+            },
+            closed: {
+              title:   "Loan Closed",
+              message: `Your loan (${loan.reference_no}) has been closed.`,
+              type:    "general",
+            },
+          };
+
+          const notif = notifMap[newStatus];
+          if (notif) {
+            await insertNotification(
+              Number(customerId),
+              tenantId,
+              notif.title,
+              notif.message,
+              notif.type
+            );
+          }
+
+          // Update cache to reflect new status
+          await pool.query(
+            `INSERT INTO loan_status_cache (loan_id, last_status) VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE last_status = VALUES(last_status)`,
+            [loanId, loan.status]
+          );
+        }
+      }
+
+      // Strip the joined tenant_id before returning — clients don't need it
+      const safeRows = rows.map(({ tenant_id: _tid, ...rest }) => rest);
+      res.json(safeRows);
     } catch (err: any) {
       console.error("Loans error:", err.message);
       res.status(500).json({ success: false, message: "Unable to retrieve loan records. Please try again." });
