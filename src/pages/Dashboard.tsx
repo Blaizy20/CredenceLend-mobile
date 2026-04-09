@@ -211,7 +211,6 @@ export default function Dashboard() {
                           {new Date(loan.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                         </span>
                       </div>
-                      )}
                     </div>
                   ))}
                 </div>
