@@ -16,6 +16,17 @@ interface Loan {
   created_at: string;
 }
 
+const statusStyle: Record<string, string> = {
+  paid:    'bg-green-500/10 text-green-500',
+  active:  'bg-amber-500/10 text-amber-500',
+  pending: 'bg-blue-500/10 text-blue-500',
+  denied:  'bg-red-500/10 text-red-500',
+  closed:  'bg-outline/10 text-outline',
+};
+
+const getStatusStyle = (status: string) =>
+  statusStyle[status?.toLowerCase()] ?? 'bg-outline/10 text-outline';
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const [loans, setLoans] = React.useState<Loan[]>([]);
@@ -52,9 +63,9 @@ export default function Dashboard() {
       const loanList = Array.isArray(data) ? data : [];
       setLoans(loanList);
 
-      // Sum remaining balances of active loans for "Current Amount"
+      // Case-insensitive active check
       const total = loanList
-        .filter((l: Loan) => l.status === 'Active')
+        .filter((l: Loan) => l.status?.toLowerCase() === 'active')
         .reduce((sum: number, l: Loan) => sum + Number(l.remaining_balance ?? 0), 0);
       setTotalBalance(total);
     } catch {
@@ -68,18 +79,14 @@ export default function Dashboard() {
   if (!parsedUser) return null;
 
   const sortedLoans = [...loans].sort((a, b) => {
-    if (a.status === 'Paid' && b.status !== 'Paid') return 1;
-    if (a.status !== 'Paid' && b.status === 'Paid') return -1;
+    const aPaid = a.status?.toLowerCase() === 'paid';
+    const bPaid = b.status?.toLowerCase() === 'paid';
+    if (aPaid && !bPaid) return 1;
+    if (!aPaid && bPaid) return -1;
     return 0;
   });
 
   const displayedLoans = showAllLoans ? sortedLoans : sortedLoans.slice(0, 3);
-
-  const statusStyle: Record<string, string> = {
-    Paid:    'bg-green-500/10 text-green-500',
-    Active:  'bg-amber-500/10 text-amber-500',
-    Pending: 'bg-red-500/10 text-red-500',
-  };
 
   return (
     <div className="min-h-screen bg-background pb-32">
@@ -102,7 +109,7 @@ export default function Dashboard() {
           </div>
         </motion.section>
 
-        {/* Current Balance */}
+        {/* Outstanding Balance */}
         <motion.section
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -183,7 +190,7 @@ export default function Dashboard() {
                         {loan.reference_no}
                       </span>
                       <div className="flex justify-center">
-                        <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-tighter ${statusStyle[loan.status] ?? 'bg-outline/10 text-outline'}`}>
+                        <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-tighter ${getStatusStyle(loan.status)}`}>
                           {loan.status}
                         </span>
                       </div>
@@ -192,7 +199,7 @@ export default function Dashboard() {
                       </span>
                     </div>
 
-                    {loan.status === 'Active' && (
+                    {loan.status?.toLowerCase() === 'active' && (
                       <div className="flex gap-2 mt-2">
                         <button
                           onClick={(e) => { e.stopPropagation(); navigate(`/loan/${loan.loan_id}`); }}
