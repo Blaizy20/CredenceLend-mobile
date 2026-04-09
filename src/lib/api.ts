@@ -7,7 +7,9 @@ export const authAPI = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
     });
-    return res.json();
+    const data = await res.json();
+    if (!data.success) throw new Error(data.message || 'Invalid username or password.');
+    return data;
   },
 
   register: async (data: Record<string, string>) => {
@@ -16,6 +18,11 @@ export const authAPI = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
+    return res.json();
+  },
+
+  getProfile: async (customerId: number) => {
+    const res = await fetch(`${BASE}/api/profile/${customerId}`);
     return res.json();
   },
 
@@ -43,6 +50,28 @@ export const authAPI = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, otp }),
     });
+    return res.json();
+  },
+};
+
+export const loansAPI = {
+  getLoans: async (customerId: number) => {
+    const res = await fetch(`${BASE}/api/loans/${customerId}`);
+    return res.json();
+  },
+
+  getLoan: async (loanId: number) => {
+    const res = await fetch(`${BASE}/api/loan/${loanId}`);
+    return res.json();
+  },
+
+  getPayments: async (loanId: number) => {
+    const res = await fetch(`${BASE}/api/payments/${loanId}`);
+    return res.json();
+  },
+
+  getTransactions: async (customerId: number) => {
+    const res = await fetch(`${BASE}/api/transactions/${customerId}`);
     return res.json();
   },
 };
