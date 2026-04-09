@@ -366,48 +366,8 @@ async function startServer() {
     }
   });
 
-  // ── Loans: List by Customer ───────────────────────────────────────────────
-  app.get("/api/loans/:customerId", async (req, res) => {
-    try {
-      const [rows] = await pool.query<RowDataPacket[]>(
-        `SELECT loan_id, reference_no, principal_amount, interest_rate,
-                payment_term, term_months, total_payable, remaining_balance,
-                status, due_date, activated_at, created_at, is_active
-         FROM loans
-         WHERE customer_id = ? AND is_active = 1
-         ORDER BY created_at DESC`,
-        [req.params.customerId]
-      );
-      res.json(rows);
-    } catch (err: any) {
-      console.error("Loans error:", err.message);
-      res.status(500).json({ success: false, message: "Unable to retrieve loan records. Please try again." });
-    }
-  });
-
-  // ── Loans: Single Loan ────────────────────────────────────────────────────
-  app.get("/api/loan/:loanId", async (req, res) => {
-    try {
-      const [rows] = await pool.query<RowDataPacket[]>(
-        `SELECT loan_id, reference_no, principal_amount, interest_rate,
-                payment_term, term_months, total_payable, remaining_balance,
-                status, due_date, denial_reason, notes,
-                activated_at, created_at, is_active
-         FROM loans
-         WHERE loan_id = ?
-         LIMIT 1`,
-        [req.params.loanId]
-      );
-      if (rows.length === 0)
-        return res.status(404).json({ success: false, message: "Loan record not found." });
-      res.json(rows[0]);
-    } catch (err: any) {
-      console.error("Loan error:", err.message);
-      res.status(500).json({ success: false, message: "Unable to retrieve loan details. Please try again." });
-    }
-  });
-
   // ── Loans: Apply ──────────────────────────────────────────────────────────
+  // NOTE: This route MUST be defined before /api/loans/:customerId
   app.post("/api/loans/apply", async (req, res) => {
     try {
       const {
@@ -449,8 +409,8 @@ async function startServer() {
       const reference_no = getNextReferenceNo(lastRef, year);
 
       // Calculate total payable
-      const rate     = Number(interest_rate) || 0;
-      const months   = Number(term_months)   || 1;
+      const rate        = Number(interest_rate) || 0;
+      const months      = Number(term_months)   || 1;
       const total_payable = Number(
         (amount + (amount * (rate / 100) * months)).toFixed(2)
       );
@@ -472,33 +432,38 @@ async function startServer() {
           months,
           total_payable,
           total_payable,
-          id_type    ?? null,
+          id_type       ?? null,
           collateral_type,
         ]
       );
 
       const loan_id = loanResult.insertId;
 
-      // Insert co-maker if provided
+      // Insert co-maker — non-fatal if it fails
       if (co_maker?.first_name && co_maker?.last_name) {
-        await pool.query(
-          `INSERT INTO co_makers
-            (loan_id, customer_id, first_name, last_name, contact_no,
-             email, province, city, barangay, street)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            loan_id,
-            customer_id,
-            String(co_maker.first_name).trim(),
-            String(co_maker.last_name).trim(),
-            co_maker.contact_no  || null,
-            co_maker.email       || null,
-            co_maker.province    || null,
-            co_maker.city        || null,
-            co_maker.barangay    || null,
-            co_maker.street      || null,
-          ]
-        );
+        try {
+          await pool.query(
+            `INSERT INTO co_makers
+              (loan_id, customer_id, first_name, last_name, contact_no,
+               email, province, city, barangay, street)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              loan_id,
+              customer_id,
+              String(co_maker.first_name).trim(),
+              String(co_maker.last_name).trim(),
+              co_maker.contact_no || null,
+              co_maker.email      || null,
+              co_maker.province   || null,
+              co_maker.city       || null,
+              co_maker.barangay   || null,
+              co_maker.street     || null,
+            ]
+          );
+        } catch (coMakerErr: any) {
+          // Non-fatal — loan is saved, co-maker is skipped
+          console.warn("Co-maker insert skipped:", coMakerErr.message);
+        }
       }
 
       res.status(201).json({
@@ -514,6 +479,47 @@ async function startServer() {
         error: err.message,
         code: err.code,
       });
+    }
+  });
+
+  // ── Loans: List by Customer ───────────────────────────────────────────────
+  app.get("/api/loans/:customerId", async (req, res) => {
+    try {
+      const [rows] = await pool.query<RowDataPacket[]>(
+        `SELECT loan_id, reference_no, principal_amount, interest_rate,
+                payment_term, term_months, total_payable, remaining_balance,
+                status, due_date, activated_at, created_at, is_active
+         FROM loans
+         WHERE customer_id = ? AND is_active = 1
+         ORDER BY created_at DESC`,
+        [req.params.customerId]
+      );
+      res.json(rows);
+    } catch (err: any) {
+      console.error("Loans error:", err.message);
+      res.status(500).json({ success: false, message: "Unable to retrieve loan records. Please try again." });
+    }
+  });
+
+  // ── Loans: Single Loan ────────────────────────────────────────────────────
+  app.get("/api/loan/:loanId", async (req, res) => {
+    try {
+      const [rows] = await pool.query<RowDataPacket[]>(
+        `SELECT loan_id, reference_no, principal_amount, interest_rate,
+                payment_term, term_months, total_payable, remaining_balance,
+                status, due_date, denial_reason, notes,
+                activated_at, created_at, is_active
+         FROM loans
+         WHERE loan_id = ?
+         LIMIT 1`,
+        [req.params.loanId]
+      );
+      if (rows.length === 0)
+        return res.status(404).json({ success: false, message: "Loan record not found." });
+      res.json(rows[0]);
+    } catch (err: any) {
+      console.error("Loan error:", err.message);
+      res.status(500).json({ success: false, message: "Unable to retrieve loan details. Please try again." });
     }
   });
 

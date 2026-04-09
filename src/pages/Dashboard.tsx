@@ -17,8 +17,8 @@ interface Loan {
 }
 
 const statusStyle: Record<string, string> = {
-  paid:    'bg-green-500/10 text-green-500',
-  active:  'bg-amber-500/10 text-amber-500',
+  paid:    'bg-emerald-500/10 text-emerald-400',
+  active:  'bg-green-500/10 text-green-500',
   pending: 'bg-blue-500/10 text-blue-500',
   denied:  'bg-red-500/10 text-red-500',
   closed:  'bg-outline/10 text-outline',

@@ -27,13 +27,13 @@ export const authAPI = {
   },
 
   checkUsername: (username: string) =>
-    fetch(`${BASE}/api/auth/check-username?username=${username}`).then(r => r.json()),
+    fetch(`${BASE}/api/auth/check-username?username=${encodeURIComponent(username)}`).then(r => r.json()),
 
   checkEmail: (email: string) =>
-    fetch(`${BASE}/api/auth/check-email?email=${email}`).then(r => r.json()),
+    fetch(`${BASE}/api/auth/check-email?email=${encodeURIComponent(email)}`).then(r => r.json()),
 
   checkContact: (contactNo: string) =>
-    fetch(`${BASE}/api/auth/check-contact?contactNo=${contactNo}`).then(r => r.json()),
+    fetch(`${BASE}/api/auth/check-contact?contactNo=${encodeURIComponent(contactNo)}`).then(r => r.json()),
 
   sendOtp: async (email: string) => {
     const res = await fetch(`${BASE}/api/auth/send-otp`, {
@@ -100,6 +100,14 @@ export const loansAPI = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    return res.json();
+
+    let result: any = {};
+    try {
+      result = await res.json();
+    } catch {
+      throw new Error(`Server error (${res.status}). Please try again.`);
+    }
+
+    return result;
   },
 };
