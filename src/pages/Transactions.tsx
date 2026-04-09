@@ -2,49 +2,45 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
 import { BottomNav } from '../components/BottomNav';
-import { ReceiptText, ArrowUpRight, ArrowDownLeft, Calendar, FileDown } from 'lucide-react';
+import { ReceiptText, ArrowUpRight, ArrowDownLeft, Calendar, FileDown, Loader2 } from 'lucide-react';
 import { motion } from 'motion/react';
 
 interface Transaction {
-  id: string;
-  userId: string;
-  loanId: string;
-  type: 'Loan Received' | 'Loan Payment';
-  amount: number | string;
-  date: string;
-  status: string;
+  id:      number;
+  loan_id: number;
+  type:    string;
+  amount:  number | string;
+  date:    string;
+  status:  string;
 }
 
 export default function Transactions() {
   const navigate = useNavigate();
   const [transactions, setTransactions] = React.useState<Transaction[]>([]);
-  const [loading, setLoading] = React.useState(true);
+  const [loading, setLoading]           = React.useState(true);
+  const [error, setError]               = React.useState('');
 
   React.useEffect(() => {
-    const storedUser = localStorage.getItem('user');
-    if (storedUser) {
-      const parsedUser = JSON.parse(storedUser);
-      fetchTransactions(parsedUser.username);
-    } else {
-      navigate('/login');
+    let user: any = null;
+    try { user = JSON.parse(localStorage.getItem('user') || 'null'); } catch {}
+    if (!user?.customer_id) {
+      navigate('/login', { replace: true });
+      return;
     }
+    fetchTransactions(user.customer_id);
   }, [navigate]);
 
-  const fetchTransactions = (username: string) => {
+  const fetchTransactions = async (customerId: number) => {
     try {
-      let txns = [];
-      try {
-        txns = JSON.parse(localStorage.getItem('transactions') || '[]');
-      } catch {}
-      // Only show for this user
-      const userTxns = txns.filter((t: any) => t.userId === username);
-      // Sort by date descending
-      const sortedData = userTxns.sort((a: Transaction, b: Transaction) => 
-        new Date(b.date).getTime() - new Date(a.date).getTime()
-      );
-      setTransactions(sortedData);
-    } catch (error) {
-      console.error('Error fetching transactions:', error);
+      const res  = await fetch(`/api/transactions/${customerId}`);
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data?.message || 'Failed to load transactions.');
+        return;
+      }
+      setTransactions(Array.isArray(data) ? data : []);
+    } catch {
+      setError('Unable to load transactions. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -52,10 +48,7 @@ export default function Transactions() {
 
   const formatTime = (dateString: string) => {
     const date = new Date(dateString);
-    return date.toLocaleTimeString('en-US', { 
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
   };
 
   const handleRequestHistory = () => {
@@ -65,11 +58,8 @@ export default function Transactions() {
   const groupTransactionsByDate = (txs: Transaction[]) => {
     const groups: { [key: string]: Transaction[] } = {};
     txs.forEach(tx => {
-      const d = new Date(tx.date);
-      const dateKey = d.toLocaleDateString('en-US', { 
-        month: 'long', 
-        day: 'numeric', 
-        year: 'numeric' 
+      const dateKey = new Date(tx.date).toLocaleDateString('en-US', {
+        month: 'long', day: 'numeric', year: 'numeric',
       });
       if (!groups[dateKey]) groups[dateKey] = [];
       groups[dateKey].push(tx);
@@ -81,8 +71,26 @@ export default function Transactions() {
     return (
       <div className="min-h-screen bg-background pb-32">
         <TopBar title="Transactions" showBack={false} />
-        <div className="pt-24 px-6 flex justify-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <div className="pt-24 flex justify-center">
+          <Loader2 className="text-primary animate-spin" size={36} />
+        </div>
+        <BottomNav />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-background pb-32">
+        <TopBar title="Transactions" showBack={false} />
+        <div className="pt-24 px-6 flex flex-col items-center gap-4 text-center">
+          <p className="text-red-500 text-sm font-medium">{error}</p>
+          <button
+            onClick={() => { setLoading(true); setError(''); }}
+            className="text-primary text-sm font-bold hover:underline"
+          >
+            Try again
+          </button>
         </div>
         <BottomNav />
       </div>
@@ -90,16 +98,16 @@ export default function Transactions() {
   }
 
   const displayedTransactions = transactions.slice(0, 20);
-  const groupedTransactions = groupTransactionsByDate(displayedTransactions);
-  const hasMore = transactions.length > 20;
+  const groupedTransactions   = groupTransactionsByDate(displayedTransactions);
+  const hasMore               = transactions.length > 20;
 
   return (
     <div className="min-h-screen bg-background pb-32">
-      <TopBar 
-        title="Transactions" 
-        showBack={false} 
+      <TopBar
+        title="Transactions"
+        showBack={false}
         rightElement={
-          <button 
+          <button
             onClick={handleRequestHistory}
             className="p-2 text-primary hover:bg-primary/10 rounded-full transition-colors active:scale-90"
             title="Request History"
@@ -108,7 +116,7 @@ export default function Transactions() {
           </button>
         }
       />
-      
+
       <main className="pt-24 px-6">
         <div className="mb-6">
           <p className="text-[10px] font-bold uppercase tracking-widest text-primary">Activity Log</p>
@@ -123,77 +131,68 @@ export default function Transactions() {
               <ReceiptText className="text-outline/40" size={40} />
             </div>
             <h2 className="text-xl font-headline font-bold text-on-surface">No transactions</h2>
-            <p className="text-on-surface-variant text-sm mt-2">Your transaction history will appear here.</p>
+            <p className="text-on-surface-variant text-sm mt-2">
+              Your transaction history will appear here.
+            </p>
           </div>
         ) : (
           <div className="space-y-8">
             {Object.entries(groupedTransactions).map(([date, txs], groupIndex) => (
               <div key={date} className="space-y-3">
                 <div className="sticky top-16 bg-background/95 backdrop-blur-md py-3 z-20 border-b border-outline-variant/10">
-                  <h3 className="text-[11px] font-bold text-primary uppercase tracking-[0.2em]">
-                    {date}
-                  </h3>
+                  <h3 className="text-[11px] font-bold text-primary uppercase tracking-[0.2em]">{date}</h3>
                 </div>
                 <div className="space-y-3">
-                  {txs.map((transaction, index) => (
-                    <motion.div
-                      key={transaction.id}
-                      initial={{ opacity: 0, x: -10 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: (groupIndex * 0.1) + (index * 0.05) }}
-                      className="bg-surface-container-low rounded-2xl p-4 flex items-center justify-between border border-outline-variant/20 shadow-sm"
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                          transaction.type === 'Loan Received' 
-                            ? 'bg-green-500/10 text-green-600' 
-                            : 'bg-blue-500/10 text-blue-600'
-                        }`}>
-                          {transaction.type === 'Loan Received' ? (
-                            <ArrowDownLeft size={20} />
-                          ) : (
-                            <ArrowUpRight size={20} />
-                          )}
+                  {txs.map((transaction, index) => {
+                    const isCredit = transaction.type === 'Loan Received';
+                    return (
+                      <motion.div
+                        key={transaction.id}
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: (groupIndex * 0.1) + (index * 0.05) }}
+                        className="bg-surface-container-low rounded-2xl p-4 flex items-center justify-between border border-outline-variant/20 shadow-sm"
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                            isCredit ? 'bg-green-500/10 text-green-600' : 'bg-blue-500/10 text-blue-600'
+                          }`}>
+                            {isCredit ? <ArrowDownLeft size={20} /> : <ArrowUpRight size={20} />}
+                          </div>
+                          <div>
+                            <h4 className="font-bold text-sm text-on-surface">{transaction.type}</h4>
+                            <div className="flex items-center gap-2 text-on-surface-variant text-[10px] mt-0.5">
+                              <span className="flex items-center gap-1">
+                                <Calendar size={10} className="text-outline/40" />
+                                {formatTime(transaction.date)}
+                              </span>
+                              <span className="text-outline/20">|</span>
+                              <span className="font-mono bg-surface-container-high px-1.5 rounded text-outline">
+                                #{String(transaction.id).slice(-5)}
+                              </span>
+                            </div>
+                          </div>
                         </div>
-                        <div>
-                          <h4 className="font-bold text-sm text-on-surface">{transaction.type}</h4>
-                          <div className="flex items-center gap-2 text-on-surface-variant text-[10px] mt-0.5">
-                            <span className="flex items-center gap-1">
-                              <Calendar size={10} className="text-outline/40" />
-                              {formatTime(transaction.date)}
-                            </span>
-                            <span className="text-outline/20">|</span>
-                            <span className="font-mono bg-surface-container-high px-1.5 rounded text-outline">
-                              #{transaction.id.split('-').pop()}
+                        <div className="text-right">
+                          <p className={`font-bold text-sm ${isCredit ? 'text-green-600' : 'text-on-surface'}`}>
+                            {isCredit ? '+' : '-'} ₱{Number(transaction.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </p>
+                          <div className="flex items-center justify-end gap-1 mt-1">
+                            <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                            <span className="text-[9px] text-green-700 font-bold uppercase tracking-wider">
+                              {transaction.status}
                             </span>
                           </div>
                         </div>
-                      </div>
-                      <div className="text-right">
-                        <p className={`font-bold text-sm ${
-                          transaction.type === 'Loan Received' ? 'text-green-600' : 'text-on-surface'
-                        }`}>
-                          {transaction.type === 'Loan Received' ? '+' : '-'} ₱{Number(transaction.amount).toLocaleString()}
-                        </p>
-                        <div className="flex items-center justify-end gap-1 mt-1">
-                          <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                          <span className="text-[9px] text-green-700 font-bold uppercase tracking-wider">
-                            {transaction.status}
-                          </span>
-                        </div>
-                      </div>
-                    </motion.div>
-                  ))}
+                      </motion.div>
+                    );
+                  })}
                 </div>
               </div>
             ))}
 
             {hasMore && (
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="pt-4 pb-8"
-              >
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="pt-4 pb-8">
                 <div className="bg-surface-container-high/30 rounded-3xl p-8 text-center border border-dashed border-outline-variant/50">
                   <div className="w-12 h-12 bg-primary/10 text-primary rounded-full flex items-center justify-center mx-auto mb-4">
                     <FileDown size={24} />
@@ -202,7 +201,7 @@ export default function Transactions() {
                   <p className="text-xs text-on-surface-variant mb-6 leading-relaxed">
                     We only show your 20 most recent activities here. You can request a full PDF statement of your account.
                   </p>
-                  <button 
+                  <button
                     onClick={handleRequestHistory}
                     className="w-full py-3.5 bg-primary text-on-primary font-bold rounded-full text-sm active:scale-95 transition-all shadow-lg shadow-primary/20"
                   >
@@ -214,7 +213,7 @@ export default function Transactions() {
           </div>
         )}
       </main>
-      
+
       <BottomNav />
     </div>
   );

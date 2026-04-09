@@ -68,9 +68,9 @@ export default function PaymentOptions() {
   const termMonths        = Number(loan.term_months       ?? 1);
   const installmentAmount = termMonths > 0 ? totalPayable / termMonths : totalPayable;
 
-  const totalPaid     = payments.reduce((sum, p) => sum + Number(p.amount ?? 0), 0);
-  const partialInto   = installmentAmount > 0 ? totalPaid % installmentAmount : 0;
-  const amountDue     = remainingBalance <= 0
+  const totalPaid   = payments.reduce((sum, p) => sum + Number(p.amount ?? 0), 0);
+  const partialInto = installmentAmount > 0 ? totalPaid % installmentAmount : 0;
+  const amountDue   = remainingBalance <= 0
     ? 0
     : Math.min(
         remainingBalance,
@@ -106,7 +106,8 @@ export default function PaymentOptions() {
       amount = val;
     }
 
-    navigate(`/loan/${id}/pay?amount=${amount}&type=${selectedOption}`);
+    // ✅ Fixed: matches the route /loan/:id/pay/confirm in App.tsx
+    navigate(`/loan/${id}/pay/confirm?amount=${amount}&type=${selectedOption}`);
   };
 
   const radioClass = (active: boolean) => cn(
