@@ -52,6 +52,19 @@ export const authAPI = {
     });
     return res.json();
   },
+
+  resetPassword: async (email: string, newPassword: string) => {
+    const res = await fetch(`${BASE}/api/auth/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, newPassword }),
+    });
+    let result: any = {};
+    try { result = await res.json(); } catch {
+      throw new Error(`Server error (${res.status}). Please try again.`);
+    }
+    return result;
+  },
 };
 
 export const loansAPI = {
@@ -73,19 +86,6 @@ export const loansAPI = {
   getTransactions: async (customerId: number) => {
     const res = await fetch(`${BASE}/api/transactions/${customerId}`);
     return res.json();
-  },
-
-  resetPassword: async (email: string, newPassword: string) => {
-    const res = await fetch(`${BASE}/api/auth/reset-password`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, newPassword }),
-    });
-    let result: any = {};
-    try { result = await res.json(); } catch {
-      throw new Error(`Server error (${res.status}). Please try again.`);
-    }
-    return result;
   },
 
   applyLoan: async (data: {
@@ -113,14 +113,10 @@ export const loansAPI = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-
     let result: any = {};
-    try {
-      result = await res.json();
-    } catch {
+    try { result = await res.json(); } catch {
       throw new Error(`Server error (${res.status}). Please try again.`);
     }
-
     return result;
   },
 };
