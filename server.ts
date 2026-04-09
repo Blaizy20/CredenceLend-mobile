@@ -189,6 +189,52 @@ async function startServer() {
     }
   });
 
+  // ── Auth: Reset Password ──────────────────────────────────────────────────
+  app.post("/api/auth/reset-password", async (req, res) => {
+    try {
+      const email       = String(req.body.email       ?? "").trim().toLowerCase();
+      const newPassword = String(req.body.newPassword ?? "");
+
+      if (!email || !newPassword)
+        return res.status(400).json({
+          success: false,
+          message: "Email and new password are required.",
+        });
+
+      if (newPassword.length < 8)
+        return res.status(400).json({
+          success: false,
+          message: "Password must be at least 8 characters.",
+        });
+
+      const [rows] = await pool.query<RowDataPacket[]>(
+        "SELECT customer_id FROM customers WHERE email = ? AND is_active = 1 LIMIT 1",
+        [email]
+      );
+
+      if (rows.length === 0)
+        return res.status(404).json({
+          success: false,
+          message: "No account found with this email address.",
+        });
+
+      const hashed = await bcrypt.hash(newPassword, 10);
+
+      await pool.query(
+        "UPDATE customers SET password = ? WHERE email = ? AND is_active = 1",
+        [hashed, email]
+      );
+
+      res.json({ success: true, message: "Your password has been reset successfully." });
+    } catch (err: any) {
+      console.error("Reset password error:", err.message);
+      res.status(500).json({
+        success: false,
+        message: "An unexpected error occurred. Please try again.",
+      });
+    }
+  });
+
   // ── Auth: Register ────────────────────────────────────────────────────────
   app.post("/api/auth/register", async (req, res) => {
     try {
