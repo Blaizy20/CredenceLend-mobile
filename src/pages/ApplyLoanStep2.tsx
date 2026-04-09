@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { BadgeCheck, CreditCard, PenTool } from 'lucide-react';
 import { TopBar } from '../components/TopBar';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
@@ -17,34 +18,52 @@ interface CoMakerForm {
 }
 
 export default function ApplyLoanStep2() {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const step1 = location.state?.step1;
+  const navigate  = useNavigate();
+  const location  = useLocation();
+  const step1     = location.state?.step1;
 
-  // Redirect back if Step 1 data is missing
   React.useEffect(() => {
     if (!step1) navigate('/apply', { replace: true });
   }, [step1]);
 
   const [formData, setFormData] = useState<CoMakerForm>({
     first_name: '',
-    last_name: '',
+    last_name:  '',
     contact_no: '',
-    email: '',
-    province: '',
-    city: '',
-    barangay: '',
-    street: '',
+    email:      '',
+    province:   '',
+    city:       '',
+    barangay:   '',
+    street:     '',
   });
 
-  const [errors, setErrors]     = useState<Record<string, string>>({});
+  const [files, setFiles]           = useState<Record<string, string>>({});
+  const [errors, setErrors]         = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
   const handleChange = (field: keyof CoMakerForm, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
     if (errors[field]) setErrors(prev => ({ ...prev, [field]: '' }));
-    if (submitError) setSubmitError('');
+    if (submitError)   setSubmitError('');
+  };
+
+  const handleFileChange = (
+    e: React.ChangeEvent<HTMLInputElement>,
+    field: string
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      alert('File size should not exceed 5MB.');
+      e.target.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setFiles(prev => ({ ...prev, [field]: ev.target?.result as string }));
+    };
+    reader.readAsDataURL(file);
   };
 
   const validate = () => {
@@ -77,15 +96,15 @@ export default function ApplyLoanStep2() {
 
     try {
       const result = await loansAPI.applyLoan({
-        customer_id:     user.customer_id,
-        tenant_id:       user.tenant_id ?? 1,
+        customer_id:      user.customer_id,
+        tenant_id:        user.tenant_id ?? 1,
         principal_amount: step1.principal_amount,
-        payment_term:    step1.payment_term,
-        interest_rate:   step1.interest_rate,
-        term_months:     step1.term_months,
-        id_type:         step1.id_type,
-        collateral_type: step1.collateral_type,
-        co_maker:        formData,
+        payment_term:     step1.payment_term,
+        interest_rate:    step1.interest_rate,
+        term_months:      step1.term_months,
+        id_type:          step1.id_type,
+        collateral_type:  step1.collateral_type,
+        co_maker:         formData,
       });
 
       if (!result.success) {
@@ -103,6 +122,12 @@ export default function ApplyLoanStep2() {
 
   if (!step1) return null;
 
+  const idFields = [
+    { key: 'idFront',    label: 'Valid ID (Front)',       icon: <BadgeCheck className="text-primary" size={20} /> },
+    { key: 'idBack',     label: 'Valid ID (Back)',        icon: <CreditCard className="text-primary" size={20} /> },
+    { key: 'signatures', label: '3 Specimen Signatures', icon: <PenTool    className="text-primary" size={20} /> },
+  ];
+
   return (
     <div className="min-h-screen bg-background pb-12">
       <TopBar title="Co-maker Details" />
@@ -114,9 +139,7 @@ export default function ApplyLoanStep2() {
             <span className="font-headline font-extrabold text-2xl tracking-tight text-on-surface">
               Step 2 <span className="text-primary/60 text-lg font-medium">of 2</span>
             </span>
-            <span className="font-body text-xs uppercase tracking-widest text-primary font-bold">
-              Co-maker
-            </span>
+            <span className="text-xs uppercase tracking-widest text-primary font-bold">Co-maker</span>
           </div>
           <div className="h-1.5 w-full bg-surface-container-highest rounded-full overflow-hidden">
             <div className="h-full w-full bg-primary rounded-full" />
@@ -124,7 +147,7 @@ export default function ApplyLoanStep2() {
         </div>
 
         {/* Loan Summary */}
-        <div className="mb-8 p-4 bg-surface-container-high rounded-xl space-y-1 border border-outline-variant/10">
+        <div className="mb-8 p-4 bg-surface-container-high rounded-xl space-y-2 border border-outline-variant/10">
           <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-2">
             Loan Summary
           </p>
@@ -225,14 +248,51 @@ export default function ApplyLoanStep2() {
           />
         </section>
 
-        {/* Error */}
+        {/* Identification — Optional */}
+        <section className="space-y-6 mb-10">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-1 h-6 bg-primary rounded-full" />
+            <h2 className="font-headline font-bold text-lg text-on-surface">
+              Identification
+              <span className="ml-2 text-on-surface-variant text-sm font-normal">— optional</span>
+            </h2>
+          </div>
+          <div className="space-y-4">
+            {idFields.map(({ key, label, icon }) => (
+              <div key={key} className="flex items-center justify-between p-4 bg-surface-container-low rounded-xl border border-white/5">
+                <div className="flex items-center gap-3">
+                  {icon}
+                  <span className="text-sm font-medium">{label}</span>
+                </div>
+                <div className="flex flex-col items-end gap-1">
+                  <input
+                    type="file"
+                    accept="image/*,application/pdf"
+                    style={{ display: 'none' }}
+                    id={`${key}Upload`}
+                    onChange={e => handleFileChange(e, key)}
+                  />
+                  <label htmlFor={`${key}Upload`} className="bg-primary text-on-primary-container text-[10px] font-bold px-4 py-2 rounded-lg uppercase tracking-wider shadow-lg shadow-primary/20 cursor-pointer">
+                    CHOOSE FILE
+                  </label>
+                  {files[key]
+                    ? <span className="text-xs text-green-600">Attached ✓</span>
+                    : <span className="text-xs text-outline">No file selected</span>
+                  }
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* Submit Error */}
         {submitError && (
           <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-xl">
             <p className="text-red-500 text-sm font-medium">{submitError}</p>
           </div>
         )}
 
-        {/* Submit */}
+        {/* Footer */}
         <footer className="mt-4 mb-8 space-y-4">
           <Button onClick={handleSubmit} disabled={submitting}>
             {submitting ? 'Submitting...' : 'SUBMIT APPLICATION'}
@@ -240,8 +300,8 @@ export default function ApplyLoanStep2() {
           <div className="flex flex-col items-center">
             <button
               onClick={() => navigate('/apply')}
-              className="text-on-surface-variant hover:text-primary transition-colors text-sm font-medium"
               disabled={submitting}
+              className="text-on-surface-variant hover:text-primary transition-colors text-sm font-medium"
             >
               Back to Step 1
             </button>
