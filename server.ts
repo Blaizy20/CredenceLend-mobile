@@ -1,5 +1,5 @@
 import cors from "cors";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
