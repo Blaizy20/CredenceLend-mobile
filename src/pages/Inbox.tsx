@@ -4,21 +4,22 @@ import { TopBar } from '../components/TopBar';
 import { BottomNav } from '../components/BottomNav';
 import { Inbox as InboxIcon, Bell, CheckCircle2, XCircle, Clock, Loader2 } from 'lucide-react';
 import { motion } from 'motion/react';
+import { notificationsAPI } from '@/src/lib/api';
 
 interface Notification {
   notification_id: number;
-  title:      string;
-  message:    string;
-  type:       string;  // 'approved' | 'denied' | 'payment' | 'general'
-  is_read:    boolean;
-  created_at: string;
+  title:           string;
+  message:         string;
+  type:            string;
+  is_read:         boolean;
+  created_at:      string;
 }
 
 const notifIcon: Record<string, JSX.Element> = {
-  approved: <CheckCircle2 className="text-green-500"  size={20} />,
-  denied:   <XCircle      className="text-red-500"    size={20} />,
-  payment:  <CheckCircle2 className="text-primary"    size={20} />,
-  general:  <Bell         className="text-on-surface-variant" size={20} />,
+  approved: <CheckCircle2 className="text-green-500"           size={20} />,
+  denied:   <XCircle      className="text-red-500"             size={20} />,
+  payment:  <CheckCircle2 className="text-primary"             size={20} />,
+  general:  <Bell         className="text-on-surface-variant"  size={20} />,
 };
 
 const notifBg: Record<string, string> = {
@@ -41,12 +42,10 @@ export default function Inbox() {
     const fetchNotifications = async () => {
       setLoading(true);
       try {
-        const res  = await fetch(`/api/notifications/${user.customer_id}`);
-        const data = await res.json();
+        const data = await notificationsAPI.getAll(user.customer_id);
         setNotifications(Array.isArray(data) ? data : []);
-
-        // Mark all as read silently
-        await fetch(`/api/notifications/${user.customer_id}/read-all`, { method: 'PATCH' });
+        // Mark all as read silently — non-fatal
+        notificationsAPI.markAllRead(user.customer_id).catch(() => {});
       } catch {
         setNotifications([]);
       } finally {
@@ -62,10 +61,10 @@ export default function Inbox() {
     const now  = new Date();
     const diff = Math.floor((now.getTime() - date.getTime()) / 1000);
 
-    if (diff < 60)                    return 'Just now';
-    if (diff < 3600)                  return `${Math.floor(diff / 60)}m ago`;
-    if (diff < 86400)                 return `${Math.floor(diff / 3600)}h ago`;
-    if (diff < 604800)                return `${Math.floor(diff / 86400)}d ago`;
+    if (diff < 60)     return 'Just now';
+    if (diff < 3600)   return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400)  return `${Math.floor(diff / 3600)}h ago`;
+    if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 

@@ -2,6 +2,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { LayoutDashboard, Inbox, ReceiptText, User, ShieldCheck } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { useEffect, useState } from 'react';
+import { notificationsAPI } from '@/src/lib/api';
 
 export function BottomNav() {
   const navigate = useNavigate();
@@ -15,8 +16,7 @@ export function BottomNav() {
 
     const fetchUnread = async () => {
       try {
-        const res  = await fetch(`/api/notifications/${user.customer_id}`);
-        const data = await res.json();
+        const data = await notificationsAPI.getAll(user.customer_id);
         if (Array.isArray(data)) {
           setUnreadCount(data.filter((n: any) => !n.is_read).length);
         }
@@ -27,12 +27,11 @@ export function BottomNav() {
 
     fetchUnread();
 
-    // Re-check every 30 seconds while app is open
     const interval = setInterval(fetchUnread, 30_000);
     return () => clearInterval(interval);
   }, []);
 
-  // Clear badge when user navigates to inbox
+  // Clear badge immediately when navigating to inbox
   useEffect(() => {
     if (location.pathname === '/inbox') setUnreadCount(0);
   }, [location.pathname]);
@@ -61,17 +60,14 @@ export function BottomNav() {
               isActive ? "bg-primary/10 text-primary" : "text-outline hover:text-primary/80"
             )}
           >
-            {/* Icon + badge wrapper */}
             <div className="relative">
               <item.icon size={24} strokeWidth={isActive ? 2.5 : 2} />
-
               {showBadge && (
                 <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-extrabold flex items-center justify-center leading-none">
                   {unreadCount > 99 ? '99+' : unreadCount}
                 </span>
               )}
             </div>
-
             <span className="font-body text-[10px] font-medium tracking-widest uppercase mt-1">
               {item.label}
             </span>
