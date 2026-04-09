@@ -554,6 +554,22 @@ async function startServer() {
         }
       }
 
+      // Notify customer that application was received
+      try {
+        await pool.query(
+          `INSERT INTO notifications (customer_id, tenant_id, title, message, type)
+           VALUES (?, ?, ?, ?, 'general')`,
+          [
+            customer_id,
+            tenant_id ?? DEFAULT_TENANT_ID,
+            'Loan Application Received',
+            `Your application (${reference_no}) for ₱${amount.toLocaleString()} has been submitted and is pending review.`,
+          ]
+        );
+      } catch (notifErr: any) {
+        console.warn("Notification insert skipped:", notifErr.message);
+      }
+
       res.status(201).json({
         success: true,
         message: "Your loan application has been submitted successfully.",
@@ -626,6 +642,38 @@ async function startServer() {
     } catch (err: any) {
       console.error("Payments error:", err.message);
       res.status(500).json({ success: false, message: "Unable to retrieve payment records. Please try again." });
+    }
+  });
+
+  // ── Notifications: List ───────────────────────────────────────────────────
+  app.get("/api/notifications/:customerId", async (req, res) => {
+    try {
+      const [rows] = await pool.query<RowDataPacket[]>(
+        `SELECT notification_id, title, message, type, is_read, created_at
+         FROM notifications
+         WHERE customer_id = ?
+         ORDER BY created_at DESC
+         LIMIT 50`,
+        [req.params.customerId]
+      );
+      res.json(rows);
+    } catch (err: any) {
+      console.error("Notifications error:", err.message);
+      res.status(500).json({ success: false, message: "Unable to retrieve notifications." });
+    }
+  });
+
+  // ── Notifications: Mark All Read ──────────────────────────────────────────
+  app.patch("/api/notifications/:customerId/read-all", async (req, res) => {
+    try {
+      await pool.query(
+        `UPDATE notifications SET is_read = 1 WHERE customer_id = ? AND is_read = 0`,
+        [req.params.customerId]
+      );
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("Mark read error:", err.message);
+      res.status(500).json({ success: false, message: "Unable to update notifications." });
     }
   });
 

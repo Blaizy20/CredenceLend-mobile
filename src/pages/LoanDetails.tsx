@@ -164,6 +164,23 @@ export default function LoanDetails() {
           </div>
         )}
 
+        {/* Pay Button — active loans only */}
+        {loan.status?.toLowerCase() === 'active' && !isFullyPaid && (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+          >
+            <button
+              onClick={() => navigate(`/loan/${id}/pay`)}
+              className="w-full py-4 rounded-2xl bg-primary text-on-primary font-headline font-extrabold text-base flex items-center justify-center gap-2 shadow-lg shadow-primary/20 active:scale-95 transition-transform"
+            >
+              Make a Payment
+              <ChevronRight size={20} />
+            </button>
+          </motion.div>
+        )}
+
         {/* Hero Card */}
         <motion.section
           initial={{ opacity: 0, y: 20 }}
