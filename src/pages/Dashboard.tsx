@@ -211,16 +211,6 @@ export default function Dashboard() {
                           {new Date(loan.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                         </span>
                       </div>
-
-                      {loan.status?.toLowerCase() === 'active' && (
-                        <div className="flex gap-2 mt-2">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); navigate(`/loan/${loan.loan_id}`); }}
-                            className="flex-1 py-2 bg-primary/10 text-primary text-[10px] font-bold rounded-lg uppercase tracking-wider border border-primary/20 active:scale-95 transition-all"
-                          >
-                            View Loan
-                          </button>
-                        </div>
                       )}
                     </div>
                   ))}
