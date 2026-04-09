@@ -77,7 +77,7 @@ async function startServer() {
     try {
       const username = String(req.query.username || "").trim();
       if (!username)
-        return res.status(400).json({ taken: false, message: "Username is required" });
+        return res.status(400).json({ taken: false, message: "Username is required." });
       const [rows] = await pool.query<RowDataPacket[]>(
         "SELECT customer_id FROM customers WHERE username = ? LIMIT 1",
         [username]
@@ -85,7 +85,7 @@ async function startServer() {
       res.json({ taken: rows.length > 0 });
     } catch (err: any) {
       console.error("Check username error:", err.message);
-      res.status(500).json({ taken: false, message: "Server error" });
+      res.status(500).json({ taken: false, message: "An unexpected error occurred. Please try again." });
     }
   });
 
@@ -93,7 +93,7 @@ async function startServer() {
     try {
       const email = String(req.query.email || "").trim();
       if (!email)
-        return res.status(400).json({ taken: false, message: "Email is required" });
+        return res.status(400).json({ taken: false, message: "Email address is required." });
       const [rows] = await pool.query<RowDataPacket[]>(
         "SELECT customer_id FROM customers WHERE email = ? LIMIT 1",
         [email]
@@ -101,7 +101,7 @@ async function startServer() {
       res.json({ taken: rows.length > 0 });
     } catch (err: any) {
       console.error("Check email error:", err.message);
-      res.status(500).json({ taken: false, message: "Server error" });
+      res.status(500).json({ taken: false, message: "An unexpected error occurred. Please try again." });
     }
   });
 
@@ -109,7 +109,7 @@ async function startServer() {
     try {
       const contactNo = String(req.query.contactNo || "").trim();
       if (!contactNo)
-        return res.status(400).json({ taken: false, message: "Contact number is required" });
+        return res.status(400).json({ taken: false, message: "Contact number is required." });
       const [rows] = await pool.query<RowDataPacket[]>(
         "SELECT customer_id FROM customers WHERE contact_no = ? LIMIT 1",
         [contactNo]
@@ -117,7 +117,7 @@ async function startServer() {
       res.json({ taken: rows.length > 0 });
     } catch (err: any) {
       console.error("Check contact error:", err.message);
-      res.status(500).json({ taken: false, message: "Server error" });
+      res.status(500).json({ taken: false, message: "An unexpected error occurred. Please try again." });
     }
   });
 
@@ -126,14 +126,17 @@ async function startServer() {
     try {
       const { email } = req.body;
       if (!email)
-        return res.status(400).json({ success: false, message: "Email is required" });
+        return res.status(400).json({ success: false, message: "Please provide your email address." });
 
       const [customers] = await pool.query<RowDataPacket[]>(
         "SELECT customer_id FROM customers WHERE email = ? AND is_active = 1 LIMIT 1",
         [email]
       );
       if (customers.length === 0)
-        return res.status(404).json({ success: false, message: "Email not found" });
+        return res.status(404).json({
+          success: false,
+          message: "No account is associated with this email address.",
+        });
 
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
       const expiresAt = Date.now() + 10 * 60 * 1000;
@@ -144,10 +147,10 @@ async function startServer() {
       );
 
       console.log(`[OTP] ${email} → ${otp}`);
-      res.json({ success: true, message: "OTP sent successfully" });
+      res.json({ success: true, message: "A verification code has been sent to your email." });
     } catch (err: any) {
       console.error("Send OTP error:", err.message);
-      res.status(500).json({ success: false, message: "Server error" });
+      res.status(500).json({ success: false, message: "An unexpected error occurred. Please try again." });
     }
   });
 
@@ -156,20 +159,26 @@ async function startServer() {
     try {
       const { email, otp } = req.body;
       if (!email || !otp)
-        return res.status(400).json({ success: false, message: "Email and OTP are required" });
+        return res.status(400).json({
+          success: false,
+          message: "Email address and verification code are required.",
+        });
 
       const [rows] = await pool.query<RowDataPacket[]>(
         "SELECT * FROM otps WHERE email = ? AND otp = ? AND expires_at > ? LIMIT 1",
         [email, otp, Date.now()]
       );
       if (rows.length === 0)
-        return res.status(400).json({ success: false, message: "Invalid or expired OTP" });
+        return res.status(400).json({
+          success: false,
+          message: "The verification code is invalid or has already expired. Please request a new one.",
+        });
 
       await pool.query("DELETE FROM otps WHERE email = ?", [email]);
-      res.json({ success: true, message: "OTP verified" });
+      res.json({ success: true, message: "Verification successful." });
     } catch (err: any) {
       console.error("Verify OTP error:", err.message);
-      res.status(500).json({ success: false, message: "Server error" });
+      res.status(500).json({ success: false, message: "An unexpected error occurred. Please try again." });
     }
   });
 
@@ -189,13 +198,22 @@ async function startServer() {
 
       if (!first_name || !last_name || !username || !contact_no ||
           !email || !password || !province || !city || !barangay || !street)
-        return res.status(400).json({ success: false, message: "Please fill in all required fields" });
+        return res.status(400).json({
+          success: false,
+          message: "All fields are required. Please complete the registration form.",
+        });
 
-      if (!/^09\d{9}$/.test(contact_no))
-        return res.status(400).json({ success: false, message: "Contact number must be in PH format (09XXXXXXXXX)" });
+      if (!/^09\d{9}$/.test(contact_no))  // 👈 fixed regex (was \\d)
+        return res.status(400).json({
+          success: false,
+          message: "Please enter a valid Philippine mobile number (e.g. 09XXXXXXXXX).",
+        });
 
-      if (!/\S+@\S+\.\S+/.test(email))
-        return res.status(400).json({ success: false, message: "Invalid email address" });
+      if (!/\S+@\S+\.\S+/.test(email))    // 👈 fixed regex (was \\S)
+        return res.status(400).json({
+          success: false,
+          message: "Please enter a valid email address.",
+        });
 
       const [duplicateRows] = await pool.query<RowDataPacket[]>(
         `SELECT customer_id, username, email, contact_no
@@ -208,11 +226,20 @@ async function startServer() {
       if (duplicateRows.length > 0) {
         const dup = duplicateRows[0];
         if (dup.username === username)
-          return res.status(409).json({ success: false, message: "Username already taken" });
+          return res.status(409).json({
+            success: false,
+            message: "This username is already taken. Please choose a different one.",
+          });
         if (dup.email === email)
-          return res.status(409).json({ success: false, message: "Email already registered" });
+          return res.status(409).json({
+            success: false,
+            message: "An account with this email address already exists.",
+          });
         if (dup.contact_no === contact_no)
-          return res.status(409).json({ success: false, message: "Contact number already registered" });
+          return res.status(409).json({
+            success: false,
+            message: "An account with this contact number already exists.",
+          });
       }
 
       const year = new Date().getFullYear();
@@ -242,7 +269,7 @@ async function startServer() {
 
       res.status(201).json({
         success: true,
-        message: "Registration successful",
+        message: "Your account has been successfully created.",
         customer: {
           customer_id: result.insertId,
           tenant_id: DEFAULT_TENANT_ID,
@@ -253,7 +280,12 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error("Register error:", err);
-      res.status(500).json({ success: false, message: "Server error", error: err.message, code: err.code });
+      res.status(500).json({
+        success: false,
+        message: "An unexpected error occurred during registration. Please try again.",
+        error: err.message,
+        code: err.code,
+      });
     }
   });
 
@@ -264,7 +296,10 @@ async function startServer() {
       const password        = String(req.body.password ?? "");
 
       if (!usernameOrEmail || !password)
-        return res.status(400).json({ success: false, message: "Username and password required" });
+        return res.status(400).json({
+          success: false,
+          message: "Please enter your username and password to continue.",
+        });
 
       const [rows] = await pool.query<CustomerRow[]>(
         `SELECT customer_id, tenant_id, user_id, username, password,
@@ -277,19 +312,29 @@ async function startServer() {
       );
 
       if (rows.length === 0)
-        return res.status(401).json({ success: false, message: "Invalid credentials" });
+        return res.status(401).json({
+          success: false,
+          message: "The username or password you entered is incorrect. Please try again.",
+        });
 
       const customer = rows[0];
       const match    = await bcrypt.compare(password, customer.password);
 
       if (!match)
-        return res.status(401).json({ success: false, message: "Invalid credentials" });
+        return res.status(401).json({
+          success: false,
+          message: "The username or password you entered is incorrect. Please try again.",
+        });
 
       const { password: _pw, ...safeCustomer } = customer;
       res.json({ success: true, customer: safeCustomer });
     } catch (err: any) {
       console.error("Login error:", err.message);
-      res.status(500).json({ success: false, message: "Server error", error: err.message });
+      res.status(500).json({
+        success: false,
+        message: "An unexpected error occurred. Please try again later.",
+        error: err.message,
+      });
     }
   });
 
@@ -306,11 +351,11 @@ async function startServer() {
         [req.params.customerId]
       );
       if (rows.length === 0)
-        return res.status(404).json({ success: false, message: "Customer not found" });
+        return res.status(404).json({ success: false, message: "Customer account not found." });
       res.json(rows[0]);
     } catch (err: any) {
       console.error("Profile error:", err.message);
-      res.status(500).json({ success: false, message: "Server error" });
+      res.status(500).json({ success: false, message: "An unexpected error occurred. Please try again." });
     }
   });
 
@@ -329,7 +374,7 @@ async function startServer() {
       res.json(rows);
     } catch (err: any) {
       console.error("Loans error:", err.message);
-      res.status(500).json({ success: false, message: "Server error" });
+      res.status(500).json({ success: false, message: "Unable to retrieve loan records. Please try again." });
     }
   });
 
@@ -346,11 +391,11 @@ async function startServer() {
         [req.params.loanId]
       );
       if (rows.length === 0)
-        return res.status(404).json({ success: false, message: "Loan not found" });
+        return res.status(404).json({ success: false, message: "Loan record not found." });
       res.json(rows[0]);
     } catch (err: any) {
       console.error("Loan error:", err.message);
-      res.status(500).json({ success: false, message: "Server error" });
+      res.status(500).json({ success: false, message: "Unable to retrieve loan details. Please try again." });
     }
   });
 
@@ -368,7 +413,7 @@ async function startServer() {
       res.json(rows);
     } catch (err: any) {
       console.error("Payments error:", err.message);
-      res.status(500).json({ success: false, message: "Server error" });
+      res.status(500).json({ success: false, message: "Unable to retrieve payment records. Please try again." });
     }
   });
 
@@ -385,7 +430,7 @@ async function startServer() {
       res.json(rows);
     } catch (err: any) {
       console.error("Transactions error:", err.message);
-      res.status(500).json({ success: false, message: "Server error" });
+      res.status(500).json({ success: false, message: "Unable to retrieve transaction history. Please try again." });
     }
   });
 
