@@ -12,7 +12,11 @@ export default function Profile() {
   React.useEffect(() => {
     const storedUser = localStorage.getItem('user');
     if (storedUser) {
-      setUser(JSON.parse(storedUser));
+      try {
+        setUser(JSON.parse(storedUser));
+      } catch {
+        navigate('/login');
+      }
     } else {
       navigate('/login');
     }
@@ -20,18 +24,17 @@ export default function Profile() {
 
   const handleLogout = () => {
     localStorage.removeItem('user');
-    navigate('/login');
+    navigate('/login', { replace: true });
   };
 
   if (!user) return null;
 
   return (
     <div className="min-h-screen bg-background pb-32">
-      <TopBar 
-        title="My Profile" 
-      />
-      
+      <TopBar title="My Profile" />
+
       <main className="pt-24 pb-12 px-6 max-w-md mx-auto space-y-8">
+
         {/* Profile Header */}
         <section className="flex flex-col items-center text-center space-y-4">
           <div className="relative group">
@@ -44,8 +47,12 @@ export default function Profile() {
             </div>
           </div>
           <div className="space-y-1">
-            <h2 className="text-3xl font-extrabold tracking-tight text-on-surface">{user.firstName} {user.lastName}</h2>
-            <p className="text-primary font-medium tracking-wide text-sm bg-primary/10 px-3 py-0.5 rounded-full inline-block">PREMIUM MEMBER</p>
+            <h2 className="text-3xl font-extrabold tracking-tight text-on-surface">
+              {user.first_name} {user.last_name}
+            </h2>
+            <p className="text-primary font-medium tracking-wide text-sm bg-primary/10 px-3 py-0.5 rounded-full inline-block">
+              PREMIUM MEMBER
+            </p>
           </div>
         </section>
 
@@ -53,25 +60,27 @@ export default function Profile() {
         <section className="space-y-4">
           <div className="flex items-center gap-2 px-1">
             <User className="text-primary" size={18} />
-            <h3 className="text-sm font-bold uppercase tracking-widest text-on-surface-variant">Personal Information</h3>
+            <h3 className="text-sm font-bold uppercase tracking-widest text-on-surface-variant">
+              Personal Information
+            </h3>
           </div>
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, scale: 0.98 }}
             animate={{ opacity: 1, scale: 1 }}
             className="bg-surface-container-high rounded-xl p-6 space-y-6 shadow-xl"
           >
             <div className="grid grid-cols-1 gap-6">
               <div className="space-y-1">
-                <p className="text-xs font-semibold text-outline tracking-wider uppercase">Customer ID</p>
-                <p className="text-on-surface font-mono text-base">{user.customerNo || 'N/A'}</p>
+                <p className="text-xs font-semibold text-outline tracking-wider uppercase">Customer No.</p>
+                <p className="text-on-surface font-mono text-base">{user.customer_no || 'N/A'}</p>
               </div>
               <div className="space-y-1">
                 <p className="text-xs font-semibold text-outline tracking-wider uppercase">Contact No.</p>
-                <p className="text-on-surface text-base">{user.contactNo || 'N/A'}</p>
+                <p className="text-on-surface text-base">{user.contact_no || 'N/A'}</p>
               </div>
               <div className="space-y-1">
                 <p className="text-xs font-semibold text-outline tracking-wider uppercase">Email Address</p>
-                <p className="text-on-surface text-base">{user.email}</p>
+                <p className="text-on-surface text-base">{user.email || 'N/A'}</p>
               </div>
             </div>
           </motion.div>
@@ -81,9 +90,11 @@ export default function Profile() {
         <section className="space-y-4">
           <div className="flex items-center gap-2 px-1">
             <MapPin className="text-primary" size={18} />
-            <h3 className="text-sm font-bold uppercase tracking-widest text-on-surface-variant">Residential Address</h3>
+            <h3 className="text-sm font-bold uppercase tracking-widest text-on-surface-variant">
+              Residential Address
+            </h3>
           </div>
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, scale: 0.98 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: 0.1 }}
@@ -112,14 +123,15 @@ export default function Profile() {
 
         {/* Logout */}
         <section className="pt-6">
-          <button 
-            onClick={() => navigate('/login')}
+          <button
+            onClick={handleLogout}
             className="w-full flex items-center justify-center gap-2 py-4 px-6 rounded-full bg-secondary-container/10 border border-secondary-container/20 text-secondary hover:bg-secondary-container/20 transition-all duration-300 font-bold active:scale-95"
           >
             <LogOut size={20} />
             <span>Logout from Credence</span>
           </button>
         </section>
+
       </main>
 
       <BottomNav />
