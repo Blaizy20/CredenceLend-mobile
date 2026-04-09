@@ -19,7 +19,7 @@ import AdminLoans from './pages/AdminLoans';
 import ApplyLoanStep1 from './pages/ApplyLoanStep1';
 import ApplyLoanStep2 from './pages/ApplyLoanStep2';
 import PaymentOptions from './pages/PaymentOptions';
-import Payment from './pages/Payment';
+import Payment from './pages/Payment';  
 import Profile from './pages/Profile';
 import Inbox from './pages/Inbox';
 import Transactions from './pages/Transactions';
@@ -44,8 +44,8 @@ export default function App() {
         <Route path="/admin/loans" element={<AdminLoans />} />
         <Route path="/apply" element={<ApplyLoanStep1 />} />
         <Route path="/apply/step2" element={<ApplyLoanStep2 />} />
-        <Route path="/payment-options/:id" element={<PaymentOptions />} />
-        <Route path="/payment/:id" element={<Payment />} />
+        <Route path="/loan/:id/pay"         element={<PaymentOptions />} />
+        <Route path="/loan/:id/pay/confirm" element={<Payment />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/inbox" element={<Inbox />} />
         <Route path="/transactions" element={<Transactions />} />
