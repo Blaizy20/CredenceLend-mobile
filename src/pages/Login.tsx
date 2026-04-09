@@ -40,12 +40,13 @@ export default function Login() {
       const result = await authAPI.login(trimmedUsername, trimmedPassword);
 
       if (result.success && result.customer) {
-        // Store customer in localStorage — same key as before so other pages still work
         localStorage.setItem('user', JSON.stringify(result.customer));
         navigate('/dashboard', { replace: true });
+      } else {
+        localStorage.removeItem('user');
+        setError(result.message || 'Invalid username or password.');
       }
     } catch (err: any) {
-      // authAPI throws with the server's message (e.g. "Invalid credentials")
       localStorage.removeItem('user');
       setError(err.message || 'Invalid username or password.');
     } finally {
@@ -84,9 +85,13 @@ export default function Login() {
 
           <form className="space-y-6" onSubmit={handleLogin}>
             {error && (
-              <div className="p-4 bg-error/10 border border-error/20 rounded-xl text-error text-xs font-bold text-center">
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="p-4 bg-error/10 border border-error/20 rounded-xl text-error text-xs font-bold text-center"
+              >
                 {error}
-              </div>
+              </motion.div>
             )}
             <Input 
               label="USERNAME" 
@@ -107,7 +112,10 @@ export default function Login() {
               type={showPassword ? "text" : "password"}
               icon={<Lock size={20} />} 
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                if (error) setError('');
+              }}
               required
             />
 
