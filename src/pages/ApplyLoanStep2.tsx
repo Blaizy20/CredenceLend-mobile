@@ -494,7 +494,7 @@ export default function ApplyLoanStep2() {
                     Go to Dashboard
                   </button>
                   <button
-                    onClick={() => navigate('/loans', { replace: true })}
+                    onClick={() => navigate('/dashboard', { replace: true })}
                     className="w-full py-4 rounded-full bg-surface-container-highest text-on-surface font-bold text-sm active:scale-95 transition-transform"
                   >
                     View My Loans
