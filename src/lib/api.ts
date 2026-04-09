@@ -74,4 +74,32 @@ export const loansAPI = {
     const res = await fetch(`${BASE}/api/transactions/${customerId}`);
     return res.json();
   },
+
+  applyLoan: async (data: {
+    customer_id: number;
+    tenant_id: number;
+    principal_amount: number;
+    payment_term: string;
+    interest_rate: number;
+    term_months: number;
+    id_type: string;
+    collateral_type: string;
+    co_maker: {
+      first_name: string;
+      last_name: string;
+      contact_no: string;
+      email: string;
+      province: string;
+      city: string;
+      barangay: string;
+      street: string;
+    };
+  }) => {
+    const res = await fetch(`${BASE}/api/loans/apply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    return res.json();
+  },
 };

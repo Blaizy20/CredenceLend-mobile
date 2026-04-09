@@ -1,287 +1,251 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ArrowRight, BadgeCheck, CreditCard, PenTool, Upload } from 'lucide-react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
-import { motion } from 'motion/react';
+import { loansAPI } from '../lib/api';
 
+interface CoMakerForm {
+  first_name: string;
+  last_name: string;
+  contact_no: string;
+  email: string;
+  province: string;
+  city: string;
+  barangay: string;
+  street: string;
+}
 
 export default function ApplyLoanStep2() {
   const navigate = useNavigate();
-  // Load saved data if present
-  const saved = localStorage.getItem('loanApplicationStep2');
-  const [formData, setFormData] = useState(() => saved ? JSON.parse(saved) : {
-    firstName: '',
-    lastName: '',
-    contactNo: '',
+  const location = useLocation();
+  const step1 = location.state?.step1;
+
+  // Redirect back if Step 1 data is missing
+  React.useEffect(() => {
+    if (!step1) navigate('/apply', { replace: true });
+  }, [step1]);
+
+  const [formData, setFormData] = useState<CoMakerForm>({
+    first_name: '',
+    last_name: '',
+    contact_no: '',
     email: '',
     province: '',
     city: '',
     barangay: '',
     street: '',
   });
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  // File uploads for co-maker
-  const [files, setFiles] = useState<{ idFront?: string; idBack?: string; signatures?: string }>({});
 
-  // File upload handler
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, field: 'idFront' | 'idBack' | 'signatures') => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      setFiles(prev => {
-        const updated = { ...prev, [field]: ev.target?.result as string };
-        // Save to localStorage for persistence
-        localStorage.setItem('coMakerFiles', JSON.stringify(updated));
-        return updated;
-      });
-    };
-    reader.readAsDataURL(file);
-  };
+  const [errors, setErrors]     = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
 
-  // Load files from localStorage on mount
-  React.useEffect(() => {
-    try {
-      const stored = localStorage.getItem('coMakerFiles');
-      if (stored) setFiles(JSON.parse(stored));
-    } catch {}
-  }, []);
-
-  const handleInputChange = (field: string, value: string) => {
-    setFormData(prev => {
-      const updated = { ...prev, [field]: value };
-      localStorage.setItem('loanApplicationStep2', JSON.stringify(updated));
-      return updated;
-    });
-    if (errors[field]) {
-      setErrors(prev => ({ ...prev, [field]: '' }));
-    }
+  const handleChange = (field: keyof CoMakerForm, value: string) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+    if (errors[field]) setErrors(prev => ({ ...prev, [field]: '' }));
+    if (submitError) setSubmitError('');
   };
 
   const validate = () => {
     const newErrors: Record<string, string> = {};
-    if (!formData.firstName) newErrors.firstName = 'First name is required';
-    if (!formData.lastName) newErrors.lastName = 'Last name is required';
-    if (!formData.contactNo) newErrors.contactNo = 'Contact number is required';
-    // Email is optional, remove if not needed
-    // if (!formData.email) newErrors.email = 'Email is required';
-    if (!formData.province) newErrors.province = 'Province is required';
-    if (!formData.city) newErrors.city = 'City is required';
-    if (!formData.barangay) newErrors.barangay = 'Barangay is required';
-    if (!formData.street) newErrors.street = 'Street is required';
+    if (!formData.first_name.trim()) newErrors.first_name = 'First name is required.';
+    if (!formData.last_name.trim())  newErrors.last_name  = 'Last name is required.';
+    if (!formData.contact_no.trim()) newErrors.contact_no = 'Contact number is required.';
+    else if (!/^09\d{9}$/.test(formData.contact_no))
+      newErrors.contact_no = 'Please enter a valid PH number (09XXXXXXXXX).';
+    if (!formData.province.trim()) newErrors.province = 'Province is required.';
+    if (!formData.city.trim())     newErrors.city     = 'City is required.';
+    if (!formData.barangay.trim()) newErrors.barangay = 'Barangay is required.';
+    if (!formData.street.trim())   newErrors.street   = 'Street is required.';
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = () => {
-    if (!validate()) return;
-    const loanData = JSON.parse(localStorage.getItem('loanApplicationData') || '{}');
-    const userData = JSON.parse(localStorage.getItem('user') || '{}');
+  const handleSubmit = async () => {
+    if (!validate() || !step1) return;
 
-    // Parse term to get interest and installments
-    let interest = 3.5;
-    let installments = 12;
-    const termStr = loanData.term || '';
-
-    if (termStr.includes('Daily')) {
-      interest = 2.75;
-      installments = 30;
-    } else if (termStr.includes('Weekly')) {
-      interest = 3.0;
-      installments = 12;
-    } else if (termStr.includes('Semi-monthly')) {
-      interest = 3.5;
-      installments = 24;
-    } else if (termStr.includes('Monthly')) {
-      interest = 4.0;
-      installments = 12;
+    let user: any = null;
+    try { user = JSON.parse(localStorage.getItem('user') || 'null'); } catch {}
+    if (!user?.customer_id) {
+      navigate('/login', { replace: true });
+      return;
     }
 
-    // Save application to localStorage (or db.json if you want to use it as a mock DB)
-    const application = {
-      id: 'APP-' + Date.now(),
-      username: userData.username,
-      amount: loanData.amount,
-      term: loanData.term,
-      interest: interest,
-      installments: installments,
-      coMaker: formData,
-      coMakerFiles: files,
-      status: 'Pending',
-      submittedAt: new Date().toISOString(),
-    };
-    let applications = [];
+    setSubmitting(true);
+    setSubmitError('');
+
     try {
-      applications = JSON.parse(localStorage.getItem('applications') || '[]');
-    } catch {}
-    applications.push(application);
-    localStorage.setItem('applications', JSON.stringify(applications));
-    localStorage.removeItem('loanApplicationData');
-    localStorage.removeItem('loanApplicationStep2');
-    navigate('/dashboard');
+      const result = await loansAPI.applyLoan({
+        customer_id:     user.customer_id,
+        tenant_id:       user.tenant_id ?? 1,
+        principal_amount: step1.principal_amount,
+        payment_term:    step1.payment_term,
+        interest_rate:   step1.interest_rate,
+        term_months:     step1.term_months,
+        id_type:         step1.id_type,
+        collateral_type: step1.collateral_type,
+        co_maker:        formData,
+      });
+
+      if (!result.success) {
+        setSubmitError(result.message || 'Submission failed. Please try again.');
+        return;
+      }
+
+      navigate('/dashboard', { replace: true });
+    } catch {
+      setSubmitError('An unexpected error occurred. Please check your connection and try again.');
+    } finally {
+      setSubmitting(false);
+    }
   };
+
+  if (!step1) return null;
 
   return (
     <div className="min-h-screen bg-background pb-12">
       <TopBar title="Co-maker Details" />
-      
+
       <main className="pt-24 px-6 max-w-md mx-auto">
+        {/* Progress */}
         <div className="mb-8">
           <div className="flex justify-between items-end mb-2">
-            <span className="font-headline font-extrabold text-2xl tracking-tight text-on-surface">Step 2 <span className="text-primary/60 text-lg font-medium">of 2</span></span>
-            <span className="font-body text-xs uppercase tracking-widest text-primary font-bold">Verification</span>
+            <span className="font-headline font-extrabold text-2xl tracking-tight text-on-surface">
+              Step 2 <span className="text-primary/60 text-lg font-medium">of 2</span>
+            </span>
+            <span className="font-body text-xs uppercase tracking-widest text-primary font-bold">
+              Co-maker
+            </span>
           </div>
           <div className="h-1.5 w-full bg-surface-container-highest rounded-full overflow-hidden">
-            <div className="h-full w-full bg-gradient-to-r from-primary-dim to-primary step-progress-glow"></div>
+            <div className="h-full w-full bg-primary rounded-full" />
           </div>
         </div>
 
+        {/* Loan Summary */}
+        <div className="mb-8 p-4 bg-surface-container-high rounded-xl space-y-1 border border-outline-variant/10">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-2">
+            Loan Summary
+          </p>
+          <div className="flex justify-between text-sm">
+            <span className="text-on-surface-variant">Amount</span>
+            <span className="font-bold text-on-surface">
+              ₱{Number(step1.principal_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            </span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-on-surface-variant">Term</span>
+            <span className="font-bold text-on-surface">{step1.payment_term}</span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-on-surface-variant">Interest Rate</span>
+            <span className="font-bold text-primary">{step1.interest_rate}%</span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-on-surface-variant">Collateral</span>
+            <span className="font-bold text-on-surface">{step1.collateral_type}</span>
+          </div>
+        </div>
+
+        {/* Personal Info */}
         <section className="space-y-6 mb-10">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="w-1 h-6 bg-primary rounded-full"></div>
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-1 h-6 bg-primary rounded-full" />
             <h2 className="font-headline font-bold text-lg text-on-surface">Personal Info</h2>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <Input 
-              label="First Name" 
-              placeholder="John" 
-              value={formData.firstName}
-              onChange={(e) => handleInputChange('firstName', e.target.value)}
-              error={errors.firstName}
+            <Input
+              label="First Name"
+              placeholder="Juan"
+              value={formData.first_name}
+              onChange={(e) => handleChange('first_name', e.target.value)}
+              error={errors.first_name}
             />
-            <Input 
-              label="Last Name" 
-              placeholder="Doe" 
-              value={formData.lastName}
-              onChange={(e) => handleInputChange('lastName', e.target.value)}
-              error={errors.lastName}
+            <Input
+              label="Last Name"
+              placeholder="Dela Cruz"
+              value={formData.last_name}
+              onChange={(e) => handleChange('last_name', e.target.value)}
+              error={errors.last_name}
             />
           </div>
-          <Input 
-            label="Contact No." 
-            placeholder="912 345 6789" 
-            icon={<span className="text-primary font-medium">+63</span>} 
-            value={formData.contactNo}
-            onChange={(e) => handleInputChange('contactNo', e.target.value)}
-            error={errors.contactNo}
+          <Input
+            label="Contact No."
+            placeholder="09XXXXXXXXX"
+            value={formData.contact_no}
+            onChange={(e) => handleChange('contact_no', e.target.value)}
+            error={errors.contact_no}
           />
-          <Input 
-            label="Email Address" 
-            placeholder="john.doe@example.com" 
-            type="email" 
+          <Input
+            label="Email Address (Optional)"
+            placeholder="juan@example.com"
+            type="email"
             value={formData.email}
-            onChange={(e) => handleInputChange('email', e.target.value)}
+            onChange={(e) => handleChange('email', e.target.value)}
             error={errors.email}
           />
         </section>
 
+        {/* Address */}
         <section className="space-y-6 mb-10">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="w-1 h-6 bg-primary rounded-full"></div>
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-1 h-6 bg-primary rounded-full" />
             <h2 className="font-headline font-bold text-lg text-on-surface">Address</h2>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <Input 
-              label="Province" 
-              placeholder="Enter Province" 
+            <Input
+              label="Province"
+              placeholder="Enter Province"
               value={formData.province}
-              onChange={(e) => handleInputChange('province', e.target.value)}
+              onChange={(e) => handleChange('province', e.target.value)}
               error={errors.province}
             />
-            <Input 
-              label="City" 
-              placeholder="Enter City" 
+            <Input
+              label="City"
+              placeholder="Enter City"
               value={formData.city}
-              onChange={(e) => handleInputChange('city', e.target.value)}
+              onChange={(e) => handleChange('city', e.target.value)}
               error={errors.city}
             />
           </div>
-          <Input 
-            label="Barangay" 
-            placeholder="Brgy. San Jose" 
+          <Input
+            label="Barangay"
+            placeholder="Brgy. San Jose"
             value={formData.barangay}
-            onChange={(e) => handleInputChange('barangay', e.target.value)}
+            onChange={(e) => handleChange('barangay', e.target.value)}
             error={errors.barangay}
           />
-          <Input 
-            label="Street" 
-            placeholder="House No, Building, Street Name" 
+          <Input
+            label="Street"
+            placeholder="House No., Building, Street Name"
             value={formData.street}
-            onChange={(e) => handleInputChange('street', e.target.value)}
+            onChange={(e) => handleChange('street', e.target.value)}
             error={errors.street}
           />
         </section>
 
-        <section className="space-y-6">
-          <div className="flex items-center gap-2 mb-4">
-            <div className="w-1 h-6 bg-primary rounded-full"></div>
-            <h2 className="font-headline font-bold text-lg text-on-surface">Identification</h2>
+        {/* Error */}
+        {submitError && (
+          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-xl">
+            <p className="text-red-500 text-sm font-medium">{submitError}</p>
           </div>
-          
-          <div className="space-y-4">
-            {/* Valid ID (Front) */}
-            <div className="flex items-center justify-between p-4 bg-surface-container-low rounded-xl border border-white/5">
-              <div className="flex items-center gap-3">
-                <BadgeCheck className="text-primary" size={20} />
-                <span className="text-sm font-medium">Valid ID (Front)</span>
-              </div>
-              <div className="flex flex-col items-end">
-                <input type="file" accept="image/*" style={{ display: 'none' }} id="idFrontUploadCoMaker" onChange={e => handleFileChange(e, 'idFront')} />
-                <label htmlFor="idFrontUploadCoMaker" className="bg-primary text-on-primary-container text-[10px] font-bold px-4 py-2 rounded-lg uppercase tracking-wider shadow-lg shadow-primary/20 cursor-pointer mb-1">CHOOSE FILE</label>
-                {files.idFront ? (
-                  <img src={files.idFront} alt="ID Front Preview" className="w-14 h-10 object-contain rounded border border-green-200" />
-                ) : (
-                  <span className="text-xs text-outline">No file selected</span>
-                )}
-              </div>
-            </div>
-            {/* Valid ID (Back) */}
-            <div className="flex items-center justify-between p-4 bg-surface-container-low rounded-xl border border-white/5">
-              <div className="flex items-center gap-3">
-                <CreditCard className="text-primary" size={20} />
-                <span className="text-sm font-medium">Valid ID (Back)</span>
-              </div>
-              <div className="flex flex-col items-end">
-                <input type="file" accept="image/*" style={{ display: 'none' }} id="idBackUploadCoMaker" onChange={e => handleFileChange(e, 'idBack')} />
-                <label htmlFor="idBackUploadCoMaker" className="bg-primary text-on-primary-container text-[10px] font-bold px-4 py-2 rounded-lg uppercase tracking-wider shadow-lg shadow-primary/20 cursor-pointer mb-1">CHOOSE FILE</label>
-                {files.idBack ? (
-                  <img src={files.idBack} alt="ID Back Preview" className="w-14 h-10 object-contain rounded border border-green-200" />
-                ) : (
-                  <span className="text-xs text-outline">No file selected</span>
-                )}
-              </div>
-            </div>
-            {/* 3 Specimen Signatures */}
-            <div className="flex items-center justify-between p-4 bg-surface-container-low rounded-xl border border-white/5">
-              <div className="flex items-center gap-3">
-                <PenTool className="text-primary" size={20} />
-                <span className="text-sm font-medium">3 Specimen Signatures</span>
-              </div>
-              <div className="flex flex-col items-end">
-                <input type="file" accept="image/*" style={{ display: 'none' }} id="signaturesUploadCoMaker" onChange={e => handleFileChange(e, 'signatures')} />
-                <label htmlFor="signaturesUploadCoMaker" className="bg-primary text-on-primary-container text-[10px] font-bold px-4 py-2 rounded-lg uppercase tracking-wider shadow-lg shadow-primary/20 cursor-pointer mb-1">CHOOSE FILE</label>
-                {files.signatures ? (
-                  <img src={files.signatures} alt="Signatures Preview" className="w-14 h-10 object-contain rounded border border-green-200" />
-                ) : (
-                  <span className="text-xs text-outline">No file selected</span>
-                )}
-              </div>
-            </div>
-          </div>
-        </section>
+        )}
 
-        <footer className="mt-12 mb-8 space-y-6">
-          <Button onClick={handleSubmit}>
-            SUBMIT APPLICATION
+        {/* Submit */}
+        <footer className="mt-4 mb-8 space-y-4">
+          <Button onClick={handleSubmit} disabled={submitting}>
+            {submitting ? 'Submitting...' : 'SUBMIT APPLICATION'}
           </Button>
-          {/* Removed Back to Step 1 button as requested */}
-          <div className="flex flex-col items-center gap-1">
-            <button onClick={() => navigate('/dashboard')} className="text-on-surface-variant hover:text-primary transition-colors text-sm font-medium">
-              Back to Dashboard
+          <div className="flex flex-col items-center">
+            <button
+              onClick={() => navigate('/apply')}
+              className="text-on-surface-variant hover:text-primary transition-colors text-sm font-medium"
+              disabled={submitting}
+            >
+              Back to Step 1
             </button>
-            <div className="w-12 h-1 bg-surface-container-highest rounded-full mt-2"></div>
+            <div className="w-12 h-1 bg-surface-container-highest rounded-full mt-2" />
           </div>
         </footer>
       </main>

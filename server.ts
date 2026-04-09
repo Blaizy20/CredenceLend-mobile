@@ -50,6 +50,13 @@ function getNextCustomerNo(lastCustomerNo: string | null, year: number) {
   return `CUST-${year}-${String(lastSeq + 1).padStart(4, "0")}`;
 }
 
+function getNextReferenceNo(lastRef: string | null, year: number) {
+  if (!lastRef) return `LOAN-${year}-0001`;
+  const parts = lastRef.split("-");
+  const lastSeq = Number(parts[2] || 0);
+  return `LOAN-${year}-${String(lastSeq + 1).padStart(4, "0")}`;
+}
+
 async function startServer() {
   const app = express();
 
@@ -203,13 +210,13 @@ async function startServer() {
           message: "All fields are required. Please complete the registration form.",
         });
 
-      if (!/^09\d{9}$/.test(contact_no))  // 👈 fixed regex (was \\d)
+      if (!/^09\d{9}$/.test(contact_no))
         return res.status(400).json({
           success: false,
           message: "Please enter a valid Philippine mobile number (e.g. 09XXXXXXXXX).",
         });
 
-      if (!/\S+@\S+\.\S+/.test(email))    // 👈 fixed regex (was \\S)
+      if (!/\S+@\S+\.\S+/.test(email))
         return res.status(400).json({
           success: false,
           message: "Please enter a valid email address.",
@@ -359,7 +366,7 @@ async function startServer() {
     }
   });
 
-  // ── Loans ─────────────────────────────────────────────────────────────────
+  // ── Loans: List by Customer ───────────────────────────────────────────────
   app.get("/api/loans/:customerId", async (req, res) => {
     try {
       const [rows] = await pool.query<RowDataPacket[]>(
@@ -378,6 +385,7 @@ async function startServer() {
     }
   });
 
+  // ── Loans: Single Loan ────────────────────────────────────────────────────
   app.get("/api/loan/:loanId", async (req, res) => {
     try {
       const [rows] = await pool.query<RowDataPacket[]>(
@@ -396,6 +404,116 @@ async function startServer() {
     } catch (err: any) {
       console.error("Loan error:", err.message);
       res.status(500).json({ success: false, message: "Unable to retrieve loan details. Please try again." });
+    }
+  });
+
+  // ── Loans: Apply ──────────────────────────────────────────────────────────
+  app.post("/api/loans/apply", async (req, res) => {
+    try {
+      const {
+        customer_id,
+        tenant_id,
+        principal_amount,
+        payment_term,
+        interest_rate,
+        term_months,
+        id_type,
+        collateral_type,
+        co_maker,
+      } = req.body;
+
+      if (!customer_id || !principal_amount || !payment_term || !collateral_type)
+        return res.status(400).json({
+          success: false,
+          message: "Please complete all required fields.",
+        });
+
+      const amount = Number(principal_amount);
+      if (isNaN(amount) || amount < 1000 || amount > 500000)
+        return res.status(400).json({
+          success: false,
+          message: "Loan amount must be between ₱1,000 and ₱500,000.",
+        });
+
+      // Generate reference number
+      const year = new Date().getFullYear();
+      const [lastLoanRows] = await pool.query<RowDataPacket[]>(
+        `SELECT reference_no FROM loans
+         WHERE reference_no LIKE ?
+         ORDER BY loan_id DESC LIMIT 1`,
+        [`LOAN-${year}-%`]
+      );
+      const lastRef = lastLoanRows.length > 0
+        ? String(lastLoanRows[0].reference_no)
+        : null;
+      const reference_no = getNextReferenceNo(lastRef, year);
+
+      // Calculate total payable
+      const rate     = Number(interest_rate) || 0;
+      const months   = Number(term_months)   || 1;
+      const total_payable = Number(
+        (amount + (amount * (rate / 100) * months)).toFixed(2)
+      );
+
+      // Insert loan
+      const [loanResult] = await pool.query<ResultSetHeader>(
+        `INSERT INTO loans
+          (tenant_id, customer_id, reference_no, principal_amount, interest_rate,
+           payment_term, term_months, total_payable, remaining_balance,
+           id_type, collateral_type, status, is_active)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', 1)`,
+        [
+          tenant_id ?? DEFAULT_TENANT_ID,
+          customer_id,
+          reference_no,
+          amount,
+          rate,
+          payment_term,
+          months,
+          total_payable,
+          total_payable,
+          id_type    ?? null,
+          collateral_type,
+        ]
+      );
+
+      const loan_id = loanResult.insertId;
+
+      // Insert co-maker if provided
+      if (co_maker?.first_name && co_maker?.last_name) {
+        await pool.query(
+          `INSERT INTO co_makers
+            (loan_id, customer_id, first_name, last_name, contact_no,
+             email, province, city, barangay, street)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            loan_id,
+            customer_id,
+            String(co_maker.first_name).trim(),
+            String(co_maker.last_name).trim(),
+            co_maker.contact_no  || null,
+            co_maker.email       || null,
+            co_maker.province    || null,
+            co_maker.city        || null,
+            co_maker.barangay    || null,
+            co_maker.street      || null,
+          ]
+        );
+      }
+
+      res.status(201).json({
+        success: true,
+        message: "Your loan application has been submitted successfully.",
+        loan: { loan_id, reference_no, total_payable, status: "Pending" },
+      });
+    } catch (err: any) {
+      console.error("Loan apply error:", err);
+      res.status(500).json({
+        success: false,
+        message: "An unexpected error occurred while submitting your application. Please try again.",
+        error: err.message,
+        code: err.code,
+      });
     }
   });
 
