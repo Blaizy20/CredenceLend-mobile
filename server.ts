@@ -128,6 +128,42 @@ async function startServer() {
     }
   });
 
+  // ── Email helper ──────────────────────────────────────────────────────────
+  async function sendOtpEmail(toEmail: string, otp: string): Promise<void> {
+    const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+      method: "POST",
+      headers: {
+        "accept":       "application/json",
+        "api-key":      process.env.BREVO_API_KEY ?? "",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        sender: {
+          name:  process.env.BREVO_SENDER_NAME  ?? "Loan Manager",
+          email: process.env.BREVO_SENDER_EMAIL ?? "",
+        },
+        to: [{ email: toEmail }],
+        subject: "Your Verification Code",
+        htmlContent: `
+          <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px;background:#f9f9f9;border-radius:12px;">
+            <h2 style="color:#01696f;margin-bottom:8px;">Verification Code</h2>
+            <p style="color:#555;margin-bottom:24px;">Use the code below to verify your identity. It expires in <strong>10 minutes</strong>.</p>
+            <div style="background:#fff;border:2px solid #01696f;border-radius:8px;padding:24px;text-align:center;margin-bottom:24px;">
+              <span style="font-size:40px;font-weight:900;letter-spacing:12px;color:#01696f;">${otp}</span>
+            </div>
+            <p style="color:#999;font-size:12px;">If you did not request this, please ignore this email.</p>
+          </div>
+        `,
+      }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.error("Brevo send error:", err);
+      throw new Error(`Brevo API error: ${res.status}`);
+    }
+  }
+
   // ── Auth: Send OTP ────────────────────────────────────────────────────────
   app.post("/api/auth/send-otp", async (req, res) => {
     try {
@@ -145,7 +181,7 @@ async function startServer() {
           message: "No account is associated with this email address.",
         });
 
-      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const otp       = Math.floor(100000 + Math.random() * 900000).toString();
       const expiresAt = Date.now() + 10 * 60 * 1000;
 
       await pool.query(
@@ -153,11 +189,17 @@ async function startServer() {
         [email, otp, expiresAt]
       );
 
-      console.log(`[OTP] ${email} → ${otp}`);
+      // Send via Brevo — if it fails, don't save OTP
+      await sendOtpEmail(email, otp);
+
+      console.log(`[OTP] Sent to ${email}`);
       res.json({ success: true, message: "A verification code has been sent to your email." });
     } catch (err: any) {
       console.error("Send OTP error:", err.message);
-      res.status(500).json({ success: false, message: "An unexpected error occurred. Please try again." });
+      res.status(500).json({
+        success: false,
+        message: "Failed to send verification code. Please try again.",
+      });
     }
   });
 
