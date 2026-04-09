@@ -1,11 +1,26 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { User, MapPin, Fingerprint, CheckCircle, Loader2 } from 'lucide-react';
+import { User, MapPin, Fingerprint, CheckCircle, Loader2, CheckCircle2, ArrowRight } from 'lucide-react';
 import { TopBar } from '../components/TopBar';
 import { Button } from '../components/Button';
 import { Modal } from '../components/Modal';
 import { motion } from 'motion/react';
 
+function AutoRedirect({ onRedirect }: { onRedirect: () => void }) {
+  const [count, setCount] = useState(5);
+
+  useEffect(() => {
+    if (count <= 0) { onRedirect(); return; }
+    const t = setTimeout(() => setCount(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [count, onRedirect]);
+
+  return (
+    <p className="text-on-surface-variant text-xs mb-4">
+      Redirecting to login in <span className="text-primary font-bold">{count}s</span>...
+    </p>
+  );
+}
 
 export default function RegisterStep4() {
   const navigate = useNavigate();
@@ -15,6 +30,7 @@ export default function RegisterStep4() {
   const [showPrivacy, setShowPrivacy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [done, setDone] = useState(false);
 
   useEffect(() => {
     const savedData = localStorage.getItem('registerData');
@@ -76,7 +92,7 @@ export default function RegisterStep4() {
       }
 
       localStorage.removeItem('registerData');
-      navigate('/login', { replace: true });
+      setDone(true); // ← show success screen instead of navigating directly
 
     } catch (err: any) {
       setError('Registration failed. Please try again.');
@@ -84,6 +100,50 @@ export default function RegisterStep4() {
       setLoading(false);
     }
   };
+
+  // ── Success Screen ────────────────────────────────────────────────────────
+  if (done) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="w-full max-w-md bg-surface-container-low rounded-[2rem] p-8 shadow-2xl border-t border-white/5 text-center"
+        >
+          <motion.div
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            transition={{ type: 'spring', delay: 0.1, stiffness: 200 }}
+            className="inline-flex items-center justify-center w-24 h-24 rounded-full bg-primary/10 text-primary mb-6 mx-auto"
+          >
+            <CheckCircle2 size={52} />
+          </motion.div>
+
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+          >
+            <h2 className="font-headline font-bold text-2xl text-on-surface mb-2">
+              Welcome aboard! 🎉
+            </h2>
+            <p className="text-on-surface-variant text-sm mb-2">
+              Your account has been successfully created.
+            </p>
+            <p className="text-on-surface-variant text-sm mb-8">
+              You can now log in using your registered credentials.
+            </p>
+          </motion.div>
+
+          <AutoRedirect onRedirect={() => navigate('/login', { replace: true })} />
+
+          <Button onClick={() => navigate('/login', { replace: true })}>
+            Go to Login <ArrowRight size={20} />
+          </Button>
+        </motion.div>
+      </div>
+    );
+  }
 
   if (!data) return null;
 

@@ -1,26 +1,27 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { BadgeCheck, CreditCard, PenTool } from 'lucide-react';
+import { BadgeCheck, CreditCard, PenTool, AlertTriangle, CheckCircle2, User, MapPin, FileText } from 'lucide-react';
 import { TopBar } from '../components/TopBar';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { loansAPI } from '../lib/api';
+import { motion, AnimatePresence } from 'motion/react';
 
 interface CoMakerForm {
   first_name: string;
-  last_name: string;
+  last_name:  string;
   contact_no: string;
-  email: string;
-  province: string;
-  city: string;
-  barangay: string;
-  street: string;
+  email:      string;
+  province:   string;
+  city:       string;
+  barangay:   string;
+  street:     string;
 }
 
 export default function ApplyLoanStep2() {
-  const navigate  = useNavigate();
-  const location  = useLocation();
-  const step1     = location.state?.step1;
+  const navigate = useNavigate();
+  const location = useLocation();
+  const step1    = location.state?.step1;
 
   React.useEffect(() => {
     if (!step1) navigate('/apply', { replace: true });
@@ -37,21 +38,19 @@ export default function ApplyLoanStep2() {
     street:     '',
   });
 
-  const [files, setFiles]           = useState<Record<string, string>>({});
-  const [errors, setErrors]         = useState<Record<string, string>>({});
-  const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState('');
+  const [files, setFiles]                   = useState<Record<string, string>>({});
+  const [errors, setErrors]                 = useState<Record<string, string>>({});
+  const [submitting, setSubmitting]         = useState(false);
+  const [submitError, setSubmitError]       = useState('');
+  const [showConfirm, setShowConfirm]       = useState(false);
 
   const handleChange = (field: keyof CoMakerForm, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
-    if (errors[field]) setErrors(prev => ({ ...prev, [field]: '' }));
-    if (submitError)   setSubmitError('');
+    if (errors[field])  setErrors(prev => ({ ...prev, [field]: '' }));
+    if (submitError)    setSubmitError('');
   };
 
-  const handleFileChange = (
-    e: React.ChangeEvent<HTMLInputElement>,
-    field: string
-  ) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, field: string) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) {
@@ -81,8 +80,14 @@ export default function ApplyLoanStep2() {
     return Object.keys(newErrors).length === 0;
   };
 
+  // Opens confirmation modal only if form is valid
+  const handleReview = () => {
+    if (!validate()) return;
+    setShowConfirm(true);
+  };
+
   const handleSubmit = async () => {
-    if (!validate() || !step1) return;
+    if (!step1) return;
 
     let user: any = null;
     try { user = JSON.parse(localStorage.getItem('user') || 'null'); } catch {}
@@ -93,6 +98,7 @@ export default function ApplyLoanStep2() {
 
     setSubmitting(true);
     setSubmitError('');
+    setShowConfirm(false);
 
     try {
       const result = await loansAPI.applyLoan({
@@ -127,6 +133,11 @@ export default function ApplyLoanStep2() {
     { key: 'idBack',     label: 'Valid ID (Back)',        icon: <CreditCard className="text-primary" size={20} /> },
     { key: 'signatures', label: '3 Specimen Signatures', icon: <PenTool    className="text-primary" size={20} /> },
   ];
+
+  // Computed monthly payment estimate for the overview
+  const monthlyPayment = step1.term_months > 0
+    ? ((step1.principal_amount * (1 + step1.interest_rate / 100)) / step1.term_months)
+    : 0;
 
   return (
     <div className="min-h-screen bg-background pb-12">
@@ -294,8 +305,8 @@ export default function ApplyLoanStep2() {
 
         {/* Footer */}
         <footer className="mt-4 mb-8 space-y-4">
-          <Button onClick={handleSubmit} disabled={submitting}>
-            {submitting ? 'Submitting...' : 'SUBMIT APPLICATION'}
+          <Button onClick={handleReview} disabled={submitting}>
+            {submitting ? 'Submitting...' : 'REVIEW & SUBMIT'}
           </Button>
           <div className="flex flex-col items-center">
             <button
@@ -309,6 +320,148 @@ export default function ApplyLoanStep2() {
           </div>
         </footer>
       </main>
+
+      {/* ── Confirmation Bottom Sheet ───────────────────────────────────────── */}
+      <AnimatePresence>
+        {showConfirm && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowConfirm(false)}
+              className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
+            />
+
+            {/* Sheet */}
+            <motion.div
+              initial={{ opacity: 0, y: 80 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 80 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+              className="fixed bottom-0 left-0 right-0 z-50 bg-surface-container-low rounded-t-[2rem] shadow-2xl border-t border-white/5 max-w-md mx-auto max-h-[85vh] overflow-y-auto"
+            >
+              <div className="p-6">
+                {/* Handle */}
+                <div className="w-10 h-1 bg-outline/30 rounded-full mx-auto mb-6" />
+
+                {/* Header */}
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                    <FileText size={24} />
+                  </div>
+                  <div>
+                    <h3 className="font-headline font-bold text-xl text-on-surface">Application Overview</h3>
+                    <p className="text-on-surface-variant text-xs">Please review before submitting</p>
+                  </div>
+                </div>
+
+                {/* Loan Details */}
+                <div className="mb-5 p-4 bg-primary/5 border border-primary/10 rounded-2xl space-y-3">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-primary mb-3">Loan Details</p>
+
+                  <div className="flex justify-between text-sm">
+                    <span className="text-on-surface-variant">Principal Amount</span>
+                    <span className="font-bold text-on-surface text-base">
+                      ₱{Number(step1.principal_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-on-surface-variant">Payment Term</span>
+                    <span className="font-bold text-on-surface">{step1.payment_term}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-on-surface-variant">Interest Rate</span>
+                    <span className="font-bold text-primary">{step1.interest_rate}%</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-on-surface-variant">Duration</span>
+                    <span className="font-bold text-on-surface">{step1.term_months} months</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-on-surface-variant">ID Type</span>
+                    <span className="font-bold text-on-surface">{step1.id_type}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-on-surface-variant">Collateral</span>
+                    <span className="font-bold text-on-surface">{step1.collateral_type}</span>
+                  </div>
+
+                  {/* Divider */}
+                  <div className="border-t border-primary/10 my-1" />
+
+                  <div className="flex justify-between text-sm">
+                    <span className="text-on-surface-variant">Est. Monthly Payment</span>
+                    <span className="font-extrabold text-primary text-base">
+                      ₱{monthlyPayment.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Co-maker Details */}
+                <div className="mb-5 p-4 bg-surface-container-high rounded-2xl space-y-3">
+                  <div className="flex items-center gap-2 mb-3">
+                    <User size={14} className="text-on-surface-variant" />
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Co-maker</p>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-on-surface-variant">Full Name</span>
+                    <span className="font-bold text-on-surface">{formData.first_name} {formData.last_name}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-on-surface-variant">Contact No.</span>
+                    <span className="font-bold text-on-surface font-mono">{formData.contact_no}</span>
+                  </div>
+                  {formData.email && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-on-surface-variant">Email</span>
+                      <span className="font-bold text-on-surface">{formData.email}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Co-maker Address */}
+                <div className="mb-6 p-4 bg-surface-container-high rounded-2xl space-y-3">
+                  <div className="flex items-center gap-2 mb-3">
+                    <MapPin size={14} className="text-on-surface-variant" />
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Co-maker Address</p>
+                  </div>
+                  <p className="text-sm font-semibold text-on-surface leading-relaxed">
+                    {formData.street}, {formData.barangay}, {formData.city}, {formData.province}
+                  </p>
+                </div>
+
+                {/* Disclaimer */}
+                <div className="flex gap-3 p-3 bg-orange-500/5 border border-orange-500/10 rounded-xl mb-6">
+                  <AlertTriangle size={16} className="text-orange-500 shrink-0 mt-0.5" />
+                  <p className="text-xs text-on-surface-variant leading-relaxed">
+                    By submitting, you confirm that all provided information is accurate. Your application will be reviewed by the cooperative.
+                  </p>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex flex-col gap-3">
+                  <button
+                    onClick={handleSubmit}
+                    disabled={submitting}
+                    className="w-full py-4 rounded-full bg-primary text-on-primary font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-transform disabled:opacity-60"
+                  >
+                    <CheckCircle2 size={18} />
+                    {submitting ? 'Submitting...' : 'Confirm & Submit'}
+                  </button>
+                  <button
+                    onClick={() => setShowConfirm(false)}
+                    className="w-full py-4 rounded-full bg-surface-container-highest text-on-surface font-bold text-sm active:scale-95 transition-transform"
+                  >
+                    Go Back & Edit
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

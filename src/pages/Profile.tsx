@@ -1,13 +1,14 @@
 import { useNavigate } from 'react-router-dom';
 import React from 'react';
-import { User, Verified, MapPin, LogOut } from 'lucide-react';
+import { User, Verified, MapPin, LogOut, AlertTriangle } from 'lucide-react';
 import { TopBar } from '../components/TopBar';
 import { BottomNav } from '../components/BottomNav';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 
 export default function Profile() {
   const navigate = useNavigate();
   const [user, setUser] = React.useState<any>(null);
+  const [showLogoutModal, setShowLogoutModal] = React.useState(false);
 
   React.useEffect(() => {
     const storedUser = localStorage.getItem('user');
@@ -124,7 +125,7 @@ export default function Profile() {
         {/* Logout */}
         <section className="pt-6">
           <button
-            onClick={handleLogout}
+            onClick={() => setShowLogoutModal(true)}
             className="w-full flex items-center justify-center gap-2 py-4 px-6 rounded-full bg-secondary-container/10 border border-secondary-container/20 text-secondary hover:bg-secondary-container/20 transition-all duration-300 font-bold active:scale-95"
           >
             <LogOut size={20} />
@@ -135,6 +136,65 @@ export default function Profile() {
       </main>
 
       <BottomNav />
+
+      {/* Logout Confirmation Modal */}
+      <AnimatePresence>
+        {showLogoutModal && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowLogoutModal(false)}
+              className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
+            />
+
+            {/* Modal */}
+            <motion.div
+              initial={{ opacity: 0, y: 60, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 60, scale: 0.95 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+              className="fixed bottom-0 left-0 right-0 z-50 p-6 bg-surface-container-low rounded-t-[2rem] shadow-2xl border-t border-white/5 max-w-md mx-auto"
+            >
+              {/* Icon */}
+              <div className="flex justify-center mb-4">
+                <div className="w-14 h-14 rounded-full bg-error/10 flex items-center justify-center">
+                  <AlertTriangle className="text-error" size={28} />
+                </div>
+              </div>
+
+              {/* Text */}
+              <div className="text-center mb-8">
+                <h3 className="font-headline font-bold text-xl text-on-surface mb-2">
+                  Log out?
+                </h3>
+                <p className="text-on-surface-variant text-sm">
+                  You'll be returned to the login screen. Any unsaved progress will be lost.
+                </p>
+              </div>
+
+              {/* Buttons */}
+              <div className="flex flex-col gap-3">
+                <button
+                  onClick={handleLogout}
+                  className="w-full py-4 rounded-full bg-error text-white font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-transform"
+                >
+                  <LogOut size={18} />
+                  Yes, Log Me Out
+                </button>
+                <button
+                  onClick={() => setShowLogoutModal(false)}
+                  className="w-full py-4 rounded-full bg-surface-container-highest text-on-surface font-bold text-sm active:scale-95 transition-transform"
+                >
+                  Cancel
+                </button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
