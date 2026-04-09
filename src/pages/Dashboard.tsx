@@ -1,5 +1,5 @@
 import React from 'react';
-import { Wallet, ReceiptText } from 'lucide-react';
+import { Wallet, ReceiptText, ChevronDown } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
 import { BottomNav } from '../components/BottomNav';
@@ -63,7 +63,6 @@ export default function Dashboard() {
       const loanList = Array.isArray(data) ? data : [];
       setLoans(loanList);
 
-      // Case-insensitive active check
       const total = loanList
         .filter((l: Loan) => l.status?.toLowerCase() === 'active')
         .reduce((sum: number, l: Loan) => sum + Number(l.remaining_balance ?? 0), 0);
@@ -86,7 +85,10 @@ export default function Dashboard() {
     return 0;
   });
 
-  const displayedLoans = showAllLoans ? sortedLoans : sortedLoans.slice(0, 3);
+  const PREVIEW_COUNT = 3;
+  const hiddenCount = sortedLoans.length - PREVIEW_COUNT;
+  const hasMore = !showAllLoans && hiddenCount > 0;
+  const displayedLoans = showAllLoans ? sortedLoans : sortedLoans.slice(0, PREVIEW_COUNT);
 
   return (
     <div className="min-h-screen bg-background pb-32">
@@ -156,12 +158,21 @@ export default function Dashboard() {
         <section>
           <div className="flex justify-between items-center mb-6">
             <h4 className="font-headline text-xl font-bold text-on-surface">My Loans</h4>
-            {loans.length > 3 && (
+
+            {/* ── Count badge + View All ── */}
+            {loans.length > PREVIEW_COUNT && (
               <button
                 onClick={() => setShowAllLoans(!showAllLoans)}
-                className="text-primary text-xs font-bold uppercase tracking-widest"
+                className="flex items-center gap-1.5 text-primary text-xs font-bold uppercase tracking-widest"
               >
-                {showAllLoans ? 'Show Less' : 'View All'}
+                {showAllLoans ? 'Show Less' : (
+                  <>
+                    View All
+                    <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-primary text-on-primary text-[10px] font-extrabold">
+                      {loans.length}
+                    </span>
+                  </>
+                )}
               </button>
             )}
           </div>
@@ -178,40 +189,75 @@ export default function Dashboard() {
                 <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
               </div>
             ) : loans.length > 0 ? (
-              <div className="divide-y divide-outline-variant/10">
-                {displayedLoans.map((loan) => (
-                  <div
-                    key={loan.loan_id}
-                    className="px-6 py-5 hover:bg-surface-container-highest/10 transition-colors cursor-pointer"
-                    onClick={() => navigate(`/loan/${loan.loan_id}`)}
-                  >
-                    <div className="grid grid-cols-3 items-center mb-3">
-                      <span className="text-xs font-mono font-bold text-on-surface truncate pr-2">
-                        {loan.reference_no}
-                      </span>
-                      <div className="flex justify-center">
-                        <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-tighter ${getStatusStyle(loan.status)}`}>
-                          {loan.status}
+              <>
+                {/* ── Loan rows ── */}
+                <div className="divide-y divide-outline-variant/10">
+                  {displayedLoans.map((loan) => (
+                    <div
+                      key={loan.loan_id}
+                      className="px-6 py-5 hover:bg-surface-container-highest/10 transition-colors cursor-pointer"
+                      onClick={() => navigate(`/loan/${loan.loan_id}`)}
+                    >
+                      <div className="grid grid-cols-3 items-center mb-3">
+                        <span className="text-xs font-mono font-bold text-on-surface truncate pr-2">
+                          {loan.reference_no}
+                        </span>
+                        <div className="flex justify-center">
+                          <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-tighter ${getStatusStyle(loan.status)}`}>
+                            {loan.status}
+                          </span>
+                        </div>
+                        <span className="text-xs text-on-surface-variant text-right">
+                          {new Date(loan.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                         </span>
                       </div>
-                      <span className="text-xs text-on-surface-variant text-right">
-                        {new Date(loan.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                      </span>
+
+                      {loan.status?.toLowerCase() === 'active' && (
+                        <div className="flex gap-2 mt-2">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); navigate(`/loan/${loan.loan_id}`); }}
+                            className="flex-1 py-2 bg-primary/10 text-primary text-[10px] font-bold rounded-lg uppercase tracking-wider border border-primary/20 active:scale-95 transition-all"
+                          >
+                            View Loan
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {/* ── Fade-out hint when there are more loans ── */}
+                {hasMore && (
+                  <div className="relative">
+                    {/* Ghost row — blurred/faded preview */}
+                    <div className="px-6 py-5 opacity-30 pointer-events-none select-none">
+                      <div className="grid grid-cols-3 items-center">
+                        <div className="h-3 w-24 bg-on-surface/20 rounded-full" />
+                        <div className="flex justify-center">
+                          <div className="h-5 w-14 bg-on-surface/20 rounded-full" />
+                        </div>
+                        <div className="flex justify-end">
+                          <div className="h-3 w-10 bg-on-surface/20 rounded-full" />
+                        </div>
+                      </div>
                     </div>
 
-                    {loan.status?.toLowerCase() === 'active' && (
-                      <div className="flex gap-2 mt-2">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); navigate(`/loan/${loan.loan_id}`); }}
-                          className="flex-1 py-2 bg-primary/10 text-primary text-[10px] font-bold rounded-lg uppercase tracking-wider border border-primary/20 active:scale-95 transition-all"
-                        >
-                          View Loan
-                        </button>
-                      </div>
-                    )}
+                    {/* Gradient fade overlay */}
+                    <div className="absolute inset-0 bg-gradient-to-b from-transparent via-surface-container-low/80 to-surface-container-low pointer-events-none" />
+
+                    {/* "X more" pill button */}
+                    <div className="absolute bottom-3 left-0 right-0 flex justify-center">
+                      <button
+                        onClick={() => setShowAllLoans(true)}
+                        className="flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-surface-container-highest border border-outline-variant/20 text-primary text-[11px] font-bold shadow-lg active:scale-95 transition-transform"
+                      >
+                        <ChevronDown size={13} />
+                        {hiddenCount} more loan{hiddenCount > 1 ? 's' : ''}
+                      </button>
+                    </div>
                   </div>
-                ))}
-              </div>
+                )}
+              </>
             ) : (
               <div className="flex flex-col items-center justify-center py-24 px-8 text-center space-y-6">
                 <div className="w-24 h-24 bg-surface-container-highest/30 rounded-full flex items-center justify-center">
