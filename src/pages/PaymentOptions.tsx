@@ -1,31 +1,47 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronRight, DollarSign, CreditCard, Wallet, Loader2, AlertCircle } from 'lucide-react';
+import { ChevronRight, AlertCircle, Loader2 } from 'lucide-react';
 import { TopBar } from '../components/TopBar';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { motion } from 'motion/react';
 import { cn } from '@/src/lib/utils';
+import { loansAPI } from '../lib/api';
 
 export default function PaymentOptions() {
   const navigate = useNavigate();
-  const { id } = useParams();
-  const [loan, setLoan] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const { id }   = useParams();
+
+  const [loan, setLoan]         = useState<any>(null);
+  const [payments, setPayments] = useState<any[]>([]);
+  const [loading, setLoading]   = useState(true);
+  const [error, setError]       = useState('');
+
   const [selectedOption, setSelectedOption] = useState<'installment' | 'full' | 'custom'>('installment');
-  const [customAmount, setCustomAmount] = useState('');
-  const [error, setError] = useState('');
+  const [customAmount, setCustomAmount]     = useState('');
+  const [customError, setCustomError]       = useState('');
 
   useEffect(() => {
-    if (id) {
-      let allLoans = [];
+    if (!id) return;
+    const load = async () => {
       try {
-        allLoans = JSON.parse(localStorage.getItem('applications') || '[]');
-      } catch {}
-      const found = allLoans.find((l) => l.id === id);
-      setLoan(found || null);
-      setLoading(false);
-    }
+        const [loanData, paymentData] = await Promise.all([
+          loansAPI.getLoan(Number(id)),
+          loansAPI.getPayments(Number(id)),
+        ]);
+        if (!loanData || loanData.success === false) {
+          setError(loanData?.message || 'Loan not found.');
+          return;
+        }
+        setLoan(loanData);
+        setPayments(Array.isArray(paymentData) ? paymentData : []);
+      } catch {
+        setError('Unable to load loan details. Please try again.');
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
   }, [id]);
 
   if (loading) {
@@ -36,29 +52,34 @@ export default function PaymentOptions() {
     );
   }
 
-  if (!loan) {
+  if (error || !loan) {
     return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6 text-center">
-        <h2 className="text-2xl font-bold mb-4">Loan Not Found</h2>
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6 text-center space-y-4">
+        <AlertCircle className="text-red-500" size={40} />
+        <h2 className="text-xl font-bold text-on-surface">{error || 'Loan not found.'}</h2>
         <Button onClick={() => navigate('/dashboard')}>Back to Dashboard</Button>
       </div>
     );
   }
 
-  const rate = Number(loan.interest || 3.5) / 100;
-  const installments = Number(loan.installments || 12);
-  const totalAmountWithInterest = loan.totalAmount || (Number(loan.amount) + (Number(loan.amount) * rate * installments));
-  const installmentAmount = totalAmountWithInterest / installments;
-  const remainingBalance = Number(loan.balance || totalAmountWithInterest);
-  
-  // Calculate partial payment for the upcoming installment
-  const totalPaidAmount = totalAmountWithInterest - remainingBalance;
-  const partialPayment = totalPaidAmount % installmentAmount;
-  const amountDue = remainingBalance <= 0 ? 0 : Math.max(0, installmentAmount - (partialPayment > 0.01 ? partialPayment : 0));
+  // ── Derived amounts ──────────────────────────────────────────────────────
+  const totalPayable      = Number(loan.total_payable     ?? 0);
+  const remainingBalance  = Number(loan.remaining_balance ?? totalPayable);
+  const termMonths        = Number(loan.term_months       ?? 1);
+  const installmentAmount = termMonths > 0 ? totalPayable / termMonths : totalPayable;
+
+  const totalPaid     = payments.reduce((sum, p) => sum + Number(p.amount ?? 0), 0);
+  const partialInto   = installmentAmount > 0 ? totalPaid % installmentAmount : 0;
+  const amountDue     = remainingBalance <= 0
+    ? 0
+    : Math.min(
+        remainingBalance,
+        Math.max(0, installmentAmount - (partialInto > 0.01 ? partialInto : 0))
+      );
 
   const handleContinue = () => {
+    setCustomError('');
     let amount = 0;
-    let type = selectedOption;
 
     if (selectedOption === 'installment') {
       amount = amountDue;
@@ -66,119 +87,131 @@ export default function PaymentOptions() {
       amount = remainingBalance;
     } else {
       const val = Number(customAmount);
-      if (!customAmount || isNaN(val) || val < amountDue) {
-        setError(`Amount must be at least P ${Number(amountDue).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+      if (!customAmount || isNaN(val) || val <= 0) {
+        setCustomError('Please enter a valid amount.');
+        return;
+      }
+      if (val < amountDue) {
+        setCustomError(
+          `Amount must be at least ₱ ${amountDue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        );
         return;
       }
       if (val > remainingBalance) {
-        setError(`Amount cannot exceed the remaining balance of P ${Number(remainingBalance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+        setCustomError(
+          `Amount cannot exceed remaining balance of ₱ ${remainingBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        );
         return;
       }
       amount = val;
     }
 
-    navigate(`/payment/${id}?amount=${amount}&type=${type}`);
+    navigate(`/loan/${id}/pay?amount=${amount}&type=${selectedOption}`);
   };
+
+  const radioClass = (active: boolean) => cn(
+    'w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0',
+    active ? 'border-primary bg-primary' : 'border-outline-variant'
+  );
+
+  const cardClass = (active: boolean) => cn(
+    'w-full p-5 rounded-2xl border-2 transition-all flex items-center justify-between text-left',
+    active ? 'border-primary bg-primary/5' : 'border-outline-variant/30 bg-surface-container-low'
+  );
 
   return (
     <div className="min-h-screen bg-background flex flex-col items-center">
-      <TopBar title="Payment Options" />
-      
-      <main className="w-full max-w-md px-6 pt-24 pb-32 flex-1">
-        <div className="mb-8">
-          <h2 className="text-2xl font-headline font-extrabold text-on-surface mb-2">How do you want to pay?</h2>
-          <p className="text-on-surface-variant text-sm">Choose from the payment options or enter amount below.</p>
+      <TopBar title="Payment Options" onBack={() => navigate(`/loan/${id}`)} />
+
+      <main className="w-full max-w-md px-6 pt-24 pb-36 flex-1 space-y-4">
+        <div className="mb-6">
+          <h2 className="text-2xl font-headline font-extrabold text-on-surface mb-1">
+            How do you want to pay?
+          </h2>
+          <p className="text-on-surface-variant text-sm">
+            Choose a payment option below.
+          </p>
         </div>
 
-        <div className="space-y-4">
-          {/* Option 1: Installment */}
-          <button 
-            onClick={() => { setSelectedOption('installment'); setError(''); }}
-            className={cn(
-              "w-full p-5 rounded-2xl border-2 transition-all flex items-center justify-between text-left",
-              selectedOption === 'installment' ? "border-primary bg-primary/5" : "border-outline-variant/30 bg-surface-container-low"
-            )}
-          >
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-primary mb-1">Amount Due</p>
-              <p className="font-headline font-bold text-xl text-on-surface">P {Number(amountDue).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-              <p className="text-xs text-on-surface-variant mt-1">
-                {partialPayment > 0.01 ? 'Remaining for this installment' : 'Regular monthly installment'}
-              </p>
-            </div>
-            <div className={cn(
-              "w-6 h-6 rounded-full border-2 flex items-center justify-center",
-              selectedOption === 'installment' ? "border-primary bg-primary" : "border-outline-variant"
-            )}>
-              {selectedOption === 'installment' && <div className="w-2 h-2 bg-white rounded-full" />}
-            </div>
-          </button>
-
-          {/* Option 2: Full Settlement */}
-          <button 
-            onClick={() => { setSelectedOption('full'); setError(''); }}
-            className={cn(
-              "w-full p-5 rounded-2xl border-2 transition-all flex items-center justify-between text-left",
-              selectedOption === 'full' ? "border-primary bg-primary/5" : "border-outline-variant/30 bg-surface-container-low"
-            )}
-          >
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-primary mb-1">Remaining Balance</p>
-              <p className="font-headline font-bold text-xl text-on-surface">P {Number(remainingBalance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-              <p className="text-xs text-on-surface-variant mt-1">Pay off your entire loan</p>
-            </div>
-            <div className={cn(
-              "w-6 h-6 rounded-full border-2 flex items-center justify-center",
-              selectedOption === 'full' ? "border-primary bg-primary" : "border-outline-variant"
-            )}>
-              {selectedOption === 'full' && <div className="w-2 h-2 bg-white rounded-full" />}
-            </div>
-          </button>
-
-          {/* Option 3: Custom Amount */}
-          <div className={cn(
-            "w-full p-5 rounded-2xl border-2 transition-all",
-            selectedOption === 'custom' ? "border-primary bg-primary/5" : "border-outline-variant/30 bg-surface-container-low"
-          )}>
-            <button 
-              onClick={() => { setSelectedOption('custom'); setError(''); }}
-              className="w-full flex items-center justify-between text-left mb-4"
-            >
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-primary mb-1">Enter Amount</p>
-                <p className="text-xs text-on-surface-variant">Pay any amount you prefer</p>
-              </div>
-              <div className={cn(
-                "w-6 h-6 rounded-full border-2 flex items-center justify-center",
-                selectedOption === 'custom' ? "border-primary bg-primary" : "border-outline-variant"
-              )}>
-                {selectedOption === 'custom' && <div className="w-2 h-2 bg-white rounded-full" />}
-              </div>
-            </button>
-            
-            {selectedOption === 'custom' && (
-              <motion.div 
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: 'auto' }}
-              >
-                <Input 
-                  placeholder="0.00"
-                  type="number"
-                  value={customAmount}
-                  onChange={(e) => { setCustomAmount(e.target.value); setError(''); }}
-                  icon={<span className="font-bold">P</span>}
-                  error={error}
-                />
-                <p className="text-[10px] text-on-surface-variant mt-2 italic">Note: Amount must not be less than the amount due (P {Number(installmentAmount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})</p>
-              </motion.div>
-            )}
+        {/* Installment */}
+        <button
+          onClick={() => { setSelectedOption('installment'); setCustomError(''); }}
+          className={cardClass(selectedOption === 'installment')}
+        >
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-primary mb-1">Amount Due</p>
+            <p className="font-headline font-bold text-xl text-on-surface">
+              ₱ {amountDue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </p>
+            <p className="text-xs text-on-surface-variant mt-1">
+              {partialInto > 0.01 ? 'Remaining for this installment' : 'Regular installment payment'}
+            </p>
           </div>
+          <div className={radioClass(selectedOption === 'installment')}>
+            {selectedOption === 'installment' && <div className="w-2 h-2 bg-white rounded-full" />}
+          </div>
+        </button>
+
+        {/* Full Settlement */}
+        <button
+          onClick={() => { setSelectedOption('full'); setCustomError(''); }}
+          className={cardClass(selectedOption === 'full')}
+        >
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-primary mb-1">Remaining Balance</p>
+            <p className="font-headline font-bold text-xl text-on-surface">
+              ₱ {remainingBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </p>
+            <p className="text-xs text-on-surface-variant mt-1">Pay off your entire loan</p>
+          </div>
+          <div className={radioClass(selectedOption === 'full')}>
+            {selectedOption === 'full' && <div className="w-2 h-2 bg-white rounded-full" />}
+          </div>
+        </button>
+
+        {/* Custom Amount */}
+        <div className={cn(
+          'w-full p-5 rounded-2xl border-2 transition-all',
+          selectedOption === 'custom' ? 'border-primary bg-primary/5' : 'border-outline-variant/30 bg-surface-container-low'
+        )}>
+          <button
+            onClick={() => { setSelectedOption('custom'); setCustomError(''); }}
+            className="w-full flex items-center justify-between text-left mb-0"
+          >
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-primary mb-1">Custom Amount</p>
+              <p className="text-xs text-on-surface-variant">Pay any amount you prefer</p>
+            </div>
+            <div className={radioClass(selectedOption === 'custom')}>
+              {selectedOption === 'custom' && <div className="w-2 h-2 bg-white rounded-full" />}
+            </div>
+          </button>
+
+          {selectedOption === 'custom' && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              className="mt-4"
+            >
+              <Input
+                placeholder="0.00"
+                type="number"
+                value={customAmount}
+                onChange={(e) => { setCustomAmount(e.target.value); setCustomError(''); }}
+                icon={<span className="font-bold">₱</span>}
+                error={customError}
+              />
+              <p className="text-[10px] text-on-surface-variant mt-2 italic">
+                Minimum: ₱ {amountDue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+            </motion.div>
+          )}
         </div>
 
-        {error && (
-          <div className="mt-4 p-3 bg-error/10 rounded-xl flex items-center gap-2 text-error text-xs font-medium">
+        {customError && selectedOption !== 'custom' && (
+          <div className="p-3 bg-red-500/10 rounded-xl flex items-center gap-2 text-red-500 text-xs font-medium">
             <AlertCircle size={16} />
-            <span>{error}</span>
+            <span>{customError}</span>
           </div>
         )}
       </main>
