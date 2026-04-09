@@ -69,9 +69,10 @@ async function insertNotification(
     // Deduplicate — skip if the same title was inserted within the last hour
     const [existing] = await pool.query<RowDataPacket[]>(
       `SELECT notification_id FROM notifications
-       WHERE customer_id = ? AND title = ? AND created_at > NOW() - INTERVAL 1 HOUR
-       LIMIT 1`,
-      [customerId, title]
+             WHERE customer_id = ? AND title = ? AND message = ?
+               AND created_at > NOW() - INTERVAL 1 HOUR
+             LIMIT 1`,
+      [customerId, title, message]
     );
     if ((existing as RowDataPacket[]).length > 0) return;
 
