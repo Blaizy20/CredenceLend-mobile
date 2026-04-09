@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { User, MapPin, Fingerprint, CheckCircle, Loader2, CheckCircle2, ArrowRight } from 'lucide-react';
+import { User, MapPin, Fingerprint, CheckCircle, Loader2, CheckCircle2, ArrowRight, AlertTriangle } from 'lucide-react';
 import { TopBar } from '../components/TopBar';
 import { Button } from '../components/Button';
 import { Modal } from '../components/Modal';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 
 function AutoRedirect({ onRedirect }: { onRedirect: () => void }) {
   const [count, setCount] = useState(5);
@@ -24,13 +24,14 @@ function AutoRedirect({ onRedirect }: { onRedirect: () => void }) {
 
 export default function RegisterStep4() {
   const navigate = useNavigate();
-  const [data, setData] = useState<any>(null);
-  const [agreed, setAgreed] = useState(false);
-  const [showTerms, setShowTerms] = useState(false);
+  const [data, setData]               = useState<any>(null);
+  const [agreed, setAgreed]           = useState(false);
+  const [showTerms, setShowTerms]     = useState(false);
   const [showPrivacy, setShowPrivacy] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [done, setDone] = useState(false);
+  const [loading, setLoading]         = useState(false);
+  const [error, setError]             = useState('');
+  const [done, setDone]               = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   useEffect(() => {
     const savedData = localStorage.getItem('registerData');
@@ -42,17 +43,16 @@ export default function RegisterStep4() {
     }
   }, []);
 
-  const handleComplete = async () => {
+  // Opens confirmation sheet after all checks pass
+  const handleReview = () => {
     if (!agreed) {
       alert('Please agree to the Terms and Conditions');
       return;
     }
-
     if (!data) {
       setError('Registration data is missing.');
       return;
     }
-
     const requiredFields = [
       'firstName', 'lastName', 'username', 'password',
       'email', 'contactNo', 'province', 'city', 'barangay', 'street'
@@ -62,7 +62,12 @@ export default function RegisterStep4() {
       setError('Registration data is incomplete. Missing: ' + missing.join(', '));
       return;
     }
+    setError('');
+    setShowConfirm(true);
+  };
 
+  const handleComplete = async () => {
+    setShowConfirm(false);
     setLoading(true);
     setError('');
 
@@ -92,7 +97,7 @@ export default function RegisterStep4() {
       }
 
       localStorage.removeItem('registerData');
-      setDone(true); // ← show success screen instead of navigating directly
+      setDone(true);
 
     } catch (err: any) {
       setError('Registration failed. Please try again.');
@@ -101,7 +106,7 @@ export default function RegisterStep4() {
     }
   };
 
-  // ── Success Screen ────────────────────────────────────────────────────────
+  // ── Success Screen ──────────────────────────────────────────────────────
   if (done) {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6">
@@ -150,7 +155,7 @@ export default function RegisterStep4() {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <TopBar title="Review Details" />
-      
+
       <main className="pt-20 pb-32 px-6 max-w-lg mx-auto min-h-screen flex flex-col">
         <div className="mb-10">
           <div className="flex justify-between items-end mb-2">
@@ -176,7 +181,7 @@ export default function RegisterStep4() {
 
         <div className="grid grid-cols-1 gap-6">
           {/* Face Photo Preview */}
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             className="bg-surface-container-highest rounded-xl p-6 flex flex-col items-center mb-4"
@@ -196,7 +201,7 @@ export default function RegisterStep4() {
           </motion.div>
 
           {/* Personal Details */}
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             className="bg-surface-container-high rounded-xl p-6"
@@ -234,7 +239,7 @@ export default function RegisterStep4() {
           </motion.div>
 
           {/* Residence Details */}
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
@@ -272,7 +277,7 @@ export default function RegisterStep4() {
           </motion.div>
 
           {/* Biometrics Status */}
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
@@ -293,11 +298,11 @@ export default function RegisterStep4() {
 
         <div className="mt-auto pt-10 text-center">
           <div className="flex items-start gap-3 px-4 mb-6">
-            <input 
-              type="checkbox" 
+            <input
+              type="checkbox"
               checked={agreed}
               onChange={(e) => setAgreed(e.target.checked)}
-              className="mt-1 h-4 w-4 rounded border-outline-variant bg-surface-container-high text-primary focus:ring-primary/30" 
+              className="mt-1 h-4 w-4 rounded border-outline-variant bg-surface-container-high text-primary focus:ring-primary/30"
             />
             <label className="text-xs text-on-surface-variant leading-relaxed text-left">
               By clicking "Complete Registration", you agree to our{' '}
@@ -311,15 +316,112 @@ export default function RegisterStep4() {
 
       <footer className="fixed bottom-0 left-0 w-full p-6 bg-gradient-to-t from-background via-background/95 to-transparent">
         <div className="max-w-lg mx-auto flex flex-col gap-4">
-          <Button onClick={handleComplete} disabled={loading}>
+          <Button onClick={handleReview} disabled={loading}>
             {loading ? <Loader2 className="animate-spin" size={20} /> : 'Complete Registration'}
           </Button>
           <p className="text-center text-sm text-on-surface-variant">
-            Already have an account? 
+            Already have an account?
             <button onClick={() => navigate('/login')} className="text-primary font-bold ml-1 hover:underline">Login</button>
           </p>
         </div>
       </footer>
+
+      {/* ── Confirmation Bottom Sheet ─────────────────────────────────────── */}
+      <AnimatePresence>
+        {showConfirm && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowConfirm(false)}
+              className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
+            />
+
+            <motion.div
+              initial={{ opacity: 0, y: 80 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 80 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+              className="fixed bottom-0 left-0 right-0 z-50 bg-surface-container-low rounded-t-[2rem] shadow-2xl border-t border-white/5 max-w-lg mx-auto max-h-[80vh] overflow-y-auto"
+            >
+              <div className="p-6">
+                {/* Handle */}
+                <div className="w-10 h-1 bg-outline/30 rounded-full mx-auto mb-6" />
+
+                {/* Header */}
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                    <User size={24} />
+                  </div>
+                  <div>
+                    <h3 className="font-headline font-bold text-xl text-on-surface">Almost there!</h3>
+                    <p className="text-on-surface-variant text-xs">Review your details before creating your account</p>
+                  </div>
+                </div>
+
+                {/* Personal Details Summary */}
+                <div className="mb-4 p-4 bg-primary/5 border border-primary/10 rounded-2xl space-y-3">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-primary mb-3">Personal Details</p>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-on-surface-variant">Full Name</span>
+                    <span className="font-bold text-on-surface">{data.firstName} {data.lastName}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-on-surface-variant">Username</span>
+                    <span className="font-bold text-primary">@{data.username}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-on-surface-variant">Email</span>
+                    <span className="font-bold text-on-surface">{data.email}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-on-surface-variant">Contact No.</span>
+                    <span className="font-bold text-on-surface font-mono">{data.contactNo}</span>
+                  </div>
+                </div>
+
+                {/* Address Summary */}
+                <div className="mb-6 p-4 bg-surface-container-high rounded-2xl space-y-3">
+                  <div className="flex items-center gap-2 mb-3">
+                    <MapPin size={14} className="text-on-surface-variant" />
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Address</p>
+                  </div>
+                  <p className="text-sm font-semibold text-on-surface leading-relaxed">
+                    {data.street}, {data.barangay}, {data.city}, {data.province}
+                  </p>
+                </div>
+
+                {/* Disclaimer */}
+                <div className="flex gap-3 p-3 bg-orange-500/5 border border-orange-500/10 rounded-xl mb-6">
+                  <AlertTriangle size={16} className="text-orange-500 shrink-0 mt-0.5" />
+                  <p className="text-xs text-on-surface-variant leading-relaxed">
+                    By confirming, you agree that all provided information is accurate and you accept our Terms of Service and Privacy Policy.
+                  </p>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex flex-col gap-3">
+                  <button
+                    onClick={handleComplete}
+                    disabled={loading}
+                    className="w-full py-4 rounded-full bg-primary text-on-primary font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-transform disabled:opacity-60"
+                  >
+                    <CheckCircle2 size={18} />
+                    {loading ? 'Creating Account...' : 'Yes, Create My Account'}
+                  </button>
+                  <button
+                    onClick={() => setShowConfirm(false)}
+                    className="w-full py-4 rounded-full bg-surface-container-highest text-on-surface font-bold text-sm active:scale-95 transition-transform"
+                  >
+                    Go Back & Edit
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       {/* Terms of Service Modal */}
       <Modal isOpen={showTerms} onClose={() => setShowTerms(false)} title="Terms of Service">
