@@ -126,7 +126,7 @@ export default function Profile() {
         <section className="pt-6">
           <button
             onClick={() => setShowLogoutModal(true)}
-            className="w-full flex items-center justify-center gap-2 py-4 px-6 rounded-full bg-secondary-container/10 border border-secondary-container/20 text-secondary hover:bg-secondary-container/20 transition-all duration-300 font-bold active:scale-95"
+            className="w-full flex items-center justify-center gap-2 py-4 px-6 rounded-full bg-red-500/10 border border-red-500/20 text-red-500 hover:bg-red-500/20 transition-all duration-300 font-bold active:scale-95"
           >
             <LogOut size={20} />
             <span>Logout from Credence</span>
@@ -160,8 +160,8 @@ export default function Profile() {
             >
               {/* Icon */}
               <div className="flex justify-center mb-4">
-                <div className="w-14 h-14 rounded-full bg-error/10 flex items-center justify-center">
-                  <AlertTriangle className="text-error" size={28} />
+                <div className="w-14 h-14 rounded-full bg-red-500/10 flex items-center justify-center">
+                  <AlertTriangle className="text-red-500" size={28} />
                 </div>
               </div>
 
@@ -179,7 +179,7 @@ export default function Profile() {
               <div className="flex flex-col gap-3">
                 <button
                   onClick={handleLogout}
-                  className="w-full py-4 rounded-full bg-error text-white font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-transform"
+                  className="w-full py-4 rounded-full bg-red-500 hover:bg-red-600 text-white font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-all duration-300"
                 >
                   <LogOut size={18} />
                   Yes, Log Me Out
