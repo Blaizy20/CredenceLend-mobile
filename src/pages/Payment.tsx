@@ -204,10 +204,50 @@ export default function Payment() {
     setTimeout(() => setPayStatus('done'), 2200);
   };
 
-  const handleConfirmed = () => {
-    if      (selectedMethod === 'wallet')                            handleEwalletPay();
-    else if (selectedMethod === 'card' || selectedMethod === 'bank') handleCardPay();
-    else                                                             handleWalkinConfirm();
+  const handleConfirmed = async () => {
+    setShowConfirm(false);
+
+    if (selectedMethod === 'wallet') {
+      // ── GCash / Maya: create PayMongo source and redirect ──────────────
+      setSuccessStep('loading');
+      try {
+        const successUrl = `${window.location.origin}/loan/${id}/pay/success?method=wallet&amount=${dueAmount}`;
+        const failedUrl  = `${window.location.origin}/loan/${id}/pay/failed`;
+
+        const res  = await fetch('/api/paymongo/source', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            amount:           dueAmount,
+            type:             'gcash',          // or 'paymaya' for Maya
+            redirect_success: successUrl,
+            redirect_failed:  failedUrl,
+            reference_no:     loan?.reference_no,
+            billing_name:     `${loan?.first_name ?? ''} ${loan?.last_name ?? ''}`.trim() || 'Customer',
+            billing_email:    loan?.email    ?? '',
+            billing_phone:    loan?.contact_no ?? '',
+          }),
+        });
+
+        const data = await res.json();
+        if (!data.success || !data.source?.attributes?.redirect?.checkout_url) {
+          setSuccessStep('idle');
+          alert(data.message || 'Failed to initiate GCash payment. Please try again.');
+          return;
+        }
+
+        // Redirect to GCash checkout
+        window.location.href = data.source.attributes.redirect.checkout_url;
+      } catch (err: any) {
+        setSuccessStep('idle');
+        alert('Unable to connect to payment service. Please try again.');
+      }
+      return;
+    }
+
+    // ── All other methods (walkin, bank, card): show instructions ──────────
+    setSuccessStep('loading');
+    setTimeout(() => setSuccessStep('done'), 2200);
   };
 
   // ── Guards ────────────────────────────────────────────────────────────────

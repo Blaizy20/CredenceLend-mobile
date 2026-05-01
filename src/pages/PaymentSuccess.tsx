@@ -7,13 +7,13 @@ import { Button } from '../components/Button';
 type Status = 'verifying' | 'recording' | 'done' | 'failed';
 
 export default function PaymentSuccess() {
-  const navigate             = useNavigate();
-  const { id }               = useParams();                      // loan_id
-  const [searchParams]       = useSearchParams();
-  const [status, setStatus]  = useState<Status>('verifying');
-  const [error, setError]    = useState('');
+  const navigate                  = useNavigate();
+  const { id }                    = useParams();
+  const [searchParams]            = useSearchParams();
+  const [status, setStatus]       = useState<Status>('verifying');
+  const [error, setError]         = useState('');
   const [paymentId, setPaymentId] = useState<number | null>(null);
-  const hasRun = useRef(false);  // prevent double-fire in StrictMode
+  const hasRun                    = useRef(false);
 
   useEffect(() => {
     if (hasRun.current) return;
@@ -23,44 +23,42 @@ export default function PaymentSuccess() {
 
   async function handleSuccess() {
     try {
-      const method         = searchParams.get('method') ?? 'wallet';          // wallet | card | walkin
-      const sourceId       = searchParams.get('id')     ?? '';                 // PayMongo appends ?id= for sources
-      const intentId       = searchParams.get('payment_intent_id') ?? '';     // PayMongo appends for intents
-      const amountParam    = searchParams.get('amount') ?? '0';
+      const method      = searchParams.get('method')             ?? 'wallet';
+      const sourceId    = searchParams.get('id')                 ?? '';
+      const intentId    = searchParams.get('payment_intent_id')  ?? '';
+      const amountParam = searchParams.get('amount')             ?? '0';
+      const amount      = Number(amountParam) || 0;
 
-      // ── 1. Verify the payment status with PayMongo ─────────────────────
+      // ── Guard: must have loan id and amount ───────────────────────────
+      if (!id || !amount) {
+        setError('Payment details are missing. Please go back and try again.');
+        setStatus('failed');
+        return;
+      }
+
+      // ── 1. Verify wallet payments via PayMongo source poll ────────────
       if (method === 'wallet' && sourceId) {
         setStatus('verifying');
-        // Poll source status — PayMongo marks it 'chargeable' when paid
         const verified = await pollSourceStatus(sourceId);
         if (!verified) {
-          setError('Payment could not be verified. If money was deducted, please contact support.');
+          setError('Payment could not be verified with the provider. If money was deducted, please contact support.');
           setStatus('failed');
           return;
         }
       }
-      // For card/bank, PayMongo only redirects to success_url on confirmed payment,
-      // so we trust the redirect itself as verification.
 
-      // ── 2. Record payment in our database ─────────────────────────────
+      // ── 2. Record in database ─────────────────────────────────────────
       setStatus('recording');
-      const amount = Number(amountParam) || 0;
-
-      if (!id || !amount) {
-        setError('Payment details missing. Please contact support.');
-        setStatus('failed');
-        return;
-      }
 
       const res  = await fetch('/api/paymongo/record-payment', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          loan_id:             Number(id),
+          loan_id:            Number(id),
           amount,
           method,
-          paymongo_source_id:  sourceId  || undefined,
-          paymongo_intent_id:  intentId  || undefined,
+          paymongo_source_id: sourceId || undefined,
+          paymongo_intent_id: intentId || undefined,
         }),
       });
 
@@ -79,21 +77,21 @@ export default function PaymentSuccess() {
     }
   }
 
-  async function pollSourceStatus(sourceId: string, maxAttempts = 8): Promise<boolean> {
+  async function pollSourceStatus(sourceId: string, maxAttempts = 10): Promise<boolean> {
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise(r => setTimeout(r, 1500));
       try {
-        const res  = await fetch(`/api/paymongo/source/${sourceId}`);
-        const data = await res.json();
-        const sourceStatus = data.source?.attributes?.status ?? '';
-        if (sourceStatus === 'chargeable' || sourceStatus === 'consumed') return true;
-        if (sourceStatus === 'failed' || sourceStatus === 'cancelled')    return false;
+        const res    = await fetch(`/api/paymongo/source/${sourceId}`);
+        const data   = await res.json();
+        const st     = data.source?.attributes?.status ?? '';
+        if (st === 'chargeable' || st === 'consumed') return true;
+        if (st === 'failed'     || st === 'cancelled') return false;
       } catch { /* keep polling */ }
     }
     return false;
   }
 
-  // ── Verifying Screen ──────────────────────────────────────────────────────
+  // ── Loading screens ───────────────────────────────────────────────────────
   if (status === 'verifying' || status === 'recording') {
     return (
       <motion.div
@@ -104,7 +102,6 @@ export default function PaymentSuccess() {
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-primary/10 rounded-full blur-[100px]" />
         </div>
-
         <motion.div
           initial={{ scale: 0.6, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
@@ -116,7 +113,6 @@ export default function PaymentSuccess() {
             : <Receipt className="text-primary" size={44} />
           }
         </motion.div>
-
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
           <h2 className="font-headline font-bold text-2xl text-on-surface mb-2">
             {status === 'verifying' ? 'Verifying Payment…' : 'Recording Payment…'}
@@ -127,7 +123,6 @@ export default function PaymentSuccess() {
               : 'Almost done — saving your payment record.'}
           </p>
         </motion.div>
-
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }} className="flex gap-2 mt-12">
           {[0, 1, 2].map((i) => (
             <motion.div
@@ -142,7 +137,7 @@ export default function PaymentSuccess() {
     );
   }
 
-  // ── Failed Screen ─────────────────────────────────────────────────────────
+  // ── Failed screen ─────────────────────────────────────────────────────────
   if (status === 'failed') {
     return (
       <motion.div
@@ -153,7 +148,6 @@ export default function PaymentSuccess() {
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-red-500/10 rounded-full blur-[100px]" />
         </div>
-
         <motion.div
           initial={{ scale: 0, rotate: 20 }}
           animate={{ scale: 1, rotate: 0 }}
@@ -162,25 +156,16 @@ export default function PaymentSuccess() {
         >
           <AlertTriangle className="text-red-500" size={48} />
         </motion.div>
-
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="space-y-2 mb-10">
-          <p className="text-on-surface-variant text-sm font-bold uppercase tracking-widest">Verification Failed</p>
+          <p className="text-on-surface-variant text-sm font-bold uppercase tracking-widest">Payment Failed</p>
           <h1 className="font-headline font-extrabold text-4xl text-on-surface tracking-tight">
-            Something went wrong<span className="text-red-500">.</span>
+            Try Again<span className="text-red-500">.</span>
           </h1>
-          <p className="text-on-surface-variant text-sm mt-3 max-w-xs mx-auto leading-relaxed">
-            {error}
-          </p>
+          <p className="text-on-surface-variant text-sm mt-3 max-w-xs mx-auto leading-relaxed">{error}</p>
         </motion.div>
-
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }} className="w-full max-w-xs flex flex-col gap-3">
-          <Button onClick={() => navigate(`/loan/${id}/pay`)}>
-            Try Again
-          </Button>
-          <button
-            onClick={() => navigate('/dashboard')}
-            className="text-on-surface-variant font-semibold text-sm hover:underline"
-          >
+          <Button onClick={() => navigate(`/loan/${id}/pay`)}>Try Again</Button>
+          <button onClick={() => navigate('/dashboard')} className="text-on-surface-variant font-semibold text-sm hover:underline">
             Back to Dashboard
           </button>
         </motion.div>
@@ -188,11 +173,11 @@ export default function PaymentSuccess() {
     );
   }
 
-  // ── Success Screen ────────────────────────────────────────────────────────
-  const method    = searchParams.get('method') ?? 'wallet';
-  const amount    = Number(searchParams.get('amount') ?? 0);
+  // ── Success screen ────────────────────────────────────────────────────────
+  const method      = searchParams.get('method') ?? 'wallet';
+  const amount      = Number(searchParams.get('amount') ?? 0);
   const methodLabel: Record<string, string> = {
-    wallet: searchParams.get('id')?.startsWith('src_') ? 'GCash / Maya' : 'E-wallet',
+    wallet: 'GCash / Maya',
     card:   'Card Payment',
     bank:   'Online Banking',
     walkin: 'Walk-in',
@@ -207,8 +192,6 @@ export default function PaymentSuccess() {
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-green-500/10 rounded-full blur-[120px]" />
       </div>
-
-      {/* Checkmark icon */}
       <motion.div
         initial={{ scale: 0, rotate: -20 }}
         animate={{ scale: 1, rotate: 0 }}
@@ -217,14 +200,7 @@ export default function PaymentSuccess() {
       >
         <CheckCircle2 className="text-green-500" size={48} />
       </motion.div>
-
-      {/* Headline */}
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.25 }}
-        className="space-y-2 mb-8"
-      >
+      <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="space-y-2 mb-8">
         <p className="text-on-surface-variant text-sm font-bold uppercase tracking-widest">Payment Confirmed</p>
         <h1 className="font-headline font-extrabold text-4xl text-on-surface tracking-tight">
           All Done<span className="text-green-500">.</span>
@@ -233,8 +209,6 @@ export default function PaymentSuccess() {
           Your payment has been successfully verified and recorded.
         </p>
       </motion.div>
-
-      {/* Receipt card */}
       <motion.div
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
@@ -266,21 +240,11 @@ export default function PaymentSuccess() {
           </span>
         </div>
       </motion.div>
-
-      {/* Actions */}
-      <motion.div
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.5 }}
-        className="w-full max-w-xs flex flex-col gap-3"
-      >
+      <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }} className="w-full max-w-xs flex flex-col gap-3">
         <Button onClick={() => navigate('/dashboard')}>
           <LayoutDashboard size={18} /> Back to Dashboard
         </Button>
-        <button
-          onClick={() => navigate(`/loan/${id}`)}
-          className="text-primary font-semibold text-sm hover:underline"
-        >
+        <button onClick={() => navigate(`/loan/${id}`)} className="text-primary font-semibold text-sm hover:underline">
           View Loan Details
         </button>
       </motion.div>
