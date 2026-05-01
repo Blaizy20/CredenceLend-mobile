@@ -7,40 +7,40 @@ import { fileURLToPath } from "url";
 import mysql, { ResultSetHeader, RowDataPacket } from "mysql2/promise";
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname  = path.dirname(__filename);
+const __dirname = path.dirname(__filename);
 
-const PORT              = Number(process.env.PORT              || 3000);
+const PORT = Number(process.env.PORT || 3000);
 const DEFAULT_TENANT_ID = Number(process.env.DEFAULT_TENANT_ID || 1);
 
 const pool = mysql.createPool({
-  host:               process.env.DB_HOST,
-  port:               Number(process.env.DB_PORT),
-  database:           process.env.DB_NAME,
-  user:               process.env.DB_USER,
-  password:           process.env.DB_PASSWORD,
+  host: process.env.DB_HOST,
+  port: Number(process.env.DB_PORT),
+  database: process.env.DB_NAME,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
   waitForConnections: true,
-  connectionLimit:    10,
-  queueLimit:         0,
-  ssl:                { rejectUnauthorized: false },
+  connectionLimit: 10,
+  queueLimit: 0,
+  ssl: { rejectUnauthorized: false },
 });
 
 type CustomerRow = RowDataPacket & {
   customer_id: number;
-  tenant_id:   number | null;
-  user_id:     number | null;
-  username:    string;
-  password:    string;
+  tenant_id: number | null;
+  user_id: number | null;
+  username: string;
+  password: string;
   customer_no: string;
-  first_name:  string;
-  last_name:   string;
-  contact_no:  string | null;
-  email:       string | null;
-  province:    string | null;
-  city:        string | null;
-  barangay:    string | null;
-  street:      string | null;
-  created_at:  string;
-  is_active:   number;
+  first_name: string;
+  last_name: string;
+  contact_no: string | null;
+  email: string | null;
+  province: string | null;
+  city: string | null;
+  barangay: string | null;
+  street: string | null;
+  created_at: string;
+  is_active: number;
 };
 
 // ── Payment method normalization ──────────────────────────────────────────
@@ -74,21 +74,20 @@ function getNextReferenceNo(lastRef: string | null, year: number): string {
 
 async function insertNotification(
   customerId: number,
-  tenantId:   number,
-  title:      string,
-  message:    string,
-  type:       string
+  tenantId: number,
+  title: string,
+  message: string,
+  type: string
 ): Promise<void> {
   try {
     const [existing] = await pool.query<RowDataPacket[]>(
       `SELECT notification_id FROM notifications
        WHERE customer_id = ? AND title = ? AND message = ?
-         AND created_at > NOW() - INTERVAL 1 HOUR
+       AND created_at > NOW() - INTERVAL 1 HOUR
        LIMIT 1`,
       [customerId, title, message]
     );
-    if ((existing as RowDataPacket[]).length > 0) return;
-
+    if (existing.length > 0) return;
     await pool.query(
       `INSERT INTO notifications (customer_id, tenant_id, title, message, type)
        VALUES (?, ?, ?, ?, ?)`,
@@ -101,32 +100,28 @@ async function insertNotification(
 
 async function sendOtpEmail(toEmail: string, otp: string): Promise<void> {
   const response = await fetch("https://api.brevo.com/v3/smtp/email", {
-    method:  "POST",
+    method: "POST",
     headers: {
-      "accept":       "application/json",
-      "api-key":      process.env.BREVO_API_KEY      ?? "",
+      "accept": "application/json",
+      "api-key": process.env.BREVO_API_KEY ?? "",
       "content-type": "application/json",
     },
     body: JSON.stringify({
       sender: {
-        name:  process.env.BREVO_SENDER_NAME  ?? "Loan Manager",
+        name:  process.env.BREVO_SENDER_NAME ?? "Loan Manager",
         email: process.env.BREVO_SENDER_EMAIL ?? "",
       },
-      to:          [{ email: toEmail }],
-      subject:     "Your Verification Code",
+      to: [{ email: toEmail }],
+      subject: "Your Verification Code",
       htmlContent: `
-        <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px;background:#f9f9f9;border-radius:12px;">
-          <h2 style="color:#01696f;margin-bottom:8px;">Verification Code</h2>
-          <p style="color:#555;margin-bottom:24px;">Use the code below to verify your identity. It expires in <strong>10 minutes</strong>.</p>
-          <div style="background:#fff;border:2px solid #01696f;border-radius:8px;padding:24px;text-align:center;margin-bottom:24px;">
-            <span style="font-size:40px;font-weight:900;letter-spacing:12px;color:#01696f;">${otp}</span>
-          </div>
-          <p style="color:#999;font-size:12px;">If you did not request this, please ignore this email.</p>
-        </div>
-      `,
+        <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px">
+          <h2 style="color:#01696f">Verification Code</h2>
+          <p>Use the code below to verify your identity. It expires in 10 minutes.</p>
+          <div style="font-size:2rem;font-weight:bold;letter-spacing:0.2em;padding:16px;background:#f3f0ec;border-radius:8px;text-align:center">${otp}</div>
+          <p style="color:#7a7974;font-size:0.85rem;margin-top:24px">If you did not request this, please ignore this email.</p>
+        </div>`,
     }),
   });
-
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
     console.error("Brevo send error:", err);
@@ -146,8 +141,8 @@ async function startServer() {
     process.exit(1);
   }
 
-  const PAYMONGO_SECRET  = process.env.PAYMONGO_SECRET_KEY!;
-  const PAYMONGO_AUTH    = Buffer.from(`${PAYMONGO_SECRET}:`).toString("base64");
+  const PAYMONGO_SECRET = process.env.PAYMONGO_SECRET_KEY!;
+  const PAYMONGO_AUTH   = Buffer.from(`${PAYMONGO_SECRET}:`).toString("base64");
   const PAYMONGO_HEADERS = {
     Authorization:  `Basic ${PAYMONGO_AUTH}`,
     "Content-Type": "application/json",
@@ -258,7 +253,7 @@ async function startServer() {
   // ── Auth: Reset Password ──────────────────────────────────────────────────
   app.post("/api/auth/reset-password", async (req, res) => {
     try {
-      const email       = String(req.body.email       ?? "").trim().toLowerCase();
+      const email       = String(req.body.email ?? "").trim().toLowerCase();
       const newPassword = String(req.body.newPassword ?? "");
 
       if (!email || !newPassword)
@@ -306,7 +301,7 @@ async function startServer() {
       if (!/\S+@\S+\.\S+/.test(email))
         return res.status(400).json({ success: false, message: "Please enter a valid email address." });
 
-      const [duplicateRows] = await pool.query<RowDataPacket[]>(
+      const [duplicateRows] = await pool.query<CustomerRow[]>(
         `SELECT customer_id, username, email, contact_no FROM customers
          WHERE username = ? OR email = ? OR contact_no = ? LIMIT 1`,
         [username, email, contact_no]
@@ -314,8 +309,8 @@ async function startServer() {
 
       if (duplicateRows.length > 0) {
         const dup = duplicateRows[0];
-        if (dup.username   === username)   return res.status(409).json({ success: false, message: "This username is already taken." });
-        if (dup.email      === email)      return res.status(409).json({ success: false, message: "An account with this email already exists." });
+        if (dup.username  === username)   return res.status(409).json({ success: false, message: "This username is already taken." });
+        if (dup.email     === email)      return res.status(409).json({ success: false, message: "An account with this email already exists." });
         if (dup.contact_no === contact_no) return res.status(409).json({ success: false, message: "An account with this contact number already exists." });
       }
 
@@ -330,19 +325,19 @@ async function startServer() {
 
       const [result] = await pool.query<ResultSetHeader>(
         `INSERT INTO customers
-          (tenant_id, username, password, customer_no, first_name, last_name,
-           contact_no, email, province, city, barangay, street, is_active)
+         (tenant_id, username, password, customer_no, first_name, last_name,
+          contact_no, email, province, city, barangay, street, is_active)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
         [DEFAULT_TENANT_ID, username, hashedPassword, customer_no,
          first_name, last_name, contact_no, email, province, city, barangay, street]
       );
 
       res.status(201).json({
-        success:  true,
-        message:  "Your account has been created successfully.",
+        success: true,
+        message: "Your account has been created successfully.",
         customer: {
           customer_id: result.insertId,
-          tenant_id:   DEFAULT_TENANT_ID,
+          tenant_id: DEFAULT_TENANT_ID,
           username, customer_no, first_name, last_name,
           contact_no, email, province, city, barangay, street,
           is_active: 1,
@@ -430,14 +425,14 @@ async function startServer() {
 
       const reference_no  = getNextReferenceNo(lastLoanRows[0]?.reference_no ?? null, year);
       const rate          = Number(interest_rate) || 0;
-      const months        = Number(term_months)   || 1;
+      const months        = Number(term_months) || 1;
       const total_payable = Number((amount + amount * (rate / 100) * months).toFixed(2));
 
       const [loanResult] = await pool.query<ResultSetHeader>(
         `INSERT INTO loans
-          (tenant_id, customer_id, reference_no, principal_amount, interest_rate,
-           payment_term, term_months, total_payable, remaining_balance,
-           id_type, collateral_type, status, is_active)
+         (tenant_id, customer_id, reference_no, principal_amount, interest_rate,
+          payment_term, term_months, total_payable, remaining_balance,
+          id_type, collateral_type, status, is_active)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', 1)`,
         [
           tenant_id ?? DEFAULT_TENANT_ID, customer_id, reference_no, amount, rate,
@@ -451,14 +446,14 @@ async function startServer() {
         try {
           await pool.query(
             `INSERT INTO co_makers
-              (loan_id, customer_id, first_name, last_name, contact_no, email, province, city, barangay, street)
+             (loan_id, customer_id, first_name, last_name, contact_no, email, province, city, barangay, street)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               loan_id, customer_id,
               String(co_maker.first_name).trim(), String(co_maker.last_name).trim(),
-              co_maker.contact_no || null, co_maker.email    || null,
-              co_maker.province   || null, co_maker.city     || null,
-              co_maker.barangay   || null, co_maker.street   || null,
+              co_maker.contact_no || null, co_maker.email || null,
+              co_maker.province || null, co_maker.city || null,
+              co_maker.barangay || null, co_maker.street || null,
             ]
           );
         } catch (coMakerErr: any) {
@@ -486,7 +481,7 @@ async function startServer() {
       res.status(201).json({
         success: true,
         message: "Your loan application has been submitted successfully.",
-        loan:    { loan_id, reference_no, total_payable, status: "Pending" },
+        loan: { loan_id, reference_no, total_payable, status: "Pending" },
       });
     } catch (err: any) {
       console.error("Loan apply error:", err);
@@ -512,10 +507,10 @@ async function startServer() {
       );
 
       const NOTIF_MAP: Record<string, { title: string; message: (ref: string) => string; type: string }> = {
-        active: { title: "Loan Approved ✅",        message: (ref) => `Your loan (${ref}) has been approved. View your payment schedule now.`,              type: "approved" },
+        active: { title: "Loan Approved ✅",       message: (ref) => `Your loan (${ref}) has been approved. View your payment schedule now.`,       type: "approved" },
         denied: { title: "Loan Application Denied", message: (ref) => `Your loan application (${ref}) was not approved. Please contact your cooperative.`, type: "denied"   },
-        paid:   { title: "Loan Fully Paid 🎉",      message: (ref) => `Congratulations! Your loan (${ref}) has been fully paid.`,                          type: "payment"  },
-        closed: { title: "Loan Closed",             message: (ref) => `Your loan (${ref}) has been closed.`,                                                type: "general"  },
+        paid:   { title: "Loan Fully Paid 🎉",      message: (ref) => `Congratulations! Your loan (${ref}) has been fully paid.`,                   type: "payment"  },
+        closed: { title: "Loan Closed",             message: (ref) => `Your loan (${ref}) has been closed.`,                                        type: "general"  },
       };
 
       for (const loan of rows) {
@@ -637,34 +632,58 @@ async function startServer() {
     }
   });
 
-  // ── PayMongo: Create E-wallet Source (GCash / Maya) ───────────────────────
-  app.post("/api/paymongo/source", async (req, res) => {
+  // ── PayMongo: Create Checkout Session ────────────────────────────────────
+  // Replaces both /api/paymongo/source and /api/paymongo/link.
+  // Supports success_url + cancel_url so users are redirected back to the app.
+  app.post("/api/paymongo/checkout", async (req, res) => {
     try {
       const {
-        amount, type, reference_no,
-        redirect_success, redirect_failed,
+        amount, description, reference_no,
+        success_url, cancel_url,
         billing_name, billing_email, billing_phone,
       } = req.body;
 
-      if (!amount || !type || !redirect_success || !redirect_failed)
-        return res.status(400).json({ success: false, message: "Missing required payment fields." });
+      if (!amount || !success_url || !cancel_url)
+        return res.status(400).json({ success: false, message: "amount, success_url and cancel_url are required." });
 
-      const response = await fetch("https://api.paymongo.com/v1/sources", {
+      const desc = description || "Loan Payment";
+
+      const response = await fetch("https://api.paymongo.com/v1/checkout_sessions", {
         method:  "POST",
         headers: PAYMONGO_HEADERS,
         body: JSON.stringify({
           data: {
             attributes: {
-              amount:   Math.round(Number(amount) * 100),
-              currency: "PHP",
-              type,
-              redirect: { success: redirect_success, failed: redirect_failed },
-              billing: {
-                name:  billing_name  ?? "CredenceLend Customer",
-                email: billing_email ?? "",
-                phone: billing_phone ?? "",
-              },
-              ...(reference_no && { metadata: { reference_no } }),
+              send_email_receipt: false,
+              show_description:   true,
+              show_line_items:    true,
+              line_items: [
+                {
+                  currency:    "PHP",
+                  amount:      Math.round(Number(amount) * 100),
+                  name:        desc,
+                  description: desc,
+                  quantity:    1,
+                },
+              ],
+              payment_method_types: [
+                "card", "gcash", "paymaya", "qrph",
+                "billease", "dob", "dob_ubp",
+                "brankas_bdo", "brankas_landbank", "brankas_metrobank",
+              ],
+              description:      desc,
+              reference_number: reference_no || "",
+              success_url,
+              cancel_url,
+              ...(billing_name || billing_email || billing_phone
+                ? {
+                    billing: {
+                      name:  billing_name  || "",
+                      email: billing_email || "",
+                      phone: billing_phone || "",
+                    },
+                  }
+                : {}),
             },
           },
         }),
@@ -672,198 +691,44 @@ async function startServer() {
 
       const data = await response.json();
       if (!response.ok)
-        return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to create payment source." });
-
-      res.json({ success: true, source: data.data });
-    } catch (err: any) {
-      console.error("PayMongo source error:", err.message);
-      res.status(500).json({ success: false, message: "Payment service unavailable. Please try again." });
-    }
-  });
-
-  // ── PayMongo: Create Payment Intent (Card) ────────────────────────────────
-  app.post("/api/paymongo/intent", async (req, res) => {
-    try {
-      const { amount, description } = req.body;
-
-      if (!amount)
-        return res.status(400).json({ success: false, message: "Payment amount is required." });
-
-      const response = await fetch("https://api.paymongo.com/v1/payment_intents", {
-        method:  "POST",
-        headers: PAYMONGO_HEADERS,
-        body: JSON.stringify({
-          data: {
-            attributes: {
-              amount:                 Math.round(Number(amount) * 100),
-              currency:               "PHP",
-              payment_method_allowed: ["card"],
-              capture_type:           "automatic",
-              ...(description && { description }),
-            },
-          },
-        }),
-      });
-
-      const data = await response.json();
-      if (!response.ok)
-        return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to create payment intent." });
-
-      res.json({ success: true, intent: data.data });
-    } catch (err: any) {
-      console.error("PayMongo intent error:", err.message);
-      res.status(500).json({ success: false, message: "Payment service unavailable. Please try again." });
-    }
-  });
-
-  // ── PayMongo: Create Payment Link (all methods) ───────────────────────────
-  app.post("/api/paymongo/link", async (req, res) => {
-    try {
-      const { amount, description, reference_no } = req.body;
-
-      if (!amount)
-        return res.status(400).json({ success: false, message: "Payment amount is required." });
-
-      const response = await fetch("https://api.paymongo.com/v1/links", {
-        method:  "POST",
-        headers: PAYMONGO_HEADERS,
-        body: JSON.stringify({
-          data: {
-            attributes: {
-              amount:      Math.round(Number(amount) * 100),
-              description: description || "Loan Payment",
-              remarks:     reference_no || "",
-            },
-          },
-        }),
-      });
-
-      const data = await response.json();
-      if (!response.ok)
-        return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to create payment link." });
+        return res.status(400).json({
+          success: false,
+          message: data.errors?.[0]?.detail || "Failed to create checkout session.",
+        });
 
       res.json({
         success:      true,
         checkout_url: data.data.attributes.checkout_url,
-        link_id:      data.data.id,
-        reference_no: data.data.attributes.reference_number,
+        session_id:   data.data.id,
       });
     } catch (err: any) {
-      console.error("PayMongo link error:", err.message);
-      res.status(500).json({ success: false, message: "Payment service unavailable." });
-    }
-  });
-
-  // ── PayMongo: Retrieve Source Status ──────────────────────────────────────
-  app.get("/api/paymongo/source/:sourceId", async (req, res) => {
-    try {
-      const response = await fetch(
-        `https://api.paymongo.com/v1/sources/${req.params.sourceId}`,
-        { headers: PAYMONGO_HEADERS }
-      );
-      const data = await response.json();
-      if (!response.ok)
-        return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to retrieve source status." });
-
-      res.json({ success: true, source: data.data });
-    } catch (err: any) {
-      console.error("PayMongo source status error:", err.message);
-      res.status(500).json({ success: false, message: "Payment service unavailable." });
-    }
-  });
-
-  // ── PayMongo: Create Card Payment Method ──────────────────────────────────
-  app.post("/api/paymongo/payment-method", async (req, res) => {
-    try {
-      const { card_number, exp_month, exp_year, cvc, name } = req.body;
-
-      if (!card_number || !exp_month || !exp_year || !cvc || !name)
-        return res.status(400).json({ success: false, message: "Missing card details." });
-
-      const response = await fetch("https://api.paymongo.com/v1/payment_methods", {
-        method:  "POST",
-        headers: PAYMONGO_HEADERS,
-        body: JSON.stringify({
-          data: {
-            attributes: {
-              type:    "card",
-              details: { card_number, exp_month, exp_year, cvc },
-              billing: { name },
-            },
-          },
-        }),
-      });
-
-      const data = await response.json();
-      if (!response.ok)
-        return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Invalid card details." });
-
-      res.json({ success: true, payment_method: data.data });
-    } catch (err: any) {
-      console.error("PayMongo payment method error:", err.message);
-      res.status(500).json({ success: false, message: "Payment service unavailable." });
-    }
-  });
-
-  // ── PayMongo: Attach Payment Method to Intent ─────────────────────────────
-  app.post("/api/paymongo/attach", async (req, res) => {
-    try {
-      const { intent_id, payment_method_id, client_key, return_url } = req.body;
-
-      if (!intent_id || !payment_method_id || !client_key || !return_url)
-        return res.status(400).json({ success: false, message: "Missing required fields." });
-
-      const response = await fetch(
-        `https://api.paymongo.com/v1/payment_intents/${intent_id}/attach`,
-        {
-          method:  "POST",
-          headers: PAYMONGO_HEADERS,
-          body: JSON.stringify({
-            data: {
-              attributes: {
-                payment_method: payment_method_id,
-                client_key,
-                return_url,
-              },
-            },
-          }),
-        }
-      );
-
-      const data = await response.json();
-      if (!response.ok)
-        return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to attach payment method." });
-
-      res.json({ success: true, intent: data.data });
-    } catch (err: any) {
-      console.error("PayMongo attach error:", err.message);
-      res.status(500).json({ success: false, message: "Payment service unavailable." });
+      console.error("PayMongo checkout error:", err.message);
+      res.status(500).json({ success: false, message: "Payment service unavailable. Please try again." });
     }
   });
 
   // ── PayMongo: Record Payment After Success ────────────────────────────────
   app.post("/api/paymongo/record-payment", async (req, res) => {
     try {
-      const { loan_id, amount, method, paymongo_source_id, paymongo_intent_id } = req.body;
+      const { loan_id, amount, method, paymongo_source_id, paymongo_intent_id, paymongo_session_id } = req.body;
 
       if (!loan_id || !amount || !method)
         return res.status(400).json({ success: false, message: "Missing required fields." });
 
-      // ── Normalize method to match DB ENUM ────────────────────────────────
       const normalizedMethod = normalizeMethod(String(method));
 
-      // ── Generate OR number from PayMongo IDs ──────────────────────────────
-      const or_no = paymongo_source_id
-        ? `OR-PM-${String(paymongo_source_id).slice(-8).toUpperCase()}`
-        : paymongo_intent_id
-        ? `OR-PM-${String(paymongo_intent_id).slice(-8).toUpperCase()}`
+      // Generate OR number from whichever PayMongo ID is present
+      const pmId  = paymongo_session_id || paymongo_source_id || paymongo_intent_id;
+      const or_no = pmId
+        ? `OR-PM-${String(pmId).slice(-8).toUpperCase()}`
         : `OR-${Date.now()}`;
 
-      // ── Guard against duplicate source payments ───────────────────────────
-      if (paymongo_source_id) {
+      // Deduplicate: check all possible ID types
+      for (const pmIdValue of [paymongo_session_id, paymongo_source_id, paymongo_intent_id]) {
+        if (!pmIdValue) continue;
         const [existing] = await pool.query<RowDataPacket[]>(
           `SELECT payment_id FROM payments WHERE notes LIKE ? LIMIT 1`,
-          [`%${paymongo_source_id}%`]
+          [`%${pmIdValue}%`]
         );
         if (existing.length > 0)
           return res.json({
@@ -873,21 +738,6 @@ async function startServer() {
           });
       }
 
-      // ── Guard against duplicate intent payments ───────────────────────────
-      if (paymongo_intent_id) {
-        const [existing] = await pool.query<RowDataPacket[]>(
-          `SELECT payment_id FROM payments WHERE notes LIKE ? LIMIT 1`,
-          [`%${paymongo_intent_id}%`]
-        );
-        if (existing.length > 0)
-          return res.json({
-            success:    true,
-            payment_id: existing[0].payment_id,
-            message:    "Payment already recorded.",
-          });
-      }
-
-      // ── Resolve tenant_id via COALESCE ────────────────────────────────────
       const [loanRows] = await pool.query<RowDataPacket[]>(
         `SELECT l.loan_id, l.customer_id, l.remaining_balance,
                 COALESCE(l.tenant_id, c.tenant_id, ?) AS tenant_id
@@ -900,24 +750,24 @@ async function startServer() {
       if (loanRows.length === 0)
         return res.status(404).json({ success: false, message: "Loan not found." });
 
-      const loan        = loanRows[0];
-      const payAmount   = Number(amount);
-      const newBalance  = Math.max(0, Number(loan.remaining_balance) - payAmount);
+      const loan       = loanRows[0];
+      const payAmount  = Number(amount);
+      const newBalance = Math.max(0, Number(loan.remaining_balance) - payAmount);
       const isFullyPaid = newBalance <= 0;
 
-      const notes = [
-        paymongo_source_id ? `Source ID: ${paymongo_source_id}` : null,
-        paymongo_intent_id ? `Intent ID: ${paymongo_intent_id}` : null,
-      ].filter(Boolean).join(", ") || "PayMongo payment";
+      const notesParts = [
+        paymongo_session_id ? `Session ID: ${paymongo_session_id}` : null,
+        paymongo_source_id  ? `Source ID: ${paymongo_source_id}`   : null,
+        paymongo_intent_id  ? `Intent ID: ${paymongo_intent_id}`   : null,
+      ].filter(Boolean);
+      const notes = notesParts.length ? notesParts.join(", ") : "PayMongo payment";
 
-      // ── Insert payment with all required columns ───────────────────────────
       const [payResult] = await pool.query<ResultSetHeader>(
         `INSERT INTO payments (loan_id, amount, payment_date, method, notes, tenant_id, or_no)
          VALUES (?, ?, NOW(), ?, ?, ?, ?)`,
         [loan_id, payAmount, normalizedMethod, notes, loan.tenant_id, or_no]
       );
 
-      // ── Update loan balance and status ────────────────────────────────────
       await pool.query(
         `UPDATE loans
          SET remaining_balance = ?,
@@ -926,7 +776,6 @@ async function startServer() {
         [newBalance, newBalance, loan_id]
       );
 
-      // ── Notify customer ───────────────────────────────────────────────────
       await insertNotification(
         loan.customer_id,
         Number(loan.tenant_id) || DEFAULT_TENANT_ID,
@@ -938,12 +787,12 @@ async function startServer() {
       );
 
       res.json({
-        success:     true,
-        payment_id:  payResult.insertId,
+        success:    true,
+        payment_id: payResult.insertId,
         new_balance: newBalance,
         fully_paid:  isFullyPaid,
         or_no,
-        message:     isFullyPaid ? "Loan fully paid!" : "Payment recorded successfully.",
+        message: isFullyPaid ? "Loan fully paid!" : "Payment recorded successfully.",
       });
     } catch (err: any) {
       console.error("Record payment error:", err.message);
@@ -954,7 +803,7 @@ async function startServer() {
   // ── Static / Vite ─────────────────────────────────────────────────────────
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
-      server:  { middlewareMode: true },
+      server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);

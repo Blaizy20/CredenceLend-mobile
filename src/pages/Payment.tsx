@@ -17,10 +17,10 @@ const EWALLET_OPTIONS = [
 ];
 
 const METHODS = [
-  { id: 'walkin', label: 'Walk-in',       sub: 'Over-the-counter at the cooperative', icon: Store                 },
-  { id: 'bank',   label: 'Bank Transfer', sub: 'BPI, BDO, UnionBank & more',           icon: Landmark              },
-  { id: 'wallet', label: 'E-wallet',      sub: 'GCash, Maya',                          icon: Wallet, isFast: true  },
-  { id: 'card',   label: 'Card',          sub: 'Visa, Mastercard, JCB',                icon: CreditCard            },
+  { id: 'walkin', label: 'Walk-in',       sub: 'Over-the-counter at the cooperative', icon: Store                },
+  { id: 'bank',   label: 'Bank Transfer', sub: 'BPI, BDO, UnionBank & more',           icon: Landmark             },
+  { id: 'wallet', label: 'E-wallet',      sub: 'GCash, Maya',                          icon: Wallet, isFast: true },
+  { id: 'card',   label: 'Card',          sub: 'Visa, Mastercard, JCB',                icon: CreditCard           },
 ];
 
 const METHOD_INSTRUCTIONS: Record<string, { title: string; steps: string[] }> = {
@@ -46,8 +46,9 @@ const METHOD_INSTRUCTIONS: Record<string, { title: string; steps: string[] }> = 
     title: 'E-wallet Payment',
     steps: [
       'Select GCash or Maya below.',
-      'You will be redirected to authorize the payment.',
-      'Return here once the payment is complete.',
+      'You will be redirected to a secure PayMongo checkout.',
+      'Choose your preferred e-wallet and authorize the payment.',
+      'You will be returned here once the payment is complete.',
     ],
   },
   card: {
@@ -56,6 +57,7 @@ const METHOD_INSTRUCTIONS: Record<string, { title: string; steps: string[] }> = 
       'You will be redirected to a secure PayMongo checkout.',
       'Enter your card details to complete the payment.',
       'A 3D Secure authentication may be required.',
+      'You will be returned here once the payment is complete.',
     ],
   },
 };
@@ -67,12 +69,12 @@ function getCustomerBilling() {
     const stored   = localStorage.getItem('user');
     const customer = stored ? JSON.parse(stored) : {};
     return {
-      name:  `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() || 'Customer',
+      name:  `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() || '',
       email: customer.email      ?? '',
       phone: customer.contact_no ?? '',
     };
   } catch {
-    return { name: 'Customer', email: '', phone: '' };
+    return { name: '', email: '', phone: '' };
   }
 }
 
@@ -101,6 +103,7 @@ export default function Payment() {
   const dueAmount   = safeAmount(Number(query.get('amount') ?? 0));
   const paymentType = query.get('type') ?? 'installment';
 
+  // ── Load loan ─────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!id) return;
     const load = async () => {
@@ -129,89 +132,62 @@ export default function Payment() {
     });
   };
 
-  // ── Unified confirm handler — routes to the right flow ───────────────────
-  const handleConfirmed = async () => {
-    setShowConfirm(false);
-    setPayError('');
-
-    if (selectedMethod === 'wallet') {
-      await handleEwalletPay();
-    } else if (selectedMethod === 'card') {
-      await handleCardPay();
-    } else {
-      // walkin / bank — show instructions confirmation screen
-      setPayStatus('loading');
-      setTimeout(() => setPayStatus('done'), 2200);
-    }
-  };
-
-  // ── GCash / Maya ──────────────────────────────────────────────────────────
-  const handleEwalletPay = async () => {
+  // ── Checkout Session (wallet + card) ──────────────────────────────────────
+  // Single handler for all PayMongo-processed methods (wallet & card).
+  // Uses the Checkout Sessions API which supports success_url + cancel_url.
+  const handleCheckoutPay = async () => {
     setPayStatus('redirecting');
+    setPayError('');
     try {
-      const amount = safeAmount(dueAmount);
+      const amount  = safeAmount(dueAmount);
+      const origin  = window.location.origin;
+      const billing = getCustomerBilling();
 
-      const res = await fetch('/api/paymongo/link', {
+      const res = await fetch('/api/paymongo/checkout', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           amount,
-          description:  `Loan payment – ${loan?.reference_no}`,
-          reference_no: loan?.reference_no,
+          description:    `Loan payment – ${loan?.reference_no}`,
+          reference_no:   loan?.reference_no,
+          success_url:    `${origin}/loan/${id}/pay/success?method=${selectedMethod}&amount=${amount}`,
+          cancel_url:     `${origin}/loan/${id}/pay?amount=${amount}&type=${paymentType}`,
+          billing_name:   billing.name,
+          billing_email:  billing.email,
+          billing_phone:  billing.phone,
         }),
       });
 
       const data = await res.json();
+
       if (!data.success || !data.checkout_url) {
         setPayStatus('failed');
-        setPayError(data.message || 'Failed to create payment link.');
+        setPayError(data.message || 'Failed to create checkout session. Please try again.');
         return;
       }
 
+      // Hard-redirect to PayMongo hosted checkout
       window.location.href = data.checkout_url;
-    } catch (err: any) {
-      setPayStatus('failed');
-      setPayError(err.message || 'Unable to connect to payment service.');
-    }
-  };
-  
-  // ── Card ──────────────────────────────────────────────────────────────────
-  const handleCardPay = async () => {
-    setPayStatus('redirecting');
-    try {
-      const amount = safeAmount(dueAmount);
-
-      const res = await fetch('/api/paymongo/intent', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          amount,
-          description: `Loan payment – ${loan?.reference_no}`,
-        }),
-      });
-
-      const data = await res.json();
-
-      if (!data.success || !data.intent?.id) {
-        setPayStatus('failed');
-        setPayError(data.message || 'Failed to create payment intent. Please try again.');
-        return;
-      }
-
-      const clientKey = data.intent.attributes.client_key;
-      const returnUrl = encodeURIComponent(
-        `${window.location.origin}/loan/${id}/pay/success?method=card&amount=${amount}`
-      );
-
-      window.location.href =
-        `https://checkout.paymongo.com/intents/${data.intent.id}?client_key=${clientKey}&return_url=${returnUrl}`;
     } catch (err: any) {
       setPayStatus('failed');
       setPayError(err.message || 'Unable to connect to payment service. Please try again.');
     }
   };
 
-  // ── Guards ────────────────────────────────────────────────────────────────
+  // ── Unified confirm handler ───────────────────────────────────────────────
+  const handleConfirmed = async () => {
+    setShowConfirm(false);
+
+    if (selectedMethod === 'wallet' || selectedMethod === 'card') {
+      await handleCheckoutPay();
+    } else {
+      // walkin / bank: show confirmation screen only
+      setPayStatus('loading');
+      setTimeout(() => setPayStatus('done'), 2200);
+    }
+  };
+
+  // ── Loading guard ─────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -258,15 +234,16 @@ export default function Payment() {
           <h2 className="font-headline font-bold text-2xl text-on-surface mb-2">Redirecting…</h2>
           <p className="text-on-surface-variant text-sm">
             You're being sent to{' '}
-            <span className="text-primary font-semibold">
-              {selectedMethod === 'wallet'
-                ? (selectedEwallet === 'gcash' ? 'GCash' : 'Maya')
-                : 'PayMongo Checkout'}
-            </span>{' '}
+            <span className="text-primary font-semibold">PayMongo Checkout</span>{' '}
             to complete your payment.
           </p>
         </motion.div>
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }} className="flex gap-2 mt-12">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.4 }}
+          className="flex gap-2 mt-12"
+        >
           {[0, 1, 2].map((i) => (
             <motion.div
               key={i}
@@ -303,7 +280,12 @@ export default function Payment() {
           <h2 className="font-headline font-bold text-2xl text-on-surface mb-2">Recording Payment…</h2>
           <p className="text-on-surface-variant text-sm">Please wait while we log your payment details.</p>
         </motion.div>
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }} className="flex gap-2 mt-12">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.4 }}
+          className="flex gap-2 mt-12"
+        >
           {[0, 1, 2].map((i) => (
             <motion.div
               key={i}
@@ -336,7 +318,12 @@ export default function Payment() {
         >
           <CheckCircle2 className="text-green-500" size={48} />
         </motion.div>
-        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="space-y-2 mb-10">
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.25 }}
+          className="space-y-2 mb-10"
+        >
           <p className="text-on-surface-variant text-sm font-bold uppercase tracking-widest">Payment Submitted</p>
           <h1 className="font-headline font-extrabold text-4xl text-on-surface tracking-tight">
             All Done<span className="text-green-500">.</span>
@@ -345,7 +332,12 @@ export default function Payment() {
             Your payment has been recorded and is pending verification by the cooperative.
           </p>
         </motion.div>
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }} className="w-full max-w-xs flex flex-col gap-3">
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.45 }}
+          className="w-full max-w-xs flex flex-col gap-3"
+        >
           <Button onClick={() => navigate('/dashboard')}>
             <LayoutDashboard size={18} /> Back to Dashboard
           </Button>
@@ -376,7 +368,12 @@ export default function Payment() {
         >
           <AlertTriangle className="text-red-500" size={48} />
         </motion.div>
-        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="space-y-2 mb-10">
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.25 }}
+          className="space-y-2 mb-10"
+        >
           <p className="text-on-surface-variant text-sm font-bold uppercase tracking-widest">Payment Failed</p>
           <h1 className="font-headline font-extrabold text-4xl text-on-surface tracking-tight">
             Try Again<span className="text-red-500">.</span>
@@ -385,7 +382,12 @@ export default function Payment() {
             {payError || 'Something went wrong processing your payment.'}
           </p>
         </motion.div>
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }} className="w-full max-w-xs flex flex-col gap-3">
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.45 }}
+          className="w-full max-w-xs flex flex-col gap-3"
+        >
           <Button onClick={() => { setPayStatus('idle'); setPayError(''); }}>
             Try Again
           </Button>
@@ -484,7 +486,7 @@ export default function Payment() {
           })}
         </section>
 
-        {/* E-wallet sub-selector */}
+        {/* E-wallet sub-selector — informational only (PayMongo shows both on checkout) */}
         <AnimatePresence>
           {selectedMethod === 'wallet' && (
             <motion.section
@@ -494,8 +496,11 @@ export default function Payment() {
               className="space-y-2 overflow-hidden"
             >
               <h3 className="font-headline font-bold text-on-surface-variant uppercase text-[10px] tracking-widest px-1">
-                Select E-wallet
+                Preferred E-wallet
               </h3>
+              <p className="text-[10px] text-on-surface-variant px-1">
+                All available e-wallets will be shown on the checkout page.
+              </p>
               <div className="grid grid-cols-2 gap-3">
                 {EWALLET_OPTIONS.map((ew) => {
                   const isActive = selectedEwallet === ew.id;
@@ -592,9 +597,7 @@ export default function Payment() {
               <div className="text-center mb-6">
                 <h3 className="font-headline font-bold text-xl text-on-surface mb-1">Confirm Payment</h3>
                 <p className="text-on-surface-variant text-sm">
-                  {selectedMethod === 'wallet'
-                    ? `You will be redirected to ${selectedEwallet === 'gcash' ? 'GCash' : 'Maya'} to authorize ₱${dueAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}.`
-                    : selectedMethod === 'card'
+                  {selectedMethod === 'wallet' || selectedMethod === 'card'
                     ? `You will be redirected to a secure PayMongo checkout page to complete your ₱${dueAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })} payment.`
                     : `Confirm your ${selectedMethod === 'bank' ? 'bank transfer' : 'walk-in'} payment of ₱${dueAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}.`
                   }
