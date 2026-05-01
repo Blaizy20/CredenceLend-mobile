@@ -11,7 +11,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn }       from '@/src/lib/utils';
 import { loansAPI } from '../lib/api';
 
-// â”€â”€ helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── helpers ───────────────────────────────────────────────────────────────
 function fmt(n: number) {
   return n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -34,7 +34,7 @@ function getCustomerBilling() {
   }
 }
 
-// â”€â”€ payment mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── payment mode ──────────────────────────────────────────────────────────
 type PayMode   = 'online' | 'manual';
 type PayStatus = 'idle' | 'redirecting' | 'loading' | 'done' | 'failed';
 
@@ -80,7 +80,7 @@ const MANUAL_INSTRUCTIONS = {
 
 type ManualType = keyof typeof MANUAL_INSTRUCTIONS;
 
-// â”€â”€ component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── component ─────────────────────────────────────────────────────────────
 export default function Payment() {
   const navigate = useNavigate();
   const { id }   = useParams();
@@ -108,7 +108,7 @@ export default function Payment() {
     custom:      'Custom Payment',
   };
 
-  // â”€â”€ load loan â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── load loan ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (!id) return;
     (async () => {
@@ -136,7 +136,7 @@ export default function Payment() {
     });
   };
 
-  // â”€â”€ PayMongo Checkout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── PayMongo Checkout ──────────────────────────────────────────────────
   const handleCheckoutPay = async () => {
     setPayStatus('redirecting');
     setPayError('');
@@ -150,7 +150,7 @@ export default function Payment() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           amount,
-          description:   `Loan payment â€“ ${loan?.reference_no}`,
+          description:   `Loan payment – ${loan?.reference_no}`,
           reference_no:  loan?.reference_no,
           success_url:   `${origin}/loan/${id}/pay/success?method=online&amount=${amount}`,
           cancel_url:    `${origin}/loan/${id}/pay?amount=${amount}&type=${paymentType}`,
@@ -184,7 +184,7 @@ export default function Payment() {
     }
   };
 
-  // â”€â”€ loading guard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── loading guard ──────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -205,7 +205,7 @@ export default function Payment() {
     );
   }
 
-  // â”€â”€ overlay screens â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── overlay screens ────────────────────────────────────────────────────
   if (payStatus === 'redirecting') {
     return (
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
@@ -220,7 +220,7 @@ export default function Payment() {
           <ExternalLink className="text-primary" size={44} />
         </motion.div>
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-          <h2 className="font-headline font-bold text-2xl text-on-surface mb-2">Redirectingâ€¦</h2>
+          <h2 className="font-headline font-bold text-2xl text-on-surface mb-2">Redirecting…</h2>
           <p className="text-on-surface-variant text-sm">
             You're being sent to{' '}
             <span className="text-primary font-semibold">PayMongo Checkout</span>{' '}
@@ -249,7 +249,7 @@ export default function Payment() {
           className="w-24 h-24 rounded-3xl bg-primary/10 border border-primary/20 flex items-center justify-center mb-8">
           <Receipt className="text-primary" size={44} />
         </motion.div>
-        <h2 className="font-headline font-bold text-2xl text-on-surface mb-2">Recording Paymentâ€¦</h2>
+        <h2 className="font-headline font-bold text-2xl text-on-surface mb-2">Recording Payment…</h2>
         <p className="text-on-surface-variant text-sm">Please wait while we log your payment details.</p>
         <div className="flex gap-2 mt-12">
           {[0,1,2].map(i => (
@@ -329,7 +329,7 @@ export default function Payment() {
     );
   }
 
-  // â”€â”€ derived values â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ── derived values ─────────────────────────────────────────────────────
   const total      = Number(loan.total_payable)     || 0;
   const remaining  = Number(loan.remaining_balance) || 0;
   const months     = Number(loan.term_months)       || 1;
@@ -347,7 +347,7 @@ export default function Payment() {
 
       <main className="w-full max-w-md px-6 pt-24 pb-36 flex-1 space-y-6">
 
-        {/* â”€â”€ Payment Breakdown Card â”€â”€ */}
+        {/* ── Payment Breakdown Card ── */}
         <motion.div
           initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
           className="bg-surface-container-highest rounded-2xl overflow-hidden shadow-lg border border-outline-variant/10"
@@ -360,7 +360,7 @@ export default function Payment() {
                   {PAYMENT_TYPE_LABEL[paymentType]}
                 </p>
                 <h2 className="font-headline font-extrabold text-3xl text-primary tracking-tight">
-                  â‚±{fmt(dueAmount)}
+                  ₱{fmt(dueAmount)}
                 </h2>
               </div>
               <div className="text-right">
@@ -380,11 +380,11 @@ export default function Payment() {
           {/* Breakdown rows */}
           <div className="px-5 py-4 space-y-2.5">
             {[
-              { label: 'Principal Amount',    value: `â‚±${fmt(Number(loan.principal_amount))}` },
-              { label: 'Total Payable',       value: `â‚±${fmt(total)}` },
-              { label: 'Monthly Installment', value: `â‚±${fmt(monthly)}` },
-              { label: 'Paid So Far',         value: `â‚±${fmt(paidSoFar)}` },
-              { label: 'Current Balance',     value: `â‚±${fmt(remaining)}`, bold: true },
+              { label: 'Principal Amount',    value: `₱${fmt(Number(loan.principal_amount))}` },
+              { label: 'Total Payable',       value: `₱${fmt(total)}` },
+              { label: 'Monthly Installment', value: `₱${fmt(monthly)}` },
+              { label: 'Paid So Far',         value: `₱${fmt(paidSoFar)}` },
+              { label: 'Current Balance',     value: `₱${fmt(remaining)}`, bold: true },
             ].map(({ label, value, bold }) => (
               <div key={label} className="flex justify-between items-center">
                 <p className={cn('text-xs', bold ? 'font-semibold text-on-surface' : 'text-on-surface-variant')}>{label}</p>
@@ -400,12 +400,12 @@ export default function Payment() {
           <div className="px-5 py-4 space-y-2">
             <div className="flex justify-between items-center">
               <p className="text-xs font-bold text-on-surface">You will pay</p>
-              <p className="text-sm font-extrabold text-primary tabular-nums">â‚±{fmt(dueAmount)}</p>
+              <p className="text-sm font-extrabold text-primary tabular-nums">₱{fmt(dueAmount)}</p>
             </div>
             <div className="flex justify-between items-center">
               <p className="text-xs text-on-surface-variant">Balance after payment</p>
               <p className={cn('text-xs font-bold tabular-nums', isFullPay ? 'text-green-500' : 'text-on-surface')}>
-                {isFullPay ? 'â‚±0.00 Â· Fully Paid ðŸŽ‰' : `â‚±${fmt(newBalance)}`}
+                {isFullPay ? '₱0.00 · Fully Paid 🎉' : `₱${fmt(newBalance)}`}
               </p>
             </div>
           </div>
@@ -427,7 +427,7 @@ export default function Payment() {
           </div>
         </motion.div>
 
-        {/* â”€â”€ How to Pay â”€â”€ */}
+        {/* ── How to Pay ── */}
         <section className="space-y-3">
           <h3 className="font-headline font-bold text-on-surface-variant uppercase text-[10px] tracking-widest px-1">
             How to Pay
@@ -474,7 +474,7 @@ export default function Payment() {
           })}
         </section>
 
-        {/* â”€â”€ Online: PayMongo accepted methods chips â”€â”€ */}
+        {/* ── Online: PayMongo accepted methods chips ── */}
         <AnimatePresence>
           {payMode === 'online' && (
             <motion.div
@@ -503,7 +503,7 @@ export default function Payment() {
           )}
         </AnimatePresence>
 
-        {/* â”€â”€ Manual: sub-type toggle + instructions â”€â”€ */}
+        {/* ── Manual: sub-type toggle + instructions ── */}
         <AnimatePresence>
           {payMode === 'manual' && (
             <motion.div
@@ -556,7 +556,7 @@ export default function Payment() {
           )}
         </AnimatePresence>
 
-        {/* â”€â”€ Security note â”€â”€ */}
+        {/* ── Security note ── */}
         <div className="bg-surface-container-low border border-outline-variant/10 rounded-2xl p-4 flex items-center gap-3">
           <ShieldCheck className="text-primary shrink-0" size={18} />
           <p className="text-xs text-on-surface-variant leading-relaxed">
@@ -567,7 +567,7 @@ export default function Payment() {
         </div>
       </main>
 
-      {/* â”€â”€ CTA â”€â”€ */}
+      {/* ── CTA ── */}
       <div className="fixed bottom-0 left-0 w-full bg-background/80 backdrop-blur-xl pt-4 pb-10 px-6 rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.4)]">
         <div className="max-w-md mx-auto">
           <Button onClick={() => setShowConfirm(true)}>
@@ -578,7 +578,7 @@ export default function Payment() {
         </div>
       </div>
 
-      {/* â”€â”€ Confirmation Bottom Sheet â”€â”€ */}
+      {/* ── Confirmation Bottom Sheet ── */}
       <AnimatePresence>
         {showConfirm && (
           <>
@@ -615,10 +615,10 @@ export default function Payment() {
               {/* Summary */}
               <div className="bg-surface-container-high rounded-xl p-4 space-y-2.5 mb-5">
                 {[
-                  { label: 'Amount',        value: `â‚±${fmt(dueAmount)}`,                                accent: true  },
+                  { label: 'Amount',        value: `₱${fmt(dueAmount)}`,                                accent: true  },
                   { label: 'Method',        value: payMode === 'online' ? 'PayMongo Checkout' : MANUAL_INSTRUCTIONS[manualType].label },
                   { label: 'Reference',     value: loan.reference_no                                                  },
-                  { label: 'After Payment', value: isFullPay ? 'â‚±0.00 (Fully Paid ðŸŽ‰)' : `â‚±${fmt(newBalance)} remaining` },
+                  { label: 'After Payment', value: isFullPay ? '₱0.00 (Fully Paid 🎉)' : `₱${fmt(newBalance)} remaining` },
                 ].map(({ label, value, accent }) => (
                   <div key={label} className="flex justify-between items-center">
                     <p className="text-xs text-on-surface-variant">{label}</p>
