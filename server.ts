@@ -868,7 +868,7 @@ async function startServer() {
       const [payResult] = await pool.query<ResultSetHeader>(
         `INSERT INTO payments (loan_id, amount, payment_date, method, notes, tenant_id)
          VALUES (?, ?, NOW(), ?, ?)`,
-        [loan_id, payAmount, normalizedMethod, notes]
+        [loan_id, payAmount, normalizedMethod, notes, loan.tenant_id]
       );
 
       await pool.query(
