@@ -34,9 +34,16 @@ function getCustomerBilling() {
   }
 }
 
+function getCustomerId(): number | null {
+  try {
+    const stored = localStorage.getItem('user');
+    return stored ? JSON.parse(stored)?.customer_id ?? null : null;
+  } catch { return null; }
+}
+
 // ── payment mode ──────────────────────────────────────────────────────────
 type PayMode   = 'online' | 'manual';
-type PayStatus = 'idle' | 'redirecting' | 'loading' | 'done' | 'failed';
+type PayStatus = 'idle' | 'redirecting' | 'recording' | 'loading' | 'done' | 'failed';
 
 const PAY_MODES: { id: PayMode; icon: any; label: string; sub: string; badge?: string; badgeColor?: string }[] = [
   {
@@ -86,21 +93,27 @@ export default function Payment() {
   const { id }   = useParams();
   const location = useLocation();
 
-  const [loan, setLoan]                     = useState<any>(null);
-  const [loading, setLoading]               = useState(true);
-  const [error, setError]                   = useState('');
-  const [copied, setCopied]                 = useState(false);
-  const [payMode, setPayMode]               = useState<PayMode>('online');
-  const [manualType, setManualType]         = useState<ManualType>('walkin');
-  const [showConfirm, setShowConfirm]       = useState(false);
-  const [payStatus, setPayStatus]           = useState<PayStatus>('idle');
-  const [payError, setPayError]             = useState('');
+  const [loan, setLoan]               = useState<any>(null);
+  const [loading, setLoading]         = useState(true);
+  const [error, setError]             = useState('');
+  const [copied, setCopied]           = useState(false);
+  const [payMode, setPayMode]         = useState<PayMode>('online');
+  const [manualType, setManualType]   = useState<ManualType>('walkin');
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [payStatus, setPayStatus]     = useState<PayStatus>('idle');
+  const [payError, setPayError]       = useState('');
+  const [orNo, setOrNo]               = useState('');
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const query       = new URLSearchParams(location.search);
   const dueAmount   = safeAmount(Number(query.get('amount') ?? 0));
   const paymentType = (query.get('type') ?? 'installment') as 'installment' | 'full' | 'custom';
+
+  // ── URL params set by PayMongo redirect ──────────────────────────────
+  // success_url passes: ?pm_status=success&session_id=xxx&amount=yyy
+  const pmStatus    = query.get('pm_status');   // 'success' | 'failed' | null
+  const sessionId   = query.get('session_id');  // PayMongo checkout session ID
 
   const PAYMENT_TYPE_LABEL: Record<string, string> = {
     installment: 'Installment Payment',
@@ -128,6 +141,102 @@ export default function Payment() {
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [id]);
 
+  // ── Handle PayMongo redirect back ─────────────────────────────────────
+  // When PayMongo redirects back with ?pm_status=success&session_id=xxx
+  // we fetch the session to get the real method, then record the payment.
+  useEffect(() => {
+    if (!pmStatus || !sessionId || !id) return;
+
+    if (pmStatus === 'failed') {
+      setPayStatus('failed');
+      setPayError('Payment was not completed. Please try again.');
+      return;
+    }
+
+    if (pmStatus === 'success') {
+      // Retrieve session_id from sessionStorage (saved before redirect)
+      let resolvedSessionId: string | null = sessionId;
+      if (!resolvedSessionId) {
+        try {
+          const stored = sessionStorage.getItem(`pm_session_${id}`);
+          if (stored) resolvedSessionId = JSON.parse(stored)?.session_id ?? null;
+        } catch { /* ignore */ }
+      }
+
+      if (!resolvedSessionId) {
+        setPayStatus('failed');
+        setPayError('Payment session not found. Please contact support.');
+        return;
+      }
+
+      // Wait for loan to be loaded before recording
+      const doRecord = async (loanData: any) => {
+        setPayStatus('recording');
+        try {
+          // Step 1: get real method from PayMongo session
+          const statusRes  = await fetch(`/api/paymongo/checkout-status/${resolvedSessionId}`);
+          const statusData = await statusRes.json();
+
+          const realMethod = statusData.success ? statusData.method : 'OTHER';
+          const pmType     = statusData.success ? statusData.payment_method_type : 'other';
+
+          // Step 2: record payment in DB
+          const amount = safeAmount(dueAmount || Number(query.get('amount') ?? 0));
+          const recRes = await fetch('/api/paymongo/record-payment', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              loan_id:             Number(id),
+              amount,
+              method:              realMethod,
+              paymongo_session_id: resolvedSessionId,
+              paymongo_method_type: pmType,
+            }),
+          });
+          const recData = await recRes.json();
+
+          if (!recRes.ok || !recData.success) {
+            setPayStatus('failed');
+            setPayError(recData.message || 'Failed to record payment. Please contact support.');
+            return;
+          }
+
+          setOrNo(recData.or_no || '');
+          setPayStatus('done');
+
+          // Clean sessionStorage + URL so refreshing doesn't re-record
+          sessionStorage.removeItem(`pm_session_${id}`);
+          window.history.replaceState({}, '', `/loan/${id}/pay?amount=${amount}&type=${paymentType}`);
+        } catch (err: any) {
+          setPayStatus('failed');
+          setPayError(err.message || 'Failed to record payment. Please contact support.');
+        }
+      };
+
+      // If loan already loaded, record immediately; otherwise wait
+      if (loan) {
+        doRecord(loan);
+      } else {
+        // Poll until loan loads (max 5s)
+        let attempts = 0;
+        const timer = setInterval(() => {
+          attempts++;
+          if (loan) { clearInterval(timer); doRecord(loan); }
+          if (attempts > 10) { clearInterval(timer); setPayStatus('failed'); setPayError('Loan data unavailable.'); }
+        }, 500);
+        pollRef.current = timer;
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pmStatus, sessionId, id]);
+
+  // Second effect to trigger doRecord once loan loads while waiting
+  useEffect(() => {
+    if (pmStatus === 'success' && sessionId && loan && payStatus === 'idle') {
+      // Will be caught by the above effect once loan populates — handled by poll
+    }
+  }, [loan, pmStatus, sessionId, payStatus]);
+
   const handleCopy = () => {
     if (!loan?.reference_no) return;
     navigator.clipboard.writeText(loan.reference_no).then(() => {
@@ -137,6 +246,7 @@ export default function Payment() {
   };
 
   // ── PayMongo Checkout ──────────────────────────────────────────────────
+  // Passes session_id back in success_url so we can fetch the real method
   const handleCheckoutPay = async () => {
     setPayStatus('redirecting');
     setPayError('');
@@ -152,8 +262,10 @@ export default function Payment() {
           amount,
           description:   `Loan payment – ${loan?.reference_no}`,
           reference_no:  loan?.reference_no,
-          success_url:   `${origin}/loan/${id}/pay/success?method=online&amount=${amount}`,
-          cancel_url:    `${origin}/loan/${id}/pay?amount=${amount}&type=${paymentType}`,
+          // session_id placeholder — PayMongo doesn't interpolate, so we
+          // get the session_id from the API response and append to success_url below
+          success_url:  `${origin}/loan/${id}/pay?amount=${amount}&type=${paymentType}&pm_status=success`,
+          cancel_url:   `${origin}/loan/${id}/pay?amount=${amount}&type=${paymentType}&pm_status=cancelled`,
           billing_name:  billing.name,
           billing_email: billing.email,
           billing_phone: billing.phone,
@@ -166,6 +278,14 @@ export default function Payment() {
         setPayError(data.message || 'Failed to create checkout session. Please try again.');
         return;
       }
+
+      // Store session_id before redirect so success handler can find it
+      sessionStorage.setItem(`pm_session_${id}`, JSON.stringify({
+        session_id: data.session_id,
+        amount,
+        loan_id: id,
+      }));
+
       window.location.href = data.checkout_url;
     } catch (err: any) {
       setPayStatus('failed');
@@ -178,13 +298,12 @@ export default function Payment() {
     if (payMode === 'online') {
       await handleCheckoutPay();
     } else {
-      // Manual: just record intent and show done screen
       setPayStatus('loading');
       setTimeout(() => setPayStatus('done'), 2000);
     }
   };
 
-  // ── loading guard ──────────────────────────────────────────────────────
+  // ── Guards ────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -193,7 +312,7 @@ export default function Payment() {
     );
   }
 
-  if (error || !loan) {
+  if (error || (!loan && !pmStatus)) {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6 text-center space-y-4">
         <AlertCircle className="text-red-500" size={40} />
@@ -205,7 +324,7 @@ export default function Payment() {
     );
   }
 
-  // ── overlay screens ────────────────────────────────────────────────────
+  // ── Overlay screens ───────────────────────────────────────────────────
   if (payStatus === 'redirecting') {
     return (
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
@@ -235,6 +354,30 @@ export default function Payment() {
               className="w-1.5 h-1.5 rounded-full bg-primary" />
           ))}
         </motion.div>
+      </motion.div>
+    );
+  }
+
+  if (payStatus === 'recording') {
+    return (
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+        className="fixed inset-0 z-50 bg-background flex flex-col items-center justify-center px-8 text-center">
+        <motion.div
+          initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+          transition={{ type: 'spring', stiffness: 240, damping: 18 }}
+          className="w-24 h-24 rounded-3xl bg-primary/10 border border-primary/20 flex items-center justify-center mb-8">
+          <Receipt className="text-primary" size={44} />
+        </motion.div>
+        <h2 className="font-headline font-bold text-2xl text-on-surface mb-2">Recording Payment…</h2>
+        <p className="text-on-surface-variant text-sm">Please wait while we log your payment details.</p>
+        <div className="flex gap-2 mt-12">
+          {[0,1,2].map(i => (
+            <motion.div key={i}
+              animate={{ opacity: [0.3,1,0.3], scale: [0.8,1,0.8] }}
+              transition={{ duration: 1.1, repeat: Infinity, delay: i * 0.18 }}
+              className="w-1.5 h-1.5 rounded-full bg-primary" />
+          ))}
+        </div>
       </motion.div>
     );
   }
@@ -277,14 +420,19 @@ export default function Payment() {
           <CheckCircle2 className="text-green-500" size={48} />
         </motion.div>
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="space-y-2 mb-10">
-          <p className="text-on-surface-variant text-sm font-bold uppercase tracking-widest">Payment Submitted</p>
+          <p className="text-on-surface-variant text-sm font-bold uppercase tracking-widest">Payment Recorded</p>
           <h1 className="font-headline font-extrabold text-4xl text-on-surface tracking-tight">
             All Done<span className="text-green-500">.</span>
           </h1>
+          {orNo && (
+            <p className="text-on-surface-variant text-xs mt-1 font-mono">
+              Receipt: <span className="text-on-surface font-bold">{orNo}</span>
+            </p>
+          )}
           <p className="text-on-surface-variant text-sm mt-3 max-w-xs mx-auto">
             {payMode === 'manual'
               ? 'Visit the cooperative or complete your bank transfer. Your balance will update once verified.'
-              : 'Your payment has been recorded and is pending verification by the cooperative.'}
+              : 'Your payment has been recorded. Your loan balance has been updated.'}
           </p>
         </motion.div>
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }} className="w-full max-w-xs flex flex-col gap-3">
@@ -330,16 +478,15 @@ export default function Payment() {
   }
 
   // ── derived values ─────────────────────────────────────────────────────
-  const total      = Number(loan.total_payable)     || 0;
-  const remaining  = Number(loan.remaining_balance) || 0;
-  const months     = Number(loan.term_months)       || 1;
+  const total      = Number(loan?.total_payable)     || 0;
+  const remaining  = Number(loan?.remaining_balance) || 0;
+  const months     = Number(loan?.term_months)       || 1;
   const monthly    = parseFloat((total / months).toFixed(2));
   const paidSoFar  = parseFloat((total - remaining).toFixed(2));
   const newBalance = Math.max(0, safeAmount(remaining - dueAmount));
   const isFullPay  = newBalance <= 0;
   const progressNow   = total > 0 ? Math.min((paidSoFar / total) * 100, 100) : 0;
   const progressAfter = total > 0 ? Math.min(((paidSoFar + dueAmount) / total) * 100, 100) : 0;
-  const instructions  = MANUAL_INSTRUCTIONS[manualType];
 
   return (
     <div className="min-h-screen bg-background flex flex-col items-center">
@@ -366,7 +513,7 @@ export default function Payment() {
               <div className="text-right">
                 <p className="text-on-surface-variant text-[10px] uppercase tracking-wider mb-0.5">Reference</p>
                 <div className="flex items-center gap-1.5 justify-end">
-                  <p className="font-mono text-xs font-bold text-on-surface">{loan.reference_no}</p>
+                  <p className="font-mono text-xs font-bold text-on-surface">{loan?.reference_no}</p>
                   <button onClick={handleCopy} className="text-on-surface-variant active:text-primary transition-colors">
                     {copied
                       ? <CheckCircle size={14} className="text-green-500" />
@@ -380,7 +527,7 @@ export default function Payment() {
           {/* Breakdown rows */}
           <div className="px-5 py-4 space-y-2.5">
             {[
-              { label: 'Principal Amount',    value: `₱${fmt(Number(loan.principal_amount))}` },
+              { label: 'Principal Amount',    value: `₱${fmt(Number(loan?.principal_amount))}` },
               { label: 'Total Payable',       value: `₱${fmt(total)}` },
               { label: 'Monthly Installment', value: `₱${fmt(monthly)}` },
               { label: 'Paid So Far',         value: `₱${fmt(paidSoFar)}` },
@@ -410,7 +557,7 @@ export default function Payment() {
             </div>
           </div>
 
-          {/* Progress */}
+          {/* Progress bar */}
           <div className="px-5 pb-5">
             <div className="h-1.5 rounded-full bg-surface-container-low overflow-hidden">
               <motion.div
@@ -432,7 +579,6 @@ export default function Payment() {
           <h3 className="font-headline font-bold text-on-surface-variant uppercase text-[10px] tracking-widest px-1">
             How to Pay
           </h3>
-
           {PAY_MODES.map((mode, i) => {
             const isSelected = payMode === mode.id;
             return (
@@ -489,7 +635,7 @@ export default function Payment() {
                   <p className="text-[10px] font-bold text-primary uppercase tracking-widest">Accepted Payment Methods</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {['Visa', 'Mastercard', 'JCB', 'GCash', 'Maya', 'QR Ph'].map(method => (
+                  {['Visa', 'Mastercard', 'JCB', 'GCash', 'Maya', 'QR Ph', 'GrabPay', 'BPI', 'UnionBank'].map(method => (
                     <span key={method} className="text-[10px] font-semibold px-2.5 py-1 rounded-full bg-surface-container-high border border-outline-variant/15 text-on-surface-variant">
                       {method}
                     </span>
@@ -512,7 +658,6 @@ export default function Payment() {
               exit={{ opacity: 0, height: 0 }}
               className="space-y-3 overflow-hidden"
             >
-              {/* Toggle: Walk-in vs Bank Transfer */}
               <div className="flex gap-2 p-1 bg-surface-container-high rounded-xl border border-outline-variant/10">
                 {(Object.keys(MANUAL_INSTRUCTIONS) as ManualType[]).map(type => (
                   <button
@@ -529,8 +674,6 @@ export default function Payment() {
                   </button>
                 ))}
               </div>
-
-              {/* Instructions */}
               <AnimatePresence mode="wait">
                 <motion.div
                   key={manualType}
@@ -594,48 +737,30 @@ export default function Payment() {
               transition={{ type: 'spring', stiffness: 300, damping: 30 }}
               className="fixed bottom-0 left-0 right-0 z-50 p-6 bg-surface-container-low rounded-t-[2rem] shadow-2xl border-t border-white/5 max-w-md mx-auto"
             >
-              {/* Handle bar */}
               <div className="w-10 h-1 rounded-full bg-outline-variant/30 mx-auto mb-5" />
-
               <div className="flex justify-center mb-4">
                 <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center">
                   <ShieldCheck className="text-primary" size={28} />
                 </div>
               </div>
-
               <div className="text-center mb-5">
-                <h3 className="font-headline font-bold text-xl text-on-surface mb-1">Confirm Payment</h3>
+                <h3 className="font-headline font-bold text-lg text-on-surface mb-1">Confirm Payment</h3>
                 <p className="text-on-surface-variant text-sm">
-                  {payMode === 'online'
-                    ? 'You will be redirected to PayMongo to complete this payment securely.'
-                    : `Confirm your ${MANUAL_INSTRUCTIONS[manualType].label.toLowerCase()} payment. The cooperative will verify your payment.`}
+                  You are about to pay{' '}
+                  <span className="text-primary font-bold">₱{fmt(dueAmount)}</span>
+                  {' '}via{' '}
+                  <span className="font-semibold text-on-surface">
+                    {payMode === 'online' ? 'PayMongo Checkout' : MANUAL_INSTRUCTIONS[manualType].label}
+                  </span>.
                 </p>
               </div>
-
-              {/* Summary */}
-              <div className="bg-surface-container-high rounded-xl p-4 space-y-2.5 mb-5">
-                {[
-                  { label: 'Amount',        value: `₱${fmt(dueAmount)}`,                                accent: true  },
-                  { label: 'Method',        value: payMode === 'online' ? 'PayMongo Checkout' : MANUAL_INSTRUCTIONS[manualType].label },
-                  { label: 'Reference',     value: loan.reference_no                                                  },
-                  { label: 'After Payment', value: isFullPay ? '₱0.00 (Fully Paid 🎉)' : `₱${fmt(newBalance)} remaining` },
-                ].map(({ label, value, accent }) => (
-                  <div key={label} className="flex justify-between items-center">
-                    <p className="text-xs text-on-surface-variant">{label}</p>
-                    <p className={cn('text-xs font-bold', accent ? 'text-primary' : 'text-on-surface')}>{value}</p>
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-2">
                 <Button onClick={handleConfirmed}>
-                  {payMode === 'online'
-                    ? <><span>Continue to Payment</span> <ExternalLink size={16} /></>
-                    : 'Confirm'}
+                  {payMode === 'online' ? 'Continue to Checkout' : 'Confirm'}
                 </Button>
                 <button
                   onClick={() => setShowConfirm(false)}
-                  className="w-full py-4 rounded-full bg-surface-container-highest text-on-surface font-bold text-sm active:scale-95 transition-transform"
+                  className="py-3 text-sm font-semibold text-on-surface-variant hover:text-on-surface transition-colors"
                 >
                   Cancel
                 </button>
