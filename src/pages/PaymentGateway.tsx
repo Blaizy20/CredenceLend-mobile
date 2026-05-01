@@ -7,14 +7,12 @@ import {
 } from 'lucide-react';
 import { TopBar } from '../components/TopBar';
 import { Button } from '../components/Button';
-import { Input } from '../components/Input';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/src/lib/utils';
 import { loansAPI } from '../lib/api';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-type Tab = 'ewallet' | 'card';
-type EWallet = 'gcash' | 'maya';
+type Tab      = 'ewallet' | 'card';
 type CardStep = 'form' | 'processing' | 'done';
 
 interface CardForm {
@@ -35,41 +33,42 @@ const formatExpiry = (v: string) => {
   return d.length > 2 ? `${d.slice(0, 2)}/${d.slice(2)}` : d;
 };
 
-const EWALLET_OPTIONS: { id: EWallet; label: string; color: string; bg: string }[] = [
-  { id: 'gcash', label: 'GCash', color: 'text-blue-600',  bg: 'bg-blue-50'   },
-  { id: 'maya',  label: 'Maya',  color: 'text-green-600', bg: 'bg-green-50'  },
-];
+// ── GCash only — Maya removed (test mode unsupported) ────────────────────────
+const EWALLET_OPTIONS = [
+  { id: 'gcash' as const, label: 'GCash', color: 'text-blue-600', bg: 'bg-blue-50' },
+] as const;
+type EWallet = typeof EWALLET_OPTIONS[number]['id'];
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function PaymentGateway() {
-  const navigate  = useNavigate();
-  const { id }    = useParams();
-  const location  = useLocation();
+  const navigate = useNavigate();
+  const { id }   = useParams();
+  const location = useLocation();
 
   const query       = new URLSearchParams(location.search);
   const dueAmount   = Number(query.get('amount') ?? 0);
   const paymentType = query.get('type') ?? 'installment';
 
-  const [loan, setLoan]       = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const [loan, setLoan]           = useState<any>(null);
+  const [loading, setLoading]     = useState(true);
   const [pageError, setPageError] = useState('');
-  const [copied, setCopied]   = useState(false);
+  const [copied, setCopied]       = useState(false);
 
   // ── Tab & E-wallet state ──────────────────────────────────────────────────
-  const [tab, setTab]                   = useState<Tab>('ewallet');
+  const [tab, setTab]                       = useState<Tab>('ewallet');
   const [selectedWallet, setSelectedWallet] = useState<EWallet>('gcash');
 
   // ── E-wallet flow state ───────────────────────────────────────────────────
   type EWalletStep = 'select' | 'loading' | 'qr' | 'polling' | 'success' | 'error';
-  const [eStep, setEStep]       = useState<EWalletStep>('select');
-  const [eError, setEError]     = useState('');
-  const [source, setSource]     = useState<any>(null);
+  const [eStep, setEStep]         = useState<EWalletStep>('select');
+  const [eError, setEError]       = useState('');
+  const [source, setSource]       = useState<any>(null);
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── Card flow state ───────────────────────────────────────────────────────
-  const [cardStep, setCardStep] = useState<CardStep>('form');
-  const [cardForm, setCardForm] = useState<CardForm>({ number: '', name: '', expiry: '', cvv: '' });
+  const [cardStep, setCardStep]     = useState<CardStep>('form');
+  const [cardForm, setCardForm]     = useState<CardForm>({ number: '', name: '', expiry: '', cvv: '' });
   const [cardErrors, setCardErrors] = useState<Partial<CardForm>>({});
   const [cardError, setCardError]   = useState('');
 
@@ -78,7 +77,10 @@ export default function PaymentGateway() {
     if (!id) return;
     loansAPI.getLoan(Number(id))
       .then((data) => {
-        if (!data || data.success === false) { setPageError(data?.message || 'Loan not found.'); return; }
+        if (!data || data.success === false) {
+          setPageError(data?.message || 'Loan not found.');
+          return;
+        }
         setLoan(data);
       })
       .catch(() => setPageError('Unable to load loan details.'))
@@ -112,8 +114,10 @@ export default function PaymentGateway() {
           amount:           dueAmount,
           type:             selectedWallet,
           reference_no:     loan?.reference_no,
-          billing_name:     loan ? `${loan.first_name ?? ''} ${loan.last_name ?? ''}`.trim() || 'Customer' : 'Customer',
-          billing_email:    loan?.email    ?? '',
+          billing_name:     loan
+            ? `${loan.first_name ?? ''} ${loan.last_name ?? ''}`.trim() || 'Customer'
+            : 'Customer',
+          billing_email:    loan?.email      ?? '',
           billing_phone:    loan?.contact_no ?? '',
           redirect_success: `${origin}/loan/${id}/pay/success?method=${selectedWallet}&amount=${dueAmount}`,
           redirect_failed:  `${origin}/loan/${id}/pay/failed`,
@@ -125,14 +129,15 @@ export default function PaymentGateway() {
       const src = data.source;
       setSource(src);
 
-      // Build QR data URL from base64 if available, else use checkout URL as QR text
-      const qrBase64 = src.attributes?.qr_code;
+      // QR: use PayMongo base64 if provided, else fallback to qrserver CDN
+      const qrBase64    = src.attributes?.qr_code;
+      const checkoutUrl = src.attributes?.redirect?.checkout_url ?? '';
       if (qrBase64) {
         setQrDataUrl(`data:image/png;base64,${qrBase64}`);
-      } else {
-        // Fallback: generate QR from checkout URL using a CDN
-        const checkoutUrl = src.attributes?.redirect?.checkout_url ?? '';
-        setQrDataUrl(`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(checkoutUrl)}`);
+      } else if (checkoutUrl) {
+        setQrDataUrl(
+          `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(checkoutUrl)}`
+        );
       }
 
       setEStep('qr');
@@ -145,14 +150,14 @@ export default function PaymentGateway() {
 
   const startPolling = (sourceId: string) => {
     setEStep('polling');
-    let attempts = 0;
-    const MAX    = 60; // 5 minutes at 5s intervals
+    let attempts  = 0;
+    const MAX     = 60; // 5 min at 5 s intervals
 
     pollRef.current = setInterval(async () => {
       attempts++;
       try {
-        const res  = await fetch(`${API}/api/paymongo/source/${sourceId}`);
-        const data = await res.json();
+        const res    = await fetch(`${API}/api/paymongo/source/${sourceId}`);
+        const data   = await res.json();
         const status = data.source?.attributes?.status;
 
         if (status === 'chargeable' || status === 'paid') {
@@ -171,8 +176,7 @@ export default function PaymentGateway() {
 
   const recordPayment = async (sourceId: string | null, intentId: string | null) => {
     try {
-      const user  = JSON.parse(localStorage.getItem('user') || '{}');
-      const res   = await fetch(`${API}/api/paymongo/record-payment`, {
+      const res  = await fetch(`${API}/api/paymongo/record-payment`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -186,8 +190,10 @@ export default function PaymentGateway() {
       const data = await res.json();
       if (!data.success) throw new Error(data.message);
       setEStep('success');
-      // Navigate to success after brief delay
-      setTimeout(() => navigate(`/loan/${id}/pay/success?method=${tab === 'ewallet' ? selectedWallet : 'card'}&amount=${dueAmount}`), 1500);
+      setTimeout(
+        () => navigate(`/loan/${id}/pay/success?method=${tab === 'ewallet' ? selectedWallet : 'card'}&amount=${dueAmount}`),
+        1500
+      );
     } catch (err: any) {
       setEError(err.message || 'Failed to record payment.');
       setEStep('error');
@@ -208,81 +214,73 @@ export default function PaymentGateway() {
   const validateCard = (): boolean => {
     const errs: Partial<CardForm> = {};
     const num = cardForm.number.replace(/\s/g, '');
-    if (!num || num.length < 13)          errs.number  = 'Enter a valid card number.';
-    if (!cardForm.name.trim())            errs.name    = 'Cardholder name is required.';
-    if (!/^\d{2}\/\d{2}$/.test(cardForm.expiry)) errs.expiry = 'Enter expiry as MM/YY.';
-    if (!cardForm.cvv || cardForm.cvv.length < 3) errs.cvv  = 'Enter a valid CVV.';
+    if (!num || num.length < 13)                    errs.number = 'Enter a valid card number.';
+    if (!cardForm.name.trim())                      errs.name   = 'Cardholder name is required.';
+    if (!/^\d{2}\/\d{2}$/.test(cardForm.expiry))   errs.expiry = 'Enter expiry as MM/YY.';
+    if (!cardForm.cvv || cardForm.cvv.length < 3)   errs.cvv    = 'Enter a valid CVV.';
     setCardErrors(errs);
     return Object.keys(errs).length === 0;
   };
 
+  // All card API calls go through server-side endpoints — no public key in frontend
   const handleCardPay = async () => {
     if (!validateCard()) return;
     setCardStep('processing');
     setCardError('');
 
     try {
-      // 1. Create payment intent
+      // 1. Create payment intent (server)
       const intentRes  = await fetch(`${API}/api/paymongo/intent`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: dueAmount, description: `Loan payment – ${loan?.reference_no}` }),
+        body: JSON.stringify({
+          amount:      dueAmount,
+          description: `Loan payment – ${loan?.reference_no}`,
+        }),
       });
       const intentData = await intentRes.json();
       if (!intentData.success) throw new Error(intentData.message);
-      const intentId       = intentData.intent.id;
+      const intentId        = intentData.intent.id;
       const intentClientKey = intentData.intent.attributes.client_key;
 
-      // 2. Create payment method
+      // 2. Create payment method (server)
       const [month, year] = cardForm.expiry.split('/');
-      const pmRes = await fetch('https://api.paymongo.com/v1/payment_methods', {
+      const pmRes = await fetch(`${API}/api/paymongo/payment-method`, {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Basic ${btoa(import.meta.env.VITE_PAYMONGO_PUBLIC_KEY + ':')}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          data: {
-            attributes: {
-              type: 'card',
-              details: {
-                card_number: cardForm.number.replace(/\s/g, ''),
-                exp_month:   Number(month),
-                exp_year:    Number(`20${year}`),
-                cvc:         cardForm.cvv,
-              },
-              billing: { name: cardForm.name },
-            },
-          },
+          card_number: cardForm.number.replace(/\s/g, ''),
+          exp_month:   Number(month),
+          exp_year:    Number(`20${year}`),
+          cvc:         cardForm.cvv,
+          name:        cardForm.name,
         }),
       });
       const pmData = await pmRes.json();
-      if (pmData.errors) throw new Error(pmData.errors[0]?.detail || 'Invalid card details.');
-      const pmId = pmData.data.id;
+      if (!pmData.success) throw new Error(pmData.message);
+      const pmId = pmData.payment_method.id;
 
-      // 3. Attach payment method to intent
-      const attachRes = await fetch(`https://api.paymongo.com/v1/payment_intents/${intentId}/attach`, {
+      // 3. Attach payment method to intent (server)
+      const attachRes = await fetch(`${API}/api/paymongo/attach`, {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Basic ${btoa(import.meta.env.VITE_PAYMONGO_PUBLIC_KEY + ':')}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          data: {
-            attributes: {
-              payment_method:   pmId,
-              client_key:       intentClientKey,
-              return_url:       `${window.location.origin}/loan/${id}/pay/success?method=card&amount=${dueAmount}`,
-            },
-          },
+          intent_id:         intentId,
+          payment_method_id: pmId,
+          client_key:        intentClientKey,
+          return_url:        `${window.location.origin}/loan/${id}/pay/success?method=card&amount=${dueAmount}`,
         }),
       });
       const attachData = await attachRes.json();
-      if (attachData.errors) throw new Error(attachData.errors[0]?.detail || 'Card payment failed.');
+      if (!attachData.success) throw new Error(attachData.message);
 
-      const attachedIntent = attachData.data;
-      const status         = attachedIntent.attributes?.status;
+      const status = attachData.intent.attributes?.status;
 
       if (status === 'succeeded') {
         await recordPayment(null, intentId);
         setCardStep('done');
       } else if (status === 'awaiting_next_action') {
-        // 3DS redirect
-        const redirectUrl = attachedIntent.attributes?.next_action?.redirect?.url;
+        const redirectUrl = attachData.intent.attributes?.next_action?.redirect?.url;
         if (redirectUrl) window.location.href = redirectUrl;
         else throw new Error('3D Secure redirect URL missing.');
       } else {
@@ -307,8 +305,10 @@ export default function PaymentGateway() {
     <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6 text-center space-y-4">
       <AlertCircle className="text-red-500" size={40} />
       <h2 className="text-xl font-bold text-on-surface">{pageError || 'Loan not found.'}</h2>
-      <button onClick={() => navigate('/dashboard')}
-        className="bg-primary text-on-primary px-6 py-3 rounded-full font-bold">
+      <button
+        onClick={() => navigate('/dashboard')}
+        className="bg-primary text-on-primary px-6 py-3 rounded-full font-bold"
+      >
         Back to Dashboard
       </button>
     </div>
@@ -349,10 +349,16 @@ export default function PaymentGateway() {
               <p className="text-on-surface-variant text-[10px] uppercase tracking-wider mb-0.5">Reference No.</p>
               <p className="font-mono text-sm text-on-surface font-semibold">{loan.reference_no}</p>
             </div>
-            <button onClick={handleCopy}
-              className="flex items-center gap-1.5 text-on-surface-variant active:text-primary transition-colors">
-              {copied ? <CheckCircle size={16} className="text-green-500" /> : <Copy size={16} />}
-              <span className="text-[10px] font-bold uppercase tracking-wider">{copied ? 'Copied' : 'Copy'}</span>
+            <button
+              onClick={handleCopy}
+              className="flex items-center gap-1.5 text-on-surface-variant active:text-primary transition-colors"
+            >
+              {copied
+                ? <CheckCircle size={16} className="text-green-500" />
+                : <Copy size={16} />}
+              <span className="text-[10px] font-bold uppercase tracking-wider">
+                {copied ? 'Copied' : 'Copy'}
+              </span>
             </button>
           </div>
         </motion.div>
@@ -360,12 +366,17 @@ export default function PaymentGateway() {
         {/* ── Tab switcher ── */}
         <div className="flex bg-surface-container-high rounded-2xl p-1 gap-1">
           {([
-            { id: 'ewallet', label: 'E-Wallet',    Icon: Wallet     },
+            { id: 'ewallet', label: 'E-Wallet',          Icon: Wallet     },
             { id: 'card',    label: 'Credit / Debit Card', Icon: CreditCard },
           ] as const).map(({ id: tabId, label, Icon }) => (
             <button
               key={tabId}
-              onClick={() => { setTab(tabId); resetEWallet(); setCardStep('form'); setCardError(''); }}
+              onClick={() => {
+                setTab(tabId);
+                resetEWallet();
+                setCardStep('form');
+                setCardError('');
+              }}
               className={cn(
                 'flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-all',
                 tab === tabId
@@ -381,272 +392,332 @@ export default function PaymentGateway() {
 
         {/* ── E-WALLET PANEL ── */}
         <AnimatePresence mode="wait">
-        {tab === 'ewallet' && (
-          <motion.div
-            key="ewallet"
-            initial={{ opacity: 0, x: -16 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -16 }}
-            className="space-y-4"
-          >
-            {/* Step: Select wallet */}
-            {eStep === 'select' && (
-              <div className="space-y-3">
-                <p className="text-xs font-bold uppercase tracking-widest text-on-surface-variant px-1">
-                  Choose E-Wallet
-                </p>
-                {EWALLET_OPTIONS.map((w) => (
-                  <button
-                    key={w.id}
-                    onClick={() => setSelectedWallet(w.id)}
-                    className={cn(
-                      'w-full flex items-center justify-between p-4 rounded-2xl border-2 transition-all active:scale-[0.98]',
-                      selectedWallet === w.id
-                        ? 'border-primary bg-primary/5 ring-1 ring-primary/20'
-                        : 'border-outline-variant/20 bg-surface-container-high'
-                    )}
-                  >
+          {tab === 'ewallet' && (
+            <motion.div
+              key="ewallet"
+              initial={{ opacity: 0, x: -16 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -16 }}
+              className="space-y-4"
+            >
+              {/* Step: Select wallet */}
+              {eStep === 'select' && (
+                <div className="space-y-3">
+                  <p className="text-xs font-bold uppercase tracking-widest text-on-surface-variant px-1">
+                    Choose E-Wallet
+                  </p>
+
+                  {/* GCash option */}
+                  {EWALLET_OPTIONS.map((w) => (
+                    <button
+                      key={w.id}
+                      onClick={() => setSelectedWallet(w.id)}
+                      className={cn(
+                        'w-full flex items-center justify-between p-4 rounded-2xl border-2 transition-all active:scale-[0.98]',
+                        selectedWallet === w.id
+                          ? 'border-primary bg-primary/5 ring-1 ring-primary/20'
+                          : 'border-outline-variant/20 bg-surface-container-high'
+                      )}
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className={cn(
+                          'w-11 h-11 rounded-xl flex items-center justify-center font-extrabold text-sm',
+                          w.bg, w.color
+                        )}>
+                          {w.label.slice(0, 1)}
+                        </div>
+                        <div className="text-left">
+                          <p className="font-bold text-sm text-on-surface">{w.label}</p>
+                          <p className="text-xs text-on-surface-variant">Scan QR or tap to open app</p>
+                        </div>
+                      </div>
+                      {selectedWallet === w.id && (
+                        <CheckCircle className="text-primary shrink-0" size={20} fill="currentColor" />
+                      )}
+                    </button>
+                  ))}
+
+                  {/* Maya — coming soon */}
+                  <div className="w-full flex items-center justify-between p-4 rounded-2xl border-2 border-outline-variant/10 bg-surface-container-low opacity-50 cursor-not-allowed">
                     <div className="flex items-center gap-4">
-                      <div className={cn('w-11 h-11 rounded-xl flex items-center justify-center font-extrabold text-sm', w.bg, w.color)}>
-                        {w.label.slice(0, 1)}
+                      <div className="w-11 h-11 rounded-xl flex items-center justify-center font-extrabold text-sm bg-green-50 text-green-600">
+                        M
                       </div>
                       <div className="text-left">
-                        <p className="font-bold text-sm text-on-surface">{w.label}</p>
-                        <p className="text-xs text-on-surface-variant">Scan QR or tap to open app</p>
+                        <p className="font-bold text-sm text-on-surface">Maya</p>
+                        <p className="text-xs text-on-surface-variant">Available in live mode only</p>
                       </div>
                     </div>
-                    {selectedWallet === w.id && <CheckCircle className="text-primary shrink-0" size={20} fill="currentColor" />}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {/* Step: Loading */}
-            {eStep === 'loading' && (
-              <div className="flex flex-col items-center justify-center py-16 gap-4">
-                <Loader2 className="text-primary animate-spin" size={40} />
-                <p className="text-on-surface-variant text-sm font-medium">Generating payment QR...</p>
-              </div>
-            )}
-
-            {/* Step: QR + Redirect */}
-            {(eStep === 'qr' || eStep === 'polling') && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.97 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="space-y-4"
-              >
-                {/* QR Card */}
-                <div className="bg-surface-container-high rounded-2xl p-6 flex flex-col items-center gap-4 border border-outline-variant/10">
-                  <div className="flex items-center gap-2 mb-1">
-                    <QrCode className="text-primary" size={18} />
-                    <p className="text-sm font-bold text-on-surface">Scan with {selectedWallet === 'gcash' ? 'GCash' : 'Maya'}</p>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant/60 border border-outline-variant/20 px-2 py-0.5 rounded-full">
+                      Soon
+                    </span>
                   </div>
-
-                  {qrDataUrl ? (
-                    <div className="bg-white p-3 rounded-xl shadow-md">
-                      <img src={qrDataUrl} alt="Payment QR Code" width={180} height={180} className="rounded-lg" />
-                    </div>
-                  ) : (
-                    <div className="w-[180px] h-[180px] bg-surface-container-highest rounded-xl flex items-center justify-center">
-                      <Loader2 className="text-primary animate-spin" size={32} />
-                    </div>
-                  )}
-
-                  {eStep === 'polling' && (
-                    <div className="flex items-center gap-2 text-xs text-on-surface-variant">
-                      <RefreshCw size={12} className="animate-spin" />
-                      <span>Waiting for payment confirmation…</span>
-                    </div>
-                  )}
                 </div>
+              )}
 
-                {/* Divider */}
-                <div className="flex items-center gap-3">
-                  <div className="flex-1 h-px bg-outline-variant/20" />
-                  <span className="text-xs text-on-surface-variant font-medium">or</span>
-                  <div className="flex-1 h-px bg-outline-variant/20" />
+              {/* Step: Loading */}
+              {eStep === 'loading' && (
+                <div className="flex flex-col items-center justify-center py-16 gap-4">
+                  <Loader2 className="text-primary animate-spin" size={40} />
+                  <p className="text-on-surface-variant text-sm font-medium">Generating payment QR...</p>
                 </div>
+              )}
 
-                {/* Open App button */}
-                {checkoutUrl && (
-                  <a
-                    href={checkoutUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="w-full flex items-center justify-center gap-2 py-4 rounded-full bg-primary text-on-primary font-bold text-sm active:scale-95 transition-transform"
-                  >
-                    <Smartphone size={18} />
-                    Open {selectedWallet === 'gcash' ? 'GCash' : 'Maya'} App
-                    <ExternalLink size={14} />
-                  </a>
-                )}
-
-                {/* Cancel */}
-                <button
-                  onClick={resetEWallet}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-full border border-outline-variant/30 text-on-surface-variant text-sm font-semibold active:scale-95 transition-transform"
+              {/* Step: QR + Redirect */}
+              {(eStep === 'qr' || eStep === 'polling') && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.97 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="space-y-4"
                 >
-                  <X size={16} />
-                  Cancel Payment
-                </button>
-              </motion.div>
-            )}
+                  {/* QR Card */}
+                  <div className="bg-surface-container-high rounded-2xl p-6 flex flex-col items-center gap-4 border border-outline-variant/10">
+                    <div className="flex items-center gap-2 mb-1">
+                      <QrCode className="text-primary" size={18} />
+                      <p className="text-sm font-bold text-on-surface">
+                        Scan with {selectedWallet === 'gcash' ? 'GCash' : 'Maya'}
+                      </p>
+                    </div>
 
-            {/* Step: Success */}
-            {eStep === 'success' && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="flex flex-col items-center py-12 gap-4"
-              >
-                <div className="w-20 h-20 rounded-full bg-green-500/10 flex items-center justify-center">
-                  <CheckCircle className="text-green-500" size={44} />
-                </div>
-                <p className="font-bold text-lg text-on-surface">Payment Confirmed!</p>
-                <p className="text-sm text-on-surface-variant">Redirecting you now...</p>
-              </motion.div>
-            )}
-
-            {/* Step: Error */}
-            {eStep === 'error' && (
-              <motion.div
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="bg-red-500/10 border border-red-500/20 rounded-2xl p-5 flex flex-col items-center gap-3 text-center"
-              >
-                <AlertCircle className="text-red-500" size={32} />
-                <p className="text-sm text-red-600 font-medium">{eError}</p>
-                <button
-                  onClick={resetEWallet}
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-red-500 text-white text-sm font-bold active:scale-95 transition-transform"
-                >
-                  <RefreshCw size={15} />
-                  Try Again
-                </button>
-              </motion.div>
-            )}
-          </motion.div>
-        )}
-
-        {/* ── CARD PANEL ── */}
-        {tab === 'card' && (
-          <motion.div
-            key="card"
-            initial={{ opacity: 0, x: 16 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 16 }}
-            className="space-y-4"
-          >
-            {cardStep === 'form' && (
-              <>
-                <p className="text-xs font-bold uppercase tracking-widest text-on-surface-variant px-1">
-                  Card Details
-                </p>
-
-                {/* Card number */}
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-on-surface-variant uppercase tracking-wider px-1">Card Number</label>
-                  <div className="relative">
-                    <input
-                      type="tel"
-                      inputMode="numeric"
-                      placeholder="0000 0000 0000 0000"
-                      value={cardForm.number}
-                      onChange={(e) => setCardForm(p => ({ ...p, number: formatCardNumber(e.target.value) }))}
-                      className={cn(
-                        'w-full bg-surface-container-high rounded-xl px-4 py-3.5 text-on-surface font-mono text-base tracking-widest border transition-all outline-none focus:ring-2 focus:ring-primary/30',
-                        cardErrors.number ? 'border-red-400' : 'border-outline-variant/20 focus:border-primary'
-                      )}
-                    />
-                    <CreditCard className="absolute right-4 top-1/2 -translate-y-1/2 text-on-surface-variant/40" size={18} />
-                  </div>
-                  {cardErrors.number && <p className="text-xs text-red-500 px-1">{cardErrors.number}</p>}
-                </div>
-
-                {/* Cardholder name */}
-                <div className="space-y-1">
-                  <label className="text-xs font-semibold text-on-surface-variant uppercase tracking-wider px-1">Cardholder Name</label>
-                  <input
-                    type="text"
-                    placeholder="As it appears on the card"
-                    value={cardForm.name}
-                    onChange={(e) => setCardForm(p => ({ ...p, name: e.target.value.toUpperCase() }))}
-                    className={cn(
-                      'w-full bg-surface-container-high rounded-xl px-4 py-3.5 text-on-surface text-base border transition-all outline-none focus:ring-2 focus:ring-primary/30',
-                      cardErrors.name ? 'border-red-400' : 'border-outline-variant/20 focus:border-primary'
+                    {qrDataUrl ? (
+                      <div className="bg-white p-3 rounded-xl shadow-md">
+                        <img
+                          src={qrDataUrl}
+                          alt="Payment QR Code"
+                          width={180}
+                          height={180}
+                          className="rounded-lg"
+                        />
+                      </div>
+                    ) : (
+                      <div className="w-[180px] h-[180px] bg-surface-container-highest rounded-xl flex items-center justify-center">
+                        <Loader2 className="text-primary animate-spin" size={32} />
+                      </div>
                     )}
-                  />
-                  {cardErrors.name && <p className="text-xs text-red-500 px-1">{cardErrors.name}</p>}
-                </div>
 
-                {/* Expiry + CVV */}
-                <div className="grid grid-cols-2 gap-3">
+                    {eStep === 'polling' && (
+                      <div className="flex items-center gap-2 text-xs text-on-surface-variant">
+                        <RefreshCw size={12} className="animate-spin" />
+                        <span>Waiting for payment confirmation…</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Divider */}
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 h-px bg-outline-variant/20" />
+                    <span className="text-xs text-on-surface-variant font-medium">or</span>
+                    <div className="flex-1 h-px bg-outline-variant/20" />
+                  </div>
+
+                  {/* Open App button */}
+                  {checkoutUrl && (
+                    <a
+                      href={checkoutUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="w-full flex items-center justify-center gap-2 py-4 rounded-full bg-primary text-on-primary font-bold text-sm active:scale-95 transition-transform"
+                    >
+                      <Smartphone size={18} />
+                      Open {selectedWallet === 'gcash' ? 'GCash' : 'Maya'} App
+                      <ExternalLink size={14} />
+                    </a>
+                  )}
+
+                  {/* Cancel */}
+                  <button
+                    onClick={resetEWallet}
+                    className="w-full flex items-center justify-center gap-2 py-3 rounded-full border border-outline-variant/30 text-on-surface-variant text-sm font-semibold active:scale-95 transition-transform"
+                  >
+                    <X size={16} />
+                    Cancel Payment
+                  </button>
+                </motion.div>
+              )}
+
+              {/* Step: Success */}
+              {eStep === 'success' && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="flex flex-col items-center py-12 gap-4"
+                >
+                  <div className="w-20 h-20 rounded-full bg-green-500/10 flex items-center justify-center">
+                    <CheckCircle className="text-green-500" size={44} />
+                  </div>
+                  <p className="font-bold text-lg text-on-surface">Payment Confirmed!</p>
+                  <p className="text-sm text-on-surface-variant">Redirecting you now...</p>
+                </motion.div>
+              )}
+
+              {/* Step: Error */}
+              {eStep === 'error' && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="bg-red-500/10 border border-red-500/20 rounded-2xl p-5 flex flex-col items-center gap-3 text-center"
+                >
+                  <AlertCircle className="text-red-500" size={32} />
+                  <p className="text-sm text-red-600 font-medium">{eError}</p>
+                  <button
+                    onClick={resetEWallet}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-red-500 text-white text-sm font-bold active:scale-95 transition-transform"
+                  >
+                    <RefreshCw size={15} />
+                    Try Again
+                  </button>
+                </motion.div>
+              )}
+            </motion.div>
+          )}
+
+          {/* ── CARD PANEL ── */}
+          {tab === 'card' && (
+            <motion.div
+              key="card"
+              initial={{ opacity: 0, x: 16 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 16 }}
+              className="space-y-4"
+            >
+              {cardStep === 'form' && (
+                <>
+                  <p className="text-xs font-bold uppercase tracking-widest text-on-surface-variant px-1">
+                    Card Details
+                  </p>
+
+                  {/* Card number */}
                   <div className="space-y-1">
-                    <label className="text-xs font-semibold text-on-surface-variant uppercase tracking-wider px-1">Expiry</label>
+                    <label className="text-xs font-semibold text-on-surface-variant uppercase tracking-wider px-1">
+                      Card Number
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="tel"
+                        inputMode="numeric"
+                        placeholder="0000 0000 0000 0000"
+                        value={cardForm.number}
+                        onChange={(e) => setCardForm(p => ({ ...p, number: formatCardNumber(e.target.value) }))}
+                        className={cn(
+                          'w-full bg-surface-container-high rounded-xl px-4 py-3.5 text-on-surface font-mono text-base tracking-widest border transition-all outline-none focus:ring-2 focus:ring-primary/30',
+                          cardErrors.number
+                            ? 'border-red-400'
+                            : 'border-outline-variant/20 focus:border-primary'
+                        )}
+                      />
+                      <CreditCard
+                        className="absolute right-4 top-1/2 -translate-y-1/2 text-on-surface-variant/40"
+                        size={18}
+                      />
+                    </div>
+                    {cardErrors.number && (
+                      <p className="text-xs text-red-500 px-1">{cardErrors.number}</p>
+                    )}
+                  </div>
+
+                  {/* Cardholder name */}
+                  <div className="space-y-1">
+                    <label className="text-xs font-semibold text-on-surface-variant uppercase tracking-wider px-1">
+                      Cardholder Name
+                    </label>
                     <input
-                      type="tel"
-                      inputMode="numeric"
-                      placeholder="MM/YY"
-                      value={cardForm.expiry}
-                      onChange={(e) => setCardForm(p => ({ ...p, expiry: formatExpiry(e.target.value) }))}
+                      type="text"
+                      placeholder="As it appears on the card"
+                      value={cardForm.name}
+                      onChange={(e) => setCardForm(p => ({ ...p, name: e.target.value.toUpperCase() }))}
                       className={cn(
-                        'w-full bg-surface-container-high rounded-xl px-4 py-3.5 text-on-surface font-mono text-base border transition-all outline-none focus:ring-2 focus:ring-primary/30',
-                        cardErrors.expiry ? 'border-red-400' : 'border-outline-variant/20 focus:border-primary'
+                        'w-full bg-surface-container-high rounded-xl px-4 py-3.5 text-on-surface text-base border transition-all outline-none focus:ring-2 focus:ring-primary/30',
+                        cardErrors.name
+                          ? 'border-red-400'
+                          : 'border-outline-variant/20 focus:border-primary'
                       )}
                     />
-                    {cardErrors.expiry && <p className="text-xs text-red-500 px-1">{cardErrors.expiry}</p>}
+                    {cardErrors.name && (
+                      <p className="text-xs text-red-500 px-1">{cardErrors.name}</p>
+                    )}
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-xs font-semibold text-on-surface-variant uppercase tracking-wider px-1">CVV</label>
-                    <input
-                      type="tel"
-                      inputMode="numeric"
-                      placeholder="•••"
-                      maxLength={4}
-                      value={cardForm.cvv}
-                      onChange={(e) => setCardForm(p => ({ ...p, cvv: e.target.value.replace(/\D/g, '').slice(0, 4) }))}
-                      className={cn(
-                        'w-full bg-surface-container-high rounded-xl px-4 py-3.5 text-on-surface font-mono text-base border transition-all outline-none focus:ring-2 focus:ring-primary/30',
-                        cardErrors.cvv ? 'border-red-400' : 'border-outline-variant/20 focus:border-primary'
+
+                  {/* Expiry + CVV */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-on-surface-variant uppercase tracking-wider px-1">
+                        Expiry
+                      </label>
+                      <input
+                        type="tel"
+                        inputMode="numeric"
+                        placeholder="MM/YY"
+                        value={cardForm.expiry}
+                        onChange={(e) => setCardForm(p => ({ ...p, expiry: formatExpiry(e.target.value) }))}
+                        className={cn(
+                          'w-full bg-surface-container-high rounded-xl px-4 py-3.5 text-on-surface font-mono text-base border transition-all outline-none focus:ring-2 focus:ring-primary/30',
+                          cardErrors.expiry
+                            ? 'border-red-400'
+                            : 'border-outline-variant/20 focus:border-primary'
+                        )}
+                      />
+                      {cardErrors.expiry && (
+                        <p className="text-xs text-red-500 px-1">{cardErrors.expiry}</p>
                       )}
-                    />
-                    {cardErrors.cvv && <p className="text-xs text-red-500 px-1">{cardErrors.cvv}</p>}
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-on-surface-variant uppercase tracking-wider px-1">
+                        CVV
+                      </label>
+                      <input
+                        type="tel"
+                        inputMode="numeric"
+                        placeholder="•••"
+                        maxLength={4}
+                        value={cardForm.cvv}
+                        onChange={(e) =>
+                          setCardForm(p => ({ ...p, cvv: e.target.value.replace(/\D/g, '').slice(0, 4) }))
+                        }
+                        className={cn(
+                          'w-full bg-surface-container-high rounded-xl px-4 py-3.5 text-on-surface font-mono text-base border transition-all outline-none focus:ring-2 focus:ring-primary/30',
+                          cardErrors.cvv
+                            ? 'border-red-400'
+                            : 'border-outline-variant/20 focus:border-primary'
+                        )}
+                      />
+                      {cardErrors.cvv && (
+                        <p className="text-xs text-red-500 px-1">{cardErrors.cvv}</p>
+                      )}
+                    </div>
                   </div>
-                </div>
 
-                {cardError && (
-                  <div className="p-3 bg-red-500/10 rounded-xl flex items-center gap-2 text-red-500 text-xs font-medium">
-                    <AlertCircle size={16} />
-                    <span>{cardError}</span>
+                  {cardError && (
+                    <div className="p-3 bg-red-500/10 rounded-xl flex items-center gap-2 text-red-500 text-xs font-medium">
+                      <AlertCircle size={16} />
+                      <span>{cardError}</span>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {cardStep === 'processing' && (
+                <div className="flex flex-col items-center justify-center py-16 gap-4">
+                  <Loader2 className="text-primary animate-spin" size={40} />
+                  <p className="text-on-surface-variant text-sm font-medium">Processing card payment...</p>
+                  <p className="text-on-surface-variant/60 text-xs">Please do not close this screen.</p>
+                </div>
+              )}
+
+              {cardStep === 'done' && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="flex flex-col items-center py-12 gap-4"
+                >
+                  <div className="w-20 h-20 rounded-full bg-green-500/10 flex items-center justify-center">
+                    <CheckCircle className="text-green-500" size={44} />
                   </div>
-                )}
-              </>
-            )}
-
-            {cardStep === 'processing' && (
-              <div className="flex flex-col items-center justify-center py-16 gap-4">
-                <Loader2 className="text-primary animate-spin" size={40} />
-                <p className="text-on-surface-variant text-sm font-medium">Processing card payment...</p>
-                <p className="text-on-surface-variant/60 text-xs">Please do not close this screen.</p>
-              </div>
-            )}
-
-            {cardStep === 'done' && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="flex flex-col items-center py-12 gap-4"
-              >
-                <div className="w-20 h-20 rounded-full bg-green-500/10 flex items-center justify-center">
-                  <CheckCircle className="text-green-500" size={44} />
-                </div>
-                <p className="font-bold text-lg text-on-surface">Payment Confirmed!</p>
-                <p className="text-sm text-on-surface-variant">Redirecting you now...</p>
-              </motion.div>
-            )}
-          </motion.div>
-        )}
+                  <p className="font-bold text-lg text-on-surface">Payment Confirmed!</p>
+                  <p className="text-sm text-on-surface-variant">Redirecting you now...</p>
+                </motion.div>
+              )}
+            </motion.div>
+          )}
         </AnimatePresence>
 
         {/* ── Security note ── */}

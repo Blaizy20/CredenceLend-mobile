@@ -43,14 +43,13 @@ type CustomerRow = RowDataPacket & {
   is_active:   number;
 };
 
-// Valid payment methods — single source of truth
 const VALID_METHODS = ["gcash", "maya", "card", "bank", "walkin"] as const;
 type PaymentMethod  = typeof VALID_METHODS[number];
 
 const METHOD_MAP: Record<string, PaymentMethod> = {
   gcash:  "gcash",
   maya:   "maya",
-  wallet: "gcash",  // fallback if 'wallet' slips through
+  wallet: "gcash",
   card:   "card",
   bank:   "bank",
   walkin: "walkin",
@@ -697,7 +696,7 @@ async function startServer() {
             attributes: {
               amount:                 Math.round(Number(amount) * 100),
               currency:               "PHP",
-              payment_method_allowed: ["card"],   // ← only card; dob/dob_ubp removed
+              payment_method_allowed: ["card"],
               capture_type:           "automatic",
               ...(description && { description }),
             },
@@ -734,6 +733,75 @@ async function startServer() {
     }
   });
 
+  // ── PayMongo: Create Card Payment Method ──────────────────────────────────
+  app.post("/api/paymongo/payment-method", async (req, res) => {
+    try {
+      const { card_number, exp_month, exp_year, cvc, name } = req.body;
+
+      if (!card_number || !exp_month || !exp_year || !cvc || !name)
+        return res.status(400).json({ success: false, message: "Missing card details." });
+
+      const response = await fetch("https://api.paymongo.com/v1/payment_methods", {
+        method:  "POST",
+        headers: PAYMONGO_HEADERS,
+        body: JSON.stringify({
+          data: {
+            attributes: {
+              type:    "card",
+              details: { card_number, exp_month, exp_year, cvc },
+              billing: { name },
+            },
+          },
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok)
+        return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Invalid card details." });
+
+      res.json({ success: true, payment_method: data.data });
+    } catch (err: any) {
+      console.error("PayMongo payment method error:", err.message);
+      res.status(500).json({ success: false, message: "Payment service unavailable." });
+    }
+  });
+
+  // ── PayMongo: Attach Payment Method to Intent ─────────────────────────────
+  app.post("/api/paymongo/attach", async (req, res) => {
+    try {
+      const { intent_id, payment_method_id, client_key, return_url } = req.body;
+
+      if (!intent_id || !payment_method_id || !client_key || !return_url)
+        return res.status(400).json({ success: false, message: "Missing required fields." });
+
+      const response = await fetch(
+        `https://api.paymongo.com/v1/payment_intents/${intent_id}/attach`,
+        {
+          method:  "POST",
+          headers: PAYMONGO_HEADERS,
+          body: JSON.stringify({
+            data: {
+              attributes: {
+                payment_method: payment_method_id,
+                client_key,
+                return_url,
+              },
+            },
+          }),
+        }
+      );
+
+      const data = await response.json();
+      if (!response.ok)
+        return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to attach payment method." });
+
+      res.json({ success: true, intent: data.data });
+    } catch (err: any) {
+      console.error("PayMongo attach error:", err.message);
+      res.status(500).json({ success: false, message: "Payment service unavailable." });
+    }
+  });
+
   // ── PayMongo: Record Payment After Success ────────────────────────────────
   app.post("/api/paymongo/record-payment", async (req, res) => {
     try {
@@ -742,10 +810,9 @@ async function startServer() {
       if (!loan_id || !amount || !method)
         return res.status(400).json({ success: false, message: "Missing required fields." });
 
-      // Normalize to valid DB ENUM value
       const normalizedMethod = normalizeMethod(String(method));
 
-      // Guard against duplicate PayMongo payments
+      // Guard against duplicate payments from the same source/intent
       if (paymongo_source_id) {
         const [existing] = await pool.query<RowDataPacket[]>(
           `SELECT payment_id FROM payments WHERE notes LIKE ? LIMIT 1`,
@@ -759,10 +826,28 @@ async function startServer() {
           });
       }
 
+      if (paymongo_intent_id) {
+        const [existing] = await pool.query<RowDataPacket[]>(
+          `SELECT payment_id FROM payments WHERE notes LIKE ? LIMIT 1`,
+          [`%${paymongo_intent_id}%`]
+        );
+        if (existing.length > 0)
+          return res.json({
+            success:    true,
+            payment_id: existing[0].payment_id,
+            message:    "Payment already recorded.",
+          });
+      }
+
+      // ── FIX: use COALESCE to resolve tenant_id from customers if loans.tenant_id is NULL
       const [loanRows] = await pool.query<RowDataPacket[]>(
-        `SELECT loan_id, customer_id, remaining_balance, tenant_id
-         FROM loans WHERE loan_id = ? LIMIT 1`,
-        [loan_id]
+        `SELECT l.loan_id, l.customer_id, l.remaining_balance,
+                COALESCE(l.tenant_id, c.tenant_id, ?) AS tenant_id
+         FROM loans l
+         JOIN customers c ON c.customer_id = l.customer_id
+         WHERE l.loan_id = ?
+         LIMIT 1`,
+        [DEFAULT_TENANT_ID, loan_id]
       );
       if (loanRows.length === 0)
         return res.status(404).json({ success: false, message: "Loan not found." });
