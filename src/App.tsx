@@ -18,6 +18,7 @@ import AdminLoans from './pages/AdminLoans';
 import ApplyLoanStep1 from './pages/ApplyLoanStep1';
 import ApplyLoanStep2 from './pages/ApplyLoanStep2';
 import PaymentOptions from './pages/PaymentOptions';
+import Payment from './pages/Payment';
 import PaymentGateway from './pages/PaymentGateway';
 import PaymentSuccess from './pages/PaymentSuccess';
 import Profile from './pages/Profile';
