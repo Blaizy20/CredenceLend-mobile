@@ -1,17 +1,27 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { Copy, Store, Landmark, Wallet, CreditCard, CheckCircle, ShieldCheck, Loader2, AlertCircle, CheckCircle2, LayoutDashboard, Receipt, AlertTriangle } from 'lucide-react';
-import { TopBar } from '../components/TopBar';
-import { Button } from '../components/Button';
+import {
+  Copy, Store, Landmark, Wallet, CreditCard, CheckCircle,
+  ShieldCheck, Loader2, AlertCircle, CheckCircle2, LayoutDashboard,
+  Receipt, AlertTriangle, ExternalLink,
+} from 'lucide-react';
+import { TopBar }   from '../components/TopBar';
+import { Button }   from '../components/Button';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn } from '@/src/lib/utils';
+import { cn }       from '@/src/lib/utils';
 import { loansAPI } from '../lib/api';
 
+// ── PayMongo e-wallet sub-methods ─────────────────────────────────────────
+const EWALLET_OPTIONS = [
+  { id: 'gcash',    label: 'GCash',   logo: '💚' },
+  { id: 'paymaya',  label: 'Maya',    logo: '🔵' },
+];
+
 const METHODS = [
-  { id: 'walkin',  label: 'Walk-in',       sub: 'Over-the-counter at the cooperative', icon: Store      },
-  { id: 'bank',    label: 'Bank Transfer', sub: 'BPI, BDO, UnionBank & more',           icon: Landmark   },
-  { id: 'wallet',  label: 'E-wallet',      sub: 'GCash, Maya, ShopeePay',              icon: Wallet,    isFast: true },
-  { id: 'card',    label: 'Card',          sub: 'Visa, Mastercard, JCB',               icon: CreditCard },
+  { id: 'walkin', label: 'Walk-in',       sub: 'Over-the-counter at the cooperative', icon: Store      },
+  { id: 'bank',   label: 'Bank Transfer', sub: 'BPI, BDO, UnionBank & more',           icon: Landmark   },
+  { id: 'wallet', label: 'E-wallet',      sub: 'GCash, Maya',                          icon: Wallet,    isFast: true },
+  { id: 'card',   label: 'Card',          sub: 'Visa, Mastercard, JCB',               icon: CreditCard },
 ];
 
 const METHOD_INSTRUCTIONS: Record<string, { title: string; steps: string[] }> = {
@@ -34,47 +44,42 @@ const METHOD_INSTRUCTIONS: Record<string, { title: string; steps: string[] }> = 
     ],
   },
   wallet: {
-    title: 'E-wallet Payment Instructions',
+    title: 'E-wallet Payment',
     steps: [
-      'Open your GCash, Maya, or ShopeePay app.',
-      'Send the exact amount to the cooperative\'s registered number.',
-      'Use your reference number as the message/note.',
-      'Send your screenshot as proof of payment.',
+      'Select GCash or Maya below.',
+      'You will be redirected to authorize the payment.',
+      'Return here once the payment is complete.',
     ],
   },
   card: {
-    title: 'Card Payment Instructions',
+    title: 'Card Payment',
     steps: [
-      'Visit the cooperative office or accredited payment center.',
-      'Present your card and reference number.',
-      'Authorize the payment for the exact amount.',
-      'Keep your transaction receipt for your records.',
+      'You will be redirected to a secure PayMongo checkout.',
+      'Enter your card details to complete the payment.',
+      'A 3D Secure authentication may be required.',
     ],
   },
 };
 
-const METHOD_LABELS: Record<string, string> = {
-  walkin: 'Preparing Walk-in Details',
-  bank:   'Preparing Bank Transfer Details',
-  wallet: 'Preparing E-wallet Details',
-  card:   'Preparing Card Payment Details',
-};
+type PayStatus = 'idle' | 'redirecting' | 'polling' | 'loading' | 'done' | 'failed';
 
 export default function Payment() {
   const navigate = useNavigate();
   const { id }   = useParams();
   const location = useLocation();
 
-  const [loan, setLoan]       = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState('');
-  const [copied, setCopied]   = useState(false);
+  const [loan, setLoan]           = useState<any>(null);
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState('');
+  const [copied, setCopied]       = useState(false);
+  const [selectedMethod, setSelectedMethod]   = useState('walkin');
+  const [selectedEwallet, setSelectedEwallet] = useState('gcash');
+  const [showConfirm, setShowConfirm]         = useState(false);
+  const [payStatus, setPayStatus]             = useState<PayStatus>('idle');
+  const [payError, setPayError]               = useState('');
 
-  const [selectedMethod, setSelectedMethod] = useState('walkin');
-  const [showConfirm, setShowConfirm]       = useState(false);
-
-  // 'idle' | 'loading' | 'done'
-  const [successStep, setSuccessStep] = useState<'idle' | 'loading' | 'done'>('idle');
+  const pollRef    = useRef<ReturnType<typeof setInterval> | null>(null);
+  const sourceRef  = useRef<string>('');
 
   const query       = new URLSearchParams(location.search);
   const dueAmount   = Number(query.get('amount') ?? 0);
@@ -97,6 +102,7 @@ export default function Payment() {
       }
     };
     load();
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, [id]);
 
   const handleCopy = () => {
@@ -107,12 +113,79 @@ export default function Payment() {
     });
   };
 
-  const handleConfirmed = () => {
+  // ── GCash / Maya flow ─────────────────────────────────────────────────
+  const handleEwalletPay = async () => {
     setShowConfirm(false);
-    setSuccessStep('loading');
-    setTimeout(() => setSuccessStep('done'), 2200);
+    setPayError('');
+    setPayStatus('redirecting');
+    try {
+      const origin  = window.location.origin;
+      const success = `${origin}/loan/${id}/pay/success?method=wallet`;
+      const failed  = `${origin}/loan/${id}/pay/failed`;
+
+      const res = await fetch('/api/paymongo/source', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amount:           dueAmount,
+          type:             selectedEwallet,
+          reference_no:     loan.reference_no,
+          redirect_success: success,
+          redirect_failed:  failed,
+        }),
+      });
+      const data = await res.json();
+      if (!data.success) { setPayStatus('failed'); setPayError(data.message); return; }
+
+      const checkoutUrl = data.source.attributes.redirect.checkout_url;
+      sourceRef.current = data.source.id;
+
+      // Open GCash/Maya in same tab
+      window.location.href = checkoutUrl;
+    } catch (err: any) {
+      setPayStatus('failed');
+      setPayError(err.message || 'Payment failed. Please try again.');
+    }
   };
 
+  // ── Card / Bank flow ──────────────────────────────────────────────────
+  const handleCardPay = async () => {
+    setShowConfirm(false);
+    setPayError('');
+    setPayStatus('redirecting');
+    try {
+      const res = await fetch('/api/paymongo/intent', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: dueAmount }),
+      });
+      const data = await res.json();
+      if (!data.success) { setPayStatus('failed'); setPayError(data.message); return; }
+
+      // Redirect to PayMongo's hosted checkout using client_key
+      const clientKey = data.intent.attributes.client_key;
+      const returnUrl = encodeURIComponent(`${window.location.origin}/loan/${id}/pay/success?method=card`);
+      window.location.href = `https://checkout.paymongo.com/intents/${data.intent.id}?client_key=${clientKey}&return_url=${returnUrl}`;
+    } catch (err: any) {
+      setPayStatus('failed');
+      setPayError(err.message || 'Payment failed. Please try again.');
+    }
+  };
+
+  // ── Walk-in (manual, no PayMongo) ─────────────────────────────────────
+  const handleWalkinConfirm = () => {
+    setShowConfirm(false);
+    setPayStatus('loading');
+    setTimeout(() => setPayStatus('done'), 2200);
+  };
+
+  const handleConfirmed = () => {
+    if (selectedMethod === 'wallet')            handleEwalletPay();
+    else if (selectedMethod === 'card' || selectedMethod === 'bank') handleCardPay();
+    else                                        handleWalkinConfirm();
+  };
+
+  // ── Loading states ────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -134,9 +207,173 @@ export default function Payment() {
     );
   }
 
+  // ── Redirecting Screen ────────────────────────────────────────────────
+  if (payStatus === 'redirecting') {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="fixed inset-0 z-50 bg-background flex flex-col items-center justify-center px-8 text-center"
+      >
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-primary/10 rounded-full blur-[100px]" />
+        </div>
+        <motion.div
+          initial={{ scale: 0.6, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ type: 'spring', stiffness: 240, damping: 18 }}
+          className="w-24 h-24 rounded-3xl bg-primary/10 border border-primary/20 flex items-center justify-center mb-8 shadow-2xl shadow-primary/20"
+        >
+          <ExternalLink className="text-primary" size={44} />
+        </motion.div>
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
+          <h2 className="font-headline font-bold text-2xl text-on-surface mb-2">Redirecting…</h2>
+          <p className="text-on-surface-variant text-sm">
+            You're being sent to{' '}
+            <span className="text-primary font-semibold">
+              {selectedMethod === 'wallet'
+                ? (selectedEwallet === 'gcash' ? 'GCash' : 'Maya')
+                : 'PayMongo Checkout'}
+            </span>{' '}
+            to complete your payment.
+          </p>
+        </motion.div>
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }} className="flex gap-2 mt-12">
+          {[0, 1, 2].map((i) => (
+            <motion.div
+              key={i}
+              animate={{ opacity: [0.3, 1, 0.3], scale: [0.8, 1, 0.8] }}
+              transition={{ duration: 1.1, repeat: Infinity, delay: i * 0.18 }}
+              className="w-1.5 h-1.5 rounded-full bg-primary"
+            />
+          ))}
+        </motion.div>
+      </motion.div>
+    );
+  }
+
+  // ── Processing Screen ─────────────────────────────────────────────────
+  if (payStatus === 'loading') {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="fixed inset-0 z-50 bg-background flex flex-col items-center justify-center px-8 text-center"
+      >
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-primary/10 rounded-full blur-[100px]" />
+        </div>
+        <motion.div
+          initial={{ scale: 0.6, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ type: 'spring', stiffness: 240, damping: 18 }}
+          className="w-24 h-24 rounded-3xl bg-primary/10 border border-primary/20 flex items-center justify-center mb-8 shadow-2xl shadow-primary/20"
+        >
+          <Receipt className="text-primary" size={44} />
+        </motion.div>
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
+          <h2 className="font-headline font-bold text-2xl text-on-surface mb-2">Recording Payment…</h2>
+          <p className="text-on-surface-variant text-sm">Please wait while we log your payment details.</p>
+        </motion.div>
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }} className="flex gap-2 mt-12">
+          {[0, 1, 2].map((i) => (
+            <motion.div
+              key={i}
+              animate={{ opacity: [0.3, 1, 0.3], scale: [0.8, 1, 0.8] }}
+              transition={{ duration: 1.1, repeat: Infinity, delay: i * 0.18 }}
+              className="w-1.5 h-1.5 rounded-full bg-primary"
+            />
+          ))}
+        </motion.div>
+      </motion.div>
+    );
+  }
+
+  // ── Success Screen ────────────────────────────────────────────────────
+  if (payStatus === 'done') {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="fixed inset-0 z-50 bg-background flex flex-col items-center justify-center px-8 text-center"
+      >
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-green-500/10 rounded-full blur-[100px]" />
+        </div>
+        <motion.div
+          initial={{ scale: 0, rotate: -20 }}
+          animate={{ scale: 1, rotate: 0 }}
+          transition={{ type: 'spring', stiffness: 260, damping: 18, delay: 0.1 }}
+          className="w-24 h-24 rounded-3xl bg-green-500/10 border border-green-500/20 flex items-center justify-center mb-8 shadow-2xl shadow-green-500/10"
+        >
+          <CheckCircle2 className="text-green-500" size={48} />
+        </motion.div>
+        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="space-y-2 mb-10">
+          <p className="text-on-surface-variant text-sm font-bold uppercase tracking-widest">Payment Submitted</p>
+          <h1 className="font-headline font-extrabold text-4xl text-on-surface tracking-tight">
+            All Done<span className="text-green-500">.</span>
+          </h1>
+          <p className="text-on-surface-variant text-sm mt-3 max-w-xs mx-auto">
+            Your payment has been recorded and is pending verification by the cooperative.
+          </p>
+        </motion.div>
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }} className="w-full max-w-xs flex flex-col gap-3">
+          <Button onClick={() => navigate('/dashboard')}>
+            <LayoutDashboard size={18} /> Back to Dashboard
+          </Button>
+          <button
+            onClick={() => navigate(`/loan/${id}`)}
+            className="text-primary font-semibold text-sm hover:underline"
+          >
+            View Loan Details
+          </button>
+        </motion.div>
+      </motion.div>
+    );
+  }
+
+  // ── Failed Screen ─────────────────────────────────────────────────────
+  if (payStatus === 'failed') {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="fixed inset-0 z-50 bg-background flex flex-col items-center justify-center px-8 text-center"
+      >
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-red-500/10 rounded-full blur-[100px]" />
+        </div>
+        <motion.div
+          initial={{ scale: 0, rotate: 20 }}
+          animate={{ scale: 1, rotate: 0 }}
+          transition={{ type: 'spring', stiffness: 260, damping: 18, delay: 0.1 }}
+          className="w-24 h-24 rounded-3xl bg-red-500/10 border border-red-500/20 flex items-center justify-center mb-8 shadow-2xl shadow-red-500/10"
+        >
+          <AlertTriangle className="text-red-500" size={48} />
+        </motion.div>
+        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }} className="space-y-2 mb-10">
+          <p className="text-on-surface-variant text-sm font-bold uppercase tracking-widest">Payment Failed</p>
+          <h1 className="font-headline font-extrabold text-4xl text-on-surface tracking-tight">
+            Try Again<span className="text-red-500">.</span>
+          </h1>
+          <p className="text-on-surface-variant text-sm mt-3 max-w-xs mx-auto">
+            {payError || 'Something went wrong processing your payment.'}
+          </p>
+        </motion.div>
+        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }} className="w-full max-w-xs flex flex-col gap-3">
+          <Button onClick={() => { setPayStatus('idle'); setPayError(''); }}>
+            Try Again
+          </Button>
+          <button onClick={() => navigate('/dashboard')} className="text-on-surface-variant font-semibold text-sm hover:underline">
+            Back to Dashboard
+          </button>
+        </motion.div>
+      </motion.div>
+    );
+  }
+
   const instructions = METHOD_INSTRUCTIONS[selectedMethod];
   const activeMethod = METHODS.find(m => m.id === selectedMethod)!;
-  const MethodIcon   = activeMethod.icon;
 
   return (
     <div className="min-h-screen bg-background flex flex-col items-center">
@@ -152,9 +389,7 @@ export default function Payment() {
         >
           <div className="flex justify-between items-start mb-4">
             <div>
-              <p className="text-on-surface-variant text-xs font-medium uppercase tracking-widest mb-1">
-                Due Amount
-              </p>
+              <p className="text-on-surface-variant text-xs font-medium uppercase tracking-widest mb-1">Due Amount</p>
               <h2 className="font-headline font-extrabold text-3xl text-primary tracking-tight">
                 ₱ {dueAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </h2>
@@ -170,12 +405,8 @@ export default function Payment() {
             </div>
             <button onClick={handleCopy}
               className="flex items-center gap-1.5 text-on-surface-variant active:text-primary transition-colors">
-              {copied
-                ? <CheckCircle size={16} className="text-green-500" />
-                : <Copy size={16} />}
-              <span className="text-[10px] font-bold uppercase tracking-wider">
-                {copied ? 'Copied' : 'Copy'}
-              </span>
+              {copied ? <CheckCircle size={16} className="text-green-500" /> : <Copy size={16} />}
+              <span className="text-[10px] font-bold uppercase tracking-wider">{copied ? 'Copied' : 'Copy'}</span>
             </button>
           </div>
         </motion.div>
@@ -196,19 +427,15 @@ export default function Payment() {
                     : 'border-outline-variant/20 bg-surface-container-high hover:bg-surface-bright'
                 )}>
                 <div className="flex items-center gap-4">
-                  <div className={cn(
-                    'w-11 h-11 rounded-xl flex items-center justify-center',
-                    isSelected ? 'bg-primary/10' : 'bg-surface-container-highest'
-                  )}>
+                  <div className={cn('w-11 h-11 rounded-xl flex items-center justify-center',
+                    isSelected ? 'bg-primary/10' : 'bg-surface-container-highest')}>
                     <method.icon className="text-primary" size={22} />
                   </div>
                   <div className="text-left">
                     <div className="flex items-center gap-2">
                       <p className="font-semibold text-sm text-on-surface">{method.label}</p>
                       {method.isFast && (
-                        <span className="bg-primary/10 text-primary text-[8px] px-1.5 py-0.5 rounded font-bold uppercase tracking-tight">
-                          Fast
-                        </span>
+                        <span className="bg-primary/10 text-primary text-[8px] px-1.5 py-0.5 rounded font-bold uppercase tracking-tight">Fast</span>
                       )}
                     </div>
                     <p className="text-xs text-on-surface-variant">{method.sub}</p>
@@ -220,11 +447,75 @@ export default function Payment() {
           })}
         </section>
 
+        {/* E-wallet sub-selector */}
+        <AnimatePresence>
+          {selectedMethod === 'wallet' && (
+            <motion.section
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="space-y-2 overflow-hidden"
+            >
+              <h3 className="font-headline font-bold text-on-surface-variant uppercase text-[10px] tracking-widest px-1">
+                Select E-wallet
+              </h3>
+              <div className="grid grid-cols-2 gap-3">
+                {EWALLET_OPTIONS.map((ew) => {
+                  const isActive = selectedEwallet === ew.id;
+                  return (
+                    <button
+                      key={ew.id}
+                      onClick={() => setSelectedEwallet(ew.id)}
+                      className={cn(
+                        'flex flex-col items-center justify-center gap-2 p-4 rounded-2xl border-2 transition-all active:scale-95',
+                        isActive
+                          ? 'border-primary bg-primary/5 ring-1 ring-primary/20'
+                          : 'border-outline-variant/20 bg-surface-container-high'
+                      )}
+                    >
+                      <span className="text-2xl">{ew.logo}</span>
+                      <span className={cn('text-sm font-bold', isActive ? 'text-primary' : 'text-on-surface')}>
+                        {ew.label}
+                      </span>
+                      {isActive && <CheckCircle className="text-primary" size={16} fill="currentColor" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </motion.section>
+          )}
+        </AnimatePresence>
+
+        {/* Instructions */}
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={selectedMethod}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            className="bg-surface-container-low border border-outline-variant/10 rounded-2xl p-5 space-y-3"
+          >
+            <p className="text-xs font-bold text-primary uppercase tracking-widest">{instructions.title}</p>
+            <ol className="space-y-2">
+              {instructions.steps.map((step, i) => (
+                <li key={i} className="flex items-start gap-3 text-xs text-on-surface-variant">
+                  <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">
+                    {i + 1}
+                  </span>
+                  {step}
+                </li>
+              ))}
+            </ol>
+          </motion.div>
+        </AnimatePresence>
+
         {/* Security note */}
         <div className="bg-surface-container-low border border-outline-variant/10 rounded-2xl p-4 flex items-center gap-3">
           <ShieldCheck className="text-primary shrink-0" size={20} />
           <p className="text-xs text-on-surface-variant leading-relaxed">
-            Your transactions are secured. Payment will be verified by the cooperative before updating your balance.
+            {selectedMethod === 'walkin'
+              ? 'Your transactions are secured. Payment will be verified by the cooperative before updating your balance.'
+              : 'Payments are processed securely through PayMongo. Your card and wallet details are never stored on our servers.'}
           </p>
         </div>
       </main>
@@ -233,12 +524,12 @@ export default function Payment() {
       <div className="fixed bottom-0 left-0 w-full bg-background/80 backdrop-blur-xl pt-4 pb-10 px-6 rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.4)]">
         <div className="max-w-md mx-auto">
           <Button onClick={() => setShowConfirm(true)}>
-            Confirm Payment Method
+            {selectedMethod === 'walkin' ? 'Confirm Payment Method' : 'Proceed to Payment'}
           </Button>
         </div>
       </div>
 
-      {/* ── Confirmation Bottom Sheet ── */}
+      {/* Confirmation Bottom Sheet */}
       <AnimatePresence>
         {showConfirm && (
           <>
@@ -248,228 +539,41 @@ export default function Payment() {
               className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
             />
             <motion.div
-              initial={{ opacity: 0, y: 80 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 80 }}
+              initial={{ opacity: 0, y: 60, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 60, scale: 0.95 }}
               transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-              className="fixed bottom-0 left-0 right-0 z-50 bg-surface-container-low rounded-t-[2rem] shadow-2xl border-t border-white/5 max-w-md mx-auto"
+              className="fixed bottom-0 left-0 right-0 z-50 p-6 bg-surface-container-low rounded-t-[2rem] shadow-2xl border-t border-white/5 max-w-md mx-auto"
             >
-              <div className="p-6">
-                {/* Handle */}
-                <div className="w-10 h-1 bg-outline/30 rounded-full mx-auto mb-6" />
-
-                {/* Header */}
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
-                    <MethodIcon size={24} />
-                  </div>
-                  <div>
-                    <h3 className="font-headline font-bold text-xl text-on-surface">Confirm Payment</h3>
-                    <p className="text-on-surface-variant text-xs">Review your payment details before proceeding</p>
-                  </div>
+              <div className="flex justify-center mb-4">
+                <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center">
+                  <ShieldCheck className="text-primary" size={28} />
                 </div>
-
-                {/* Payment summary */}
-                <div className="mb-4 p-4 bg-primary/5 border border-primary/10 rounded-2xl space-y-3">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-primary mb-3">Payment Summary</p>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-on-surface-variant">Amount</span>
-                    <span className="font-extrabold text-primary text-base">
-                      ₱ {dueAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-on-surface-variant">Type</span>
-                    <span className="font-bold text-on-surface capitalize">
-                      {paymentType === 'full' ? 'Full Settlement' : 'Installment'}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-on-surface-variant">Reference No.</span>
-                    <span className="font-bold text-on-surface font-mono">{loan.reference_no}</span>
-                  </div>
-                  <div className="border-t border-primary/10 my-1" />
-                  <div className="flex justify-between text-sm">
-                    <span className="text-on-surface-variant">Payment Method</span>
-                    <div className="flex items-center gap-1.5">
-                      <MethodIcon size={14} className="text-primary" />
-                      <span className="font-bold text-on-surface">{activeMethod.label}</span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Disclaimer */}
-                <div className="flex gap-3 p-3 bg-orange-500/5 border border-orange-500/10 rounded-xl mb-6">
-                  <AlertTriangle size={16} className="text-orange-500 shrink-0 mt-0.5" />
-                  <p className="text-xs text-on-surface-variant leading-relaxed">
-                    This will initiate your payment. Your balance will only update once the cooperative verifies your payment.
-                  </p>
-                </div>
-
-                {/* Buttons */}
-                <div className="flex flex-col gap-3">
-                  <button
-                    onClick={handleConfirmed}
-                    className="w-full py-4 rounded-full bg-primary text-on-primary font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-transform shadow-lg shadow-primary/20"
-                  >
-                    <CheckCircle2 size={18} />
-                    Yes, Proceed with Payment
-                  </button>
-                  <button
-                    onClick={() => setShowConfirm(false)}
-                    className="w-full py-4 rounded-full bg-surface-container-highest text-on-surface font-bold text-sm active:scale-95 transition-transform"
-                  >
-                    Go Back & Edit
-                  </button>
-                </div>
+              </div>
+              <div className="text-center mb-6">
+                <h3 className="font-headline font-bold text-xl text-on-surface mb-1">Confirm Payment</h3>
+                <p className="text-on-surface-variant text-sm">
+                  {selectedMethod === 'wallet'
+                    ? `You will be redirected to ${selectedEwallet === 'gcash' ? 'GCash' : 'Maya'} to authorize ₱${dueAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}.`
+                    : selectedMethod === 'card' || selectedMethod === 'bank'
+                    ? `You will be redirected to a secure PayMongo checkout page to complete your ₱${dueAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })} payment.`
+                    : `Confirm your walk-in payment of ₱${dueAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })} at the cooperative.`
+                  }
+                </p>
+              </div>
+              <div className="flex flex-col gap-3">
+                <Button onClick={handleConfirmed}>
+                  {selectedMethod === 'walkin' ? 'Confirm' : 'Continue to Payment'} <ExternalLink size={16} />
+                </Button>
+                <button
+                  onClick={() => setShowConfirm(false)}
+                  className="w-full py-4 rounded-full bg-surface-container-highest text-on-surface font-bold text-sm active:scale-95 transition-transform"
+                >
+                  Cancel
+                </button>
               </div>
             </motion.div>
           </>
-        )}
-      </AnimatePresence>
-
-      {/* ── Loading / Success overlay ── */}
-      <AnimatePresence>
-        {successStep !== 'idle' && (
-          <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[60] bg-background flex flex-col items-center justify-center px-8"
-          >
-            {successStep === 'loading' && (
-              <motion.div
-                key="loading"
-                initial={{ opacity: 0, scale: 0.85 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.85 }}
-                className="flex flex-col items-center gap-6"
-              >
-                <div className="relative w-24 h-24 flex items-center justify-center">
-                  <motion.div
-                    animate={{ scale: [1, 1.3, 1], opacity: [0.4, 0, 0.4] }}
-                    transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
-                    className="absolute inset-0 rounded-full bg-primary/20"
-                  />
-                  <svg className="absolute inset-0 w-full h-full animate-spin" viewBox="0 0 96 96">
-                    <circle cx="48" cy="48" r="40"
-                      fill="none" stroke="currentColor" strokeWidth="4"
-                      strokeLinecap="round" strokeDasharray="180 72"
-                      className="text-primary" />
-                  </svg>
-                  <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center">
-                    <MethodIcon size={26} className="text-primary" />
-                  </div>
-                </div>
-                <div className="text-center space-y-1">
-                  <p className="font-headline font-bold text-xl text-on-surface">
-                    {METHOD_LABELS[selectedMethod]}
-                  </p>
-                  <p className="text-on-surface-variant text-sm">Please wait a moment…</p>
-                </div>
-                <div className="flex gap-2">
-                  {[0, 1, 2].map(i => (
-                    <motion.div key={i} className="w-2 h-2 rounded-full bg-primary"
-                      animate={{ opacity: [0.3, 1, 0.3], y: [0, -6, 0] }}
-                      transition={{ duration: 1, repeat: Infinity, delay: i * 0.2 }} />
-                  ))}
-                </div>
-              </motion.div>
-            )}
-
-            {successStep === 'done' && (
-              <motion.div
-                key="done"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-                className="flex flex-col items-center gap-6 text-center max-w-xs w-full"
-              >
-                <motion.div
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  transition={{ type: 'spring', stiffness: 300, damping: 20, delay: 0.1 }}
-                  className="w-24 h-24 rounded-full bg-primary/10 border-2 border-primary/30 flex items-center justify-center"
-                >
-                  <motion.div
-                    initial={{ scale: 0, rotate: -30 }}
-                    animate={{ scale: 1, rotate: 0 }}
-                    transition={{ type: 'spring', stiffness: 400, damping: 20, delay: 0.2 }}
-                  >
-                    <CheckCircle2 size={48} className="text-primary" />
-                  </motion.div>
-                </motion.div>
-
-                {/* Amount pill */}
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.9 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ delay: 0.3 }}
-                  className="bg-primary/10 border border-primary/20 rounded-2xl px-6 py-3"
-                >
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-primary mb-1">
-                    {paymentType === 'full' ? 'Full Settlement' : 'Installment Payment'}
-                  </p>
-                  <p className="font-headline font-extrabold text-2xl text-primary">
-                    ₱ {dueAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </p>
-                </motion.div>
-
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.35 }}
-                  className="space-y-2"
-                >
-                  <h2 className="font-headline font-extrabold text-2xl text-on-surface">
-                    Payment Initiated!
-                  </h2>
-                  <p className="text-on-surface-variant text-sm leading-relaxed">
-                    Please follow the instructions below to complete your payment.
-                    Your balance will update once the cooperative confirms receipt.
-                  </p>
-                </motion.div>
-
-                {/* Instructions */}
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.45 }}
-                  className="w-full bg-surface-container-low rounded-2xl p-4 text-left space-y-2"
-                >
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-3">
-                    {instructions.title}
-                  </p>
-                  <ol className="space-y-2">
-                    {instructions.steps.map((step, i) => (
-                      <li key={i} className="flex items-start gap-3">
-                        <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-extrabold flex items-center justify-center shrink-0 mt-0.5">
-                          {i + 1}
-                        </span>
-                        <p className="text-xs text-on-surface leading-relaxed">{step}</p>
-                      </li>
-                    ))}
-                  </ol>
-                </motion.div>
-
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.5 }}
-                  className="w-full flex flex-col gap-3 pt-2"
-                >
-                  <button onClick={() => navigate(`/loan/${id}`)}
-                    className="w-full py-4 rounded-full bg-primary text-on-primary font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-transform shadow-lg shadow-primary/20"
-                  >
-                    <Receipt size={18} />
-                    View Loan Details
-                  </button>
-                  <button onClick={() => navigate('/dashboard')}
-                    className="w-full py-4 rounded-full bg-surface-container-highest text-on-surface font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-transform"
-                  >
-                    <LayoutDashboard size={18} />
-                    Go to Dashboard
-                  </button>
-                </motion.div>
-              </motion.div>
-            )}
-          </motion.div>
         )}
       </AnimatePresence>
     </div>
