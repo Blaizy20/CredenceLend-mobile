@@ -11,17 +11,17 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn }       from '@/src/lib/utils';
 import { loansAPI } from '../lib/api';
 
-// ── PayMongo e-wallet sub-methods ─────────────────────────────────────────
+// ── PayMongo e-wallet sub-methods ─────────────────────────────────────────────
 const EWALLET_OPTIONS = [
-  { id: 'gcash',    label: 'GCash',   logo: '💚' },
-  { id: 'paymaya',  label: 'Maya',    logo: '🔵' },
+  { id: 'gcash',   label: 'GCash', logo: '🔵' },
+  { id: 'paymaya', label: 'Maya',  logo: '💚' },
 ];
 
 const METHODS = [
-  { id: 'walkin', label: 'Walk-in',       sub: 'Over-the-counter at the cooperative', icon: Store      },
-  { id: 'bank',   label: 'Bank Transfer', sub: 'BPI, BDO, UnionBank & more',           icon: Landmark   },
-  { id: 'wallet', label: 'E-wallet',      sub: 'GCash, Maya',                          icon: Wallet,    isFast: true },
-  { id: 'card',   label: 'Card',          sub: 'Visa, Mastercard, JCB',               icon: CreditCard },
+  { id: 'walkin', label: 'Walk-in',       sub: 'Over-the-counter at the cooperative', icon: Store                  },
+  { id: 'bank',   label: 'Bank Transfer', sub: 'BPI, BDO, UnionBank & more',           icon: Landmark               },
+  { id: 'wallet', label: 'E-wallet',      sub: 'GCash, Maya',                          icon: Wallet,  isFast: true  },
+  { id: 'card',   label: 'Card',          sub: 'Visa, Mastercard, JCB',               icon: CreditCard              },
 ];
 
 const METHOD_INSTRUCTIONS: Record<string, { title: string; steps: string[] }> = {
@@ -37,8 +37,8 @@ const METHOD_INSTRUCTIONS: Record<string, { title: string; steps: string[] }> = 
   bank: {
     title: 'Bank Transfer Instructions',
     steps: [
-      'Log in to your online banking app.',
-      'Transfer the exact amount to the cooperative\'s account.',
+      "Log in to your online banking app.",
+      "Transfer the exact amount to the cooperative's account.",
       'Use your reference number as the transaction remarks.',
       'Send your proof of payment to the cooperative.',
     ],
@@ -61,25 +61,39 @@ const METHOD_INSTRUCTIONS: Record<string, { title: string; steps: string[] }> = 
   },
 };
 
-type PayStatus = 'idle' | 'redirecting' | 'polling' | 'loading' | 'done' | 'failed';
+type PayStatus = 'idle' | 'redirecting' | 'loading' | 'done' | 'failed';
+
+// ── Customer billing helper ───────────────────────────────────────────────────
+function getCustomerBilling() {
+  try {
+    const stored   = localStorage.getItem('user');
+    const customer = stored ? JSON.parse(stored) : {};
+    return {
+      name:  `${customer.first_name ?? ''} ${customer.last_name ?? ''}`.trim() || 'Customer',
+      email: customer.email      ?? '',
+      phone: customer.contact_no ?? '',
+    };
+  } catch {
+    return { name: 'Customer', email: '', phone: '' };
+  }
+}
 
 export default function Payment() {
   const navigate = useNavigate();
   const { id }   = useParams();
   const location = useLocation();
 
-  const [loan, setLoan]           = useState<any>(null);
-  const [loading, setLoading]     = useState(true);
-  const [error, setError]         = useState('');
-  const [copied, setCopied]       = useState(false);
+  const [loan, setLoan]                       = useState<any>(null);
+  const [loading, setLoading]                 = useState(true);
+  const [error, setError]                     = useState('');
+  const [copied, setCopied]                   = useState(false);
   const [selectedMethod, setSelectedMethod]   = useState('walkin');
   const [selectedEwallet, setSelectedEwallet] = useState('gcash');
   const [showConfirm, setShowConfirm]         = useState(false);
   const [payStatus, setPayStatus]             = useState<PayStatus>('idle');
   const [payError, setPayError]               = useState('');
 
-  const pollRef    = useRef<ReturnType<typeof setInterval> | null>(null);
-  const sourceRef  = useRef<string>('');
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const query       = new URLSearchParams(location.search);
   const dueAmount   = Number(query.get('amount') ?? 0);
@@ -113,15 +127,14 @@ export default function Payment() {
     });
   };
 
-  // ── GCash / Maya flow ─────────────────────────────────────────────────
+  // ── GCash / Maya ──────────────────────────────────────────────────────────
   const handleEwalletPay = async () => {
     setShowConfirm(false);
     setPayError('');
     setPayStatus('redirecting');
     try {
       const origin  = window.location.origin;
-      const success = `${origin}/loan/${id}/pay/success?method=wallet`;
-      const failed  = `${origin}/loan/${id}/pay/failed`;
+      const billing = getCustomerBilling();
 
       const res = await fetch('/api/paymongo/source', {
         method:  'POST',
@@ -130,25 +143,25 @@ export default function Payment() {
           amount:           dueAmount,
           type:             selectedEwallet,
           reference_no:     loan.reference_no,
-          redirect_success: success,
-          redirect_failed:  failed,
+          redirect_success: `${origin}/loan/${id}/pay/success?method=wallet&amount=${dueAmount}`,
+          redirect_failed:  `${origin}/loan/${id}/pay/failed`,
+          billing_name:     billing.name,
+          billing_email:    billing.email,
+          billing_phone:    billing.phone,
         }),
       });
+
       const data = await res.json();
       if (!data.success) { setPayStatus('failed'); setPayError(data.message); return; }
 
-      const checkoutUrl = data.source.attributes.redirect.checkout_url;
-      sourceRef.current = data.source.id;
-
-      // Open GCash/Maya in same tab
-      window.location.href = checkoutUrl;
+      window.location.href = data.source.attributes.redirect.checkout_url;
     } catch (err: any) {
       setPayStatus('failed');
       setPayError(err.message || 'Payment failed. Please try again.');
     }
   };
 
-  // ── Card / Bank flow ──────────────────────────────────────────────────
+  // ── Card / Bank ───────────────────────────────────────────────────────────
   const handleCardPay = async () => {
     setShowConfirm(false);
     setPayError('');
@@ -157,22 +170,28 @@ export default function Payment() {
       const res = await fetch('/api/paymongo/intent', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount: dueAmount }),
+        body: JSON.stringify({
+          amount,
+          description: `Loan payment – ${loan.reference_no}`,
+        }),
       });
+
       const data = await res.json();
       if (!data.success) { setPayStatus('failed'); setPayError(data.message); return; }
 
-      // Redirect to PayMongo's hosted checkout using client_key
       const clientKey = data.intent.attributes.client_key;
-      const returnUrl = encodeURIComponent(`${window.location.origin}/loan/${id}/pay/success?method=card`);
-      window.location.href = `https://checkout.paymongo.com/intents/${data.intent.id}?client_key=${clientKey}&return_url=${returnUrl}`;
+      const returnUrl = encodeURIComponent(
+        `${window.location.origin}/loan/${id}/pay/success?method=${selectedMethod}&amount=${dueAmount}`
+      );
+      window.location.href =
+        `https://checkout.paymongo.com/intents/${data.intent.id}?client_key=${clientKey}&return_url=${returnUrl}`;
     } catch (err: any) {
       setPayStatus('failed');
       setPayError(err.message || 'Payment failed. Please try again.');
     }
   };
 
-  // ── Walk-in (manual, no PayMongo) ─────────────────────────────────────
+  // ── Walk-in ───────────────────────────────────────────────────────────────
   const handleWalkinConfirm = () => {
     setShowConfirm(false);
     setPayStatus('loading');
@@ -180,12 +199,12 @@ export default function Payment() {
   };
 
   const handleConfirmed = () => {
-    if (selectedMethod === 'wallet')            handleEwalletPay();
+    if      (selectedMethod === 'wallet')                           handleEwalletPay();
     else if (selectedMethod === 'card' || selectedMethod === 'bank') handleCardPay();
-    else                                        handleWalkinConfirm();
+    else                                                             handleWalkinConfirm();
   };
 
-  // ── Loading states ────────────────────────────────────────────────────
+  // ── Guards ────────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -207,7 +226,7 @@ export default function Payment() {
     );
   }
 
-  // ── Redirecting Screen ────────────────────────────────────────────────
+  // ── Redirecting Screen ────────────────────────────────────────────────────
   if (payStatus === 'redirecting') {
     return (
       <motion.div
@@ -252,7 +271,7 @@ export default function Payment() {
     );
   }
 
-  // ── Processing Screen ─────────────────────────────────────────────────
+  // ── Processing Screen ─────────────────────────────────────────────────────
   if (payStatus === 'loading') {
     return (
       <motion.div
@@ -289,7 +308,7 @@ export default function Payment() {
     );
   }
 
-  // ── Success Screen ────────────────────────────────────────────────────
+  // ── Success Screen ────────────────────────────────────────────────────────
   if (payStatus === 'done') {
     return (
       <motion.div
@@ -321,10 +340,7 @@ export default function Payment() {
           <Button onClick={() => navigate('/dashboard')}>
             <LayoutDashboard size={18} /> Back to Dashboard
           </Button>
-          <button
-            onClick={() => navigate(`/loan/${id}`)}
-            className="text-primary font-semibold text-sm hover:underline"
-          >
+          <button onClick={() => navigate(`/loan/${id}`)} className="text-primary font-semibold text-sm hover:underline">
             View Loan Details
           </button>
         </motion.div>
@@ -332,7 +348,7 @@ export default function Payment() {
     );
   }
 
-  // ── Failed Screen ─────────────────────────────────────────────────────
+  // ── Failed Screen ─────────────────────────────────────────────────────────
   if (payStatus === 'failed') {
     return (
       <motion.div
@@ -372,8 +388,8 @@ export default function Payment() {
     );
   }
 
+  // ── Main UI ───────────────────────────────────────────────────────────────
   const instructions = METHOD_INSTRUCTIONS[selectedMethod];
-  const activeMethod = METHODS.find(m => m.id === selectedMethod)!;
 
   return (
     <div className="min-h-screen bg-background flex flex-col items-center">
@@ -403,8 +419,7 @@ export default function Payment() {
               <p className="text-on-surface-variant text-[10px] uppercase tracking-wider mb-0.5">Reference Number</p>
               <p className="font-mono text-sm text-on-surface font-semibold">{loan.reference_no}</p>
             </div>
-            <button onClick={handleCopy}
-              className="flex items-center gap-1.5 text-on-surface-variant active:text-primary transition-colors">
+            <button onClick={handleCopy} className="flex items-center gap-1.5 text-on-surface-variant active:text-primary transition-colors">
               {copied ? <CheckCircle size={16} className="text-green-500" /> : <Copy size={16} />}
               <span className="text-[10px] font-bold uppercase tracking-wider">{copied ? 'Copied' : 'Copy'}</span>
             </button>
@@ -419,13 +434,16 @@ export default function Payment() {
           {METHODS.map((method) => {
             const isSelected = selectedMethod === method.id;
             return (
-              <button key={method.id} onClick={() => setSelectedMethod(method.id)}
+              <button
+                key={method.id}
+                onClick={() => setSelectedMethod(method.id)}
                 className={cn(
                   'w-full flex items-center justify-between p-4 rounded-2xl transition-all border active:scale-[0.98]',
                   isSelected
                     ? 'border-primary/30 bg-primary/5 ring-1 ring-primary/20'
                     : 'border-outline-variant/20 bg-surface-container-high hover:bg-surface-bright'
-                )}>
+                )}
+              >
                 <div className="flex items-center gap-4">
                   <div className={cn('w-11 h-11 rounded-xl flex items-center justify-center',
                     isSelected ? 'bg-primary/10' : 'bg-surface-container-highest')}>

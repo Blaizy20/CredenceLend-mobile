@@ -675,7 +675,8 @@ async function startServer() {
   // ── PayMongo: Create E-wallet Source (GCash / Maya) ───────────────────────
   app.post("/api/paymongo/source", async (req, res) => {
     try {
-      const { amount, type, reference_no, redirect_success, redirect_failed } = req.body;
+      const { amount, type, reference_no, redirect_success, redirect_failed,
+              billing_name, billing_email, billing_phone } = req.body;
 
       if (!amount || !type || !redirect_success || !redirect_failed)
         return res.status(400).json({ success: false, message: "Missing required payment fields." });
@@ -690,7 +691,11 @@ async function startServer() {
               currency: "PHP",
               type,
               redirect: { success: redirect_success, failed: redirect_failed },
-              billing:  { name: "CredenceLend Customer" },
+              billing: {
+                name:  billing_name  ?? "CredenceLend Customer",
+                email: billing_email ?? "",
+                phone: billing_phone ?? "",
+              },
               ...(reference_no && { metadata: { reference_no } }),
             },
           },
