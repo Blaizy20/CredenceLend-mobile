@@ -5,7 +5,6 @@
 
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import React, { useEffect, useState } from 'react';
-// Removed Firebase auth for localStorage-only auth
 import Login from './pages/Login';
 import ForgotPassword from './pages/ForgotPassword';
 import RegisterStep1 from './pages/RegisterStep1';
@@ -19,13 +18,11 @@ import AdminLoans from './pages/AdminLoans';
 import ApplyLoanStep1 from './pages/ApplyLoanStep1';
 import ApplyLoanStep2 from './pages/ApplyLoanStep2';
 import PaymentOptions from './pages/PaymentOptions';
-import Payment from './pages/Payment';  
+import Payment from './pages/Payment';
+import PaymentSuccess from './pages/PaymentSuccess';
 import Profile from './pages/Profile';
 import Inbox from './pages/Inbox';
 import Transactions from './pages/Transactions';
-import PaymentSuccess from './pages/PaymentSuccess';
-
-// Removed ProtectedRoute, use localStorage checks in pages
 
 export default function App() {
   return (
@@ -38,15 +35,15 @@ export default function App() {
         <Route path="/register/step2" element={<RegisterStep2 />} />
         <Route path="/register/step3" element={<RegisterStep3 />} />
         <Route path="/register/step4" element={<RegisterStep4 />} />
-        
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/track" element={<TrackLoan />} />
         <Route path="/loan/:id" element={<LoanDetails />} />
         <Route path="/admin/loans" element={<AdminLoans />} />
         <Route path="/apply" element={<ApplyLoanStep1 />} />
         <Route path="/apply/step2" element={<ApplyLoanStep2 />} />
-        <Route path="/loan/:id/pay"         element={<PaymentOptions />} />
+        <Route path="/loan/:id/pay" element={<PaymentOptions />} />
         <Route path="/loan/:id/pay/confirm" element={<Payment />} />
+        <Route path="/loan/:id/pay/success" element={<PaymentSuccess />} />
         <Route path="/profile" element={<Profile />} />
         <Route path="/inbox" element={<Inbox />} />
         <Route path="/transactions" element={<Transactions />} />
@@ -54,4 +51,3 @@ export default function App() {
     </Router>
   );
 }
-

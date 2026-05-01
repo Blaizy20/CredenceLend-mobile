@@ -11,17 +11,16 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn }       from '@/src/lib/utils';
 import { loansAPI } from '../lib/api';
 
-// ── PayMongo e-wallet sub-methods ─────────────────────────────────────────────
 const EWALLET_OPTIONS = [
   { id: 'gcash',   label: 'GCash', logo: '🔵' },
   { id: 'paymaya', label: 'Maya',  logo: '💚' },
 ];
 
 const METHODS = [
-  { id: 'walkin', label: 'Walk-in',       sub: 'Over-the-counter at the cooperative', icon: Store                  },
-  { id: 'bank',   label: 'Bank Transfer', sub: 'BPI, BDO, UnionBank & more',           icon: Landmark               },
-  { id: 'wallet', label: 'E-wallet',      sub: 'GCash, Maya',                          icon: Wallet,  isFast: true  },
-  { id: 'card',   label: 'Card',          sub: 'Visa, Mastercard, JCB',               icon: CreditCard              },
+  { id: 'walkin', label: 'Walk-in',       sub: 'Over-the-counter at the cooperative', icon: Store                 },
+  { id: 'bank',   label: 'Bank Transfer', sub: 'BPI, BDO, UnionBank & more',           icon: Landmark              },
+  { id: 'wallet', label: 'E-wallet',      sub: 'GCash, Maya',                          icon: Wallet, isFast: true  },
+  { id: 'card',   label: 'Card',          sub: 'Visa, Mastercard, JCB',               icon: CreditCard             },
 ];
 
 const METHOD_INSTRUCTIONS: Record<string, { title: string; steps: string[] }> = {
@@ -63,7 +62,6 @@ const METHOD_INSTRUCTIONS: Record<string, { title: string; steps: string[] }> = 
 
 type PayStatus = 'idle' | 'redirecting' | 'loading' | 'done' | 'failed';
 
-// ── Customer billing helper ───────────────────────────────────────────────────
 function getCustomerBilling() {
   try {
     const stored   = localStorage.getItem('user');
@@ -76,6 +74,11 @@ function getCustomerBilling() {
   } catch {
     return { name: 'Customer', email: '', phone: '' };
   }
+}
+
+// Sanitize amount to 2 decimal places for safe URL embedding
+function safeAmount(n: number): number {
+  return parseFloat(n.toFixed(2));
 }
 
 export default function Payment() {
@@ -96,7 +99,7 @@ export default function Payment() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const query       = new URLSearchParams(location.search);
-  const dueAmount   = Number(query.get('amount') ?? 0);
+  const dueAmount   = safeAmount(Number(query.get('amount') ?? 0));
   const paymentType = query.get('type') ?? 'installment';
 
   useEffect(() => {
@@ -135,15 +138,16 @@ export default function Payment() {
     try {
       const origin  = window.location.origin;
       const billing = getCustomerBilling();
+      const amount  = safeAmount(dueAmount);
 
       const res = await fetch('/api/paymongo/source', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          amount:           dueAmount,
+          amount,
           type:             selectedEwallet,
           reference_no:     loan.reference_no,
-          redirect_success: `${origin}/loan/${id}/pay/success?method=wallet&amount=${parseFloat(dueAmount.toFixed(2))}`,
+          redirect_success: `${origin}/loan/${id}/pay/success?method=wallet&amount=${amount}`,
           redirect_failed:  `${origin}/loan/${id}/pay/failed`,
           billing_name:     billing.name,
           billing_email:    billing.email,
@@ -167,6 +171,8 @@ export default function Payment() {
     setPayError('');
     setPayStatus('redirecting');
     try {
+      const amount = safeAmount(dueAmount); // ← was undefined "amount" before, now correctly uses dueAmount
+
       const res = await fetch('/api/paymongo/intent', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -181,7 +187,7 @@ export default function Payment() {
 
       const clientKey = data.intent.attributes.client_key;
       const returnUrl = encodeURIComponent(
-        `${window.location.origin}/loan/${id}/pay/success?method=${selectedMethod}&amount=${dueAmount}`
+        `${window.location.origin}/loan/${id}/pay/success?method=${selectedMethod}&amount=${amount}`
       );
       window.location.href =
         `https://checkout.paymongo.com/intents/${data.intent.id}?client_key=${clientKey}&return_url=${returnUrl}`;
@@ -199,7 +205,7 @@ export default function Payment() {
   };
 
   const handleConfirmed = () => {
-    if      (selectedMethod === 'wallet')                           handleEwalletPay();
+    if      (selectedMethod === 'wallet')                            handleEwalletPay();
     else if (selectedMethod === 'card' || selectedMethod === 'bank') handleCardPay();
     else                                                             handleWalkinConfirm();
   };
