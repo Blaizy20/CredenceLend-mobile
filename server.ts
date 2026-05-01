@@ -43,21 +43,44 @@ type CustomerRow = RowDataPacket & {
   is_active: number;
 };
 
-// ── Payment method normalization ──────────────────────────────────────────
+// ── Payment method normalization ──────────────────────────────────────────────
+// Maps every possible PayMongo payment_method_type + offline methods to the
+// ENUM values stored in the payments.method column.
 const METHOD_MAP: Record<string, string> = {
-  gcash:  "GCASH",
-  maya:   "DIGITAL",
-  wallet: "GCASH",
-  card:   "DIGITAL",
-  bank:   "BANK",
-  walkin: "CASH",
-  cash:   "CASH",
-  cheque: "CHEQUE",
-  other:  "OTHER",
+  // Offline methods
+  walkin:               "CASH",
+  cash:                 "CASH",
+  cheque:               "CHEQUE",
+  bank:                 "BANK",
+
+  // PayMongo checkout payment_method_type values
+  gcash:                "GCASH",
+  paymaya:              "MAYA",
+  maya:                 "MAYA",
+  card:                 "CARD",
+  qrph:                 "QRPH",
+  grab_pay:             "GRAB_PAY",
+  grabpay:              "GRAB_PAY",
+  bpi:                  "BPI",
+  bpi_online:           "BPI",
+  unionbank:            "UNIONBANK",
+  unionbank_online:     "UNIONBANK",
+  brankas_bdo:          "BRANKAS_BDO",
+  brankas_landbank:     "BANK",
+  brankas_metrobank:    "BANK",
+  dob:                  "BANK",
+  dob_ubp:              "BANK",
+  billease:             "OTHER",
+
+  // Legacy / generic strings
+  wallet:               "GCASH",
+  digital:              "OTHER",
+  online:               "OTHER",
+  other:                "OTHER",
 };
 
 function normalizeMethod(method: string): string {
-  return METHOD_MAP[method.toLowerCase()] ?? "OTHER";
+  return METHOD_MAP[method.toLowerCase().replace(/-/g, "_")] ?? "OTHER";
 }
 
 function getNextCustomerNo(lastNo: string | null, year: number): string {
@@ -108,18 +131,19 @@ async function sendOtpEmail(toEmail: string, otp: string): Promise<void> {
     },
     body: JSON.stringify({
       sender: {
-        name:  process.env.BREVO_SENDER_NAME ?? "Loan Manager",
+        name: process.env.BREVO_SENDER_NAME ?? "Loan Manager",
         email: process.env.BREVO_SENDER_EMAIL ?? "",
       },
       to: [{ email: toEmail }],
       subject: "Your Verification Code",
       htmlContent: `
-        <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px">
-          <h2 style="color:#01696f">Verification Code</h2>
+        <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#f9f8f5;border-radius:8px;">
+          <h2 style="color:#01696f;">Verification Code</h2>
           <p>Use the code below to verify your identity. It expires in 10 minutes.</p>
-          <div style="font-size:2rem;font-weight:bold;letter-spacing:0.2em;padding:16px;background:#f3f0ec;border-radius:8px;text-align:center">${otp}</div>
-          <p style="color:#7a7974;font-size:0.85rem;margin-top:24px">If you did not request this, please ignore this email.</p>
-        </div>`,
+          <div style="font-size:2rem;font-weight:700;letter-spacing:0.3em;color:#28251d;background:#fff;padding:16px 24px;border-radius:6px;text-align:center;margin:24px 0;">${otp}</div>
+          <p style="color:#7a7974;font-size:0.875rem;">If you did not request this, please ignore this email.</p>
+        </div>
+      `,
     }),
   });
   if (!response.ok) {
@@ -142,9 +166,9 @@ async function startServer() {
   }
 
   const PAYMONGO_SECRET = process.env.PAYMONGO_SECRET_KEY!;
-  const PAYMONGO_AUTH   = Buffer.from(`${PAYMONGO_SECRET}:`).toString("base64");
+  const PAYMONGO_AUTH = Buffer.from(`${PAYMONGO_SECRET}:`).toString("base64");
   const PAYMONGO_HEADERS = {
-    Authorization:  `Basic ${PAYMONGO_AUTH}`,
+    Authorization: `Basic ${PAYMONGO_AUTH}`,
     "Content-Type": "application/json",
   };
 
@@ -153,7 +177,7 @@ async function startServer() {
   app.use(express.urlencoded({ extended: true, limit: "10mb" }));
   app.use(cors({ origin: true, credentials: true }));
 
-  // ── Health ────────────────────────────────────────────────────────────────
+  // ── Health ──────────────────────────────────────────────────────────────────
   app.get("/api/health", async (_req, res) => {
     try {
       await pool.query("SELECT 1");
@@ -163,7 +187,7 @@ async function startServer() {
     }
   });
 
-  // ── Auth: Availability Checks ─────────────────────────────────────────────
+  // ── Auth: Availability Checks ───────────────────────────────────────────────
   app.get("/api/auth/check-username", async (req, res) => {
     try {
       const username = String(req.query.username || "").trim();
@@ -203,7 +227,7 @@ async function startServer() {
     }
   });
 
-  // ── Auth: Send OTP ────────────────────────────────────────────────────────
+  // ── Auth: Send OTP ──────────────────────────────────────────────────────────
   app.post("/api/auth/send-otp", async (req, res) => {
     try {
       const { email } = req.body;
@@ -215,7 +239,7 @@ async function startServer() {
       if (customers.length === 0)
         return res.status(404).json({ success: false, message: "No account is associated with this email address." });
 
-      const otp       = Math.floor(100000 + Math.random() * 900000).toString();
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
       const expiresAt = Date.now() + 10 * 60 * 1000;
 
       await pool.query("REPLACE INTO otps (email, otp, expires_at) VALUES (?, ?, ?)", [email, otp, expiresAt]);
@@ -228,7 +252,7 @@ async function startServer() {
     }
   });
 
-  // ── Auth: Verify OTP ──────────────────────────────────────────────────────
+  // ── Auth: Verify OTP ────────────────────────────────────────────────────────
   app.post("/api/auth/verify-otp", async (req, res) => {
     try {
       const { email, otp } = req.body;
@@ -250,10 +274,10 @@ async function startServer() {
     }
   });
 
-  // ── Auth: Reset Password ──────────────────────────────────────────────────
+  // ── Auth: Reset Password ────────────────────────────────────────────────────
   app.post("/api/auth/reset-password", async (req, res) => {
     try {
-      const email       = String(req.body.email ?? "").trim().toLowerCase();
+      const email = String(req.body.email ?? "").trim().toLowerCase();
       const newPassword = String(req.body.newPassword ?? "");
 
       if (!email || !newPassword)
@@ -277,7 +301,7 @@ async function startServer() {
     }
   });
 
-  // ── Auth: Register ────────────────────────────────────────────────────────
+  // ── Auth: Register ──────────────────────────────────────────────────────────
   app.post("/api/auth/register", async (req, res) => {
     try {
       const first_name = String(req.body.first_name ?? req.body.firstName ?? "").trim();
@@ -301,7 +325,7 @@ async function startServer() {
       if (!/\S+@\S+\.\S+/.test(email))
         return res.status(400).json({ success: false, message: "Please enter a valid email address." });
 
-      const [duplicateRows] = await pool.query<CustomerRow[]>(
+      const [duplicateRows] = await pool.query<RowDataPacket[]>(
         `SELECT customer_id, username, email, contact_no FROM customers
          WHERE username = ? OR email = ? OR contact_no = ? LIMIT 1`,
         [username, email, contact_no]
@@ -309,8 +333,8 @@ async function startServer() {
 
       if (duplicateRows.length > 0) {
         const dup = duplicateRows[0];
-        if (dup.username  === username)   return res.status(409).json({ success: false, message: "This username is already taken." });
-        if (dup.email     === email)      return res.status(409).json({ success: false, message: "An account with this email already exists." });
+        if (dup.username === username)   return res.status(409).json({ success: false, message: "This username is already taken." });
+        if (dup.email === email)         return res.status(409).json({ success: false, message: "An account with this email already exists." });
         if (dup.contact_no === contact_no) return res.status(409).json({ success: false, message: "An account with this contact number already exists." });
       }
 
@@ -349,7 +373,7 @@ async function startServer() {
     }
   });
 
-  // ── Auth: Login ───────────────────────────────────────────────────────────
+  // ── Auth: Login ─────────────────────────────────────────────────────────────
   app.post("/api/auth/login", async (req, res) => {
     try {
       const usernameOrEmail = String(req.body.username ?? req.body.email ?? "").trim();
@@ -384,7 +408,7 @@ async function startServer() {
     }
   });
 
-  // ── Profile ───────────────────────────────────────────────────────────────
+  // ── Profile ─────────────────────────────────────────────────────────────────
   app.get("/api/profile/:customerId", async (req, res) => {
     try {
       const [rows] = await pool.query<RowDataPacket[]>(
@@ -402,7 +426,7 @@ async function startServer() {
     }
   });
 
-  // ── Loans: Apply ──────────────────────────────────────────────────────────
+  // ── Loans: Apply ────────────────────────────────────────────────────────────
   app.post("/api/loans/apply", async (req, res) => {
     try {
       const {
@@ -489,7 +513,7 @@ async function startServer() {
     }
   });
 
-  // ── Loans: List by Customer ───────────────────────────────────────────────
+  // ── Loans: List by Customer ─────────────────────────────────────────────────
   app.get("/api/loans/:customerId", async (req, res) => {
     try {
       const customerId = req.params.customerId;
@@ -507,10 +531,10 @@ async function startServer() {
       );
 
       const NOTIF_MAP: Record<string, { title: string; message: (ref: string) => string; type: string }> = {
-        active: { title: "Loan Approved ✅",       message: (ref) => `Your loan (${ref}) has been approved. View your payment schedule now.`,       type: "approved" },
-        denied: { title: "Loan Application Denied", message: (ref) => `Your loan application (${ref}) was not approved. Please contact your cooperative.`, type: "denied"   },
-        paid:   { title: "Loan Fully Paid 🎉",      message: (ref) => `Congratulations! Your loan (${ref}) has been fully paid.`,                   type: "payment"  },
-        closed: { title: "Loan Closed",             message: (ref) => `Your loan (${ref}) has been closed.`,                                        type: "general"  },
+        active: { title: "Loan Approved ✅",         message: (ref) => `Your loan (${ref}) has been approved. View your payment schedule now.`,   type: "approved" },
+        denied: { title: "Loan Application Denied",  message: (ref) => `Your loan application (${ref}) was not approved. Please contact your cooperative.`, type: "denied" },
+        paid:   { title: "Loan Fully Paid 🎉",       message: (ref) => `Congratulations! Your loan (${ref}) has been fully paid.`,                type: "payment" },
+        closed: { title: "Loan Closed",              message: (ref) => `Your loan (${ref}) has been closed.`,                                     type: "general" },
       };
 
       for (const loan of rows) {
@@ -555,7 +579,7 @@ async function startServer() {
     }
   });
 
-  // ── Loans: Single Loan ────────────────────────────────────────────────────
+  // ── Loans: Single Loan ──────────────────────────────────────────────────────
   app.get("/api/loan/:loanId", async (req, res) => {
     try {
       const [rows] = await pool.query<RowDataPacket[]>(
@@ -574,12 +598,15 @@ async function startServer() {
     }
   });
 
-  // ── Payments: List ────────────────────────────────────────────────────────
+  // ── Payments: List (latest first, timestamp-accurate) ───────────────────────
   app.get("/api/payments/:loanId", async (req, res) => {
     try {
       const [rows] = await pool.query<RowDataPacket[]>(
-        `SELECT payment_id, loan_id, amount, payment_date, method, or_no, notes, created_at
-         FROM payments WHERE loan_id = ? ORDER BY payment_date DESC`,
+        `SELECT payment_id, loan_id, amount, payment_date, created_at,
+                method, paymongo_method_type, or_no, notes
+         FROM payments
+         WHERE loan_id = ?
+         ORDER BY created_at DESC, payment_id DESC`,
         [req.params.loanId]
       );
       res.json(rows);
@@ -588,7 +615,7 @@ async function startServer() {
     }
   });
 
-  // ── Notifications: List ───────────────────────────────────────────────────
+  // ── Notifications: List ─────────────────────────────────────────────────────
   app.get("/api/notifications/:customerId", async (req, res) => {
     try {
       const [rows] = await pool.query<RowDataPacket[]>(
@@ -605,7 +632,7 @@ async function startServer() {
     }
   });
 
-  // ── Notifications: Mark All Read ──────────────────────────────────────────
+  // ── Notifications: Mark All Read ────────────────────────────────────────────
   app.patch("/api/notifications/:customerId/read-all", async (req, res) => {
     try {
       await pool.query(
@@ -618,7 +645,7 @@ async function startServer() {
     }
   });
 
-  // ── Transactions ──────────────────────────────────────────────────────────
+  // ── Transactions ────────────────────────────────────────────────────────────
   app.get("/api/transactions/:customerId", async (req, res) => {
     try {
       const [rows] = await pool.query<RowDataPacket[]>(
@@ -632,9 +659,7 @@ async function startServer() {
     }
   });
 
-  // ── PayMongo: Create Checkout Session ────────────────────────────────────
-  // Replaces both /api/paymongo/source and /api/paymongo/link.
-  // Supports success_url + cancel_url so users are redirected back to the app.
+  // ── PayMongo: Create Checkout Session ───────────────────────────────────────
   app.post("/api/paymongo/checkout", async (req, res) => {
     try {
       const {
@@ -649,7 +674,7 @@ async function startServer() {
       const desc = description || "Loan Payment";
 
       const response = await fetch("https://api.paymongo.com/v1/checkout_sessions", {
-        method:  "POST",
+        method: "POST",
         headers: PAYMONGO_HEADERS,
         body: JSON.stringify({
           data: {
@@ -657,18 +682,16 @@ async function startServer() {
               send_email_receipt: false,
               show_description:   true,
               show_line_items:    true,
-              line_items: [
-                {
-                  currency:    "PHP",
-                  amount:      Math.round(Number(amount) * 100),
-                  name:        desc,
-                  description: desc,
-                  quantity:    1,
-                },
-              ],
+              line_items: [{
+                currency:    "PHP",
+                amount:      Math.round(Number(amount) * 100),
+                name:        desc,
+                description: desc,
+                quantity:    1,
+              }],
               payment_method_types: [
                 "card", "gcash", "paymaya", "qrph",
-                "billease", "dob", "dob_ubp",
+                "grab_pay", "dob", "dob_ubp",
                 "brankas_bdo", "brankas_landbank", "brankas_metrobank",
               ],
               description:      desc,
@@ -676,13 +699,7 @@ async function startServer() {
               success_url,
               cancel_url,
               ...(billing_name || billing_email || billing_phone
-                ? {
-                    billing: {
-                      name:  billing_name  || "",
-                      email: billing_email || "",
-                      phone: billing_phone || "",
-                    },
-                  }
+                ? { billing: { name: billing_name || "", email: billing_email || "", phone: billing_phone || "" } }
                 : {}),
             },
           },
@@ -707,28 +724,71 @@ async function startServer() {
     }
   });
 
-  // ── PayMongo: Record Payment After Success ────────────────────────────────
+  // ── PayMongo: Get Checkout Session Status ───────────────────────────────────
+  // Called by the success page to get the real payment_method_type from PayMongo
+  // so we never store "OTHER" for online payments.
+  app.get("/api/paymongo/checkout-status/:sessionId", async (req, res) => {
+    try {
+      const response = await fetch(
+        `https://api.paymongo.com/v1/checkout_sessions/${req.params.sessionId}`,
+        { headers: PAYMONGO_HEADERS }
+      );
+
+      const data = await response.json();
+      if (!response.ok)
+        return res.status(400).json({
+          success: false,
+          message: data.errors?.[0]?.detail || "Failed to retrieve session.",
+        });
+
+      const attrs   = data.data.attributes;
+      const payment = attrs.payments?.[0];
+
+      const rawMethod        = payment?.payment_method_type ?? "other";
+      const normalizedMethod = normalizeMethod(rawMethod);
+
+      res.json({
+        success:             true,
+        status:              attrs.status,
+        payment_status:      payment?.status ?? null,
+        payment_method_type: rawMethod,
+        method:              normalizedMethod,
+        payment_id:          payment?.id ?? null,
+        amount:              payment ? payment.amount / 100 : null,
+      });
+    } catch (err: any) {
+      console.error("Checkout status error:", err.message);
+      res.status(500).json({ success: false, message: "Payment service unavailable." });
+    }
+  });
+
+  // ── PayMongo: Record Payment After Checkout Success ─────────────────────────
   app.post("/api/paymongo/record-payment", async (req, res) => {
     try {
-      const { loan_id, amount, method, paymongo_source_id, paymongo_intent_id, paymongo_session_id } = req.body;
+      const {
+        loan_id, amount, method,
+        paymongo_source_id, paymongo_intent_id, paymongo_session_id,
+        paymongo_method_type,
+      } = req.body;
 
       if (!loan_id || !amount || !method)
         return res.status(400).json({ success: false, message: "Missing required fields." });
 
-      const normalizedMethod = normalizeMethod(String(method));
+      // Resolve best method: prefer raw PayMongo type, fall back to frontend-sent method
+      const rawType          = paymongo_method_type ?? method;
+      const normalizedMethod = normalizeMethod(String(rawType));
 
-      // Generate OR number from whichever PayMongo ID is present
-      const pmId  = paymongo_session_id || paymongo_source_id || paymongo_intent_id;
+      // Generate OR number
+      const pmId = paymongo_session_id ?? paymongo_source_id ?? paymongo_intent_id;
       const or_no = pmId
         ? `OR-PM-${String(pmId).slice(-8).toUpperCase()}`
         : `OR-${Date.now()}`;
 
-      // Deduplicate: check all possible ID types
-      for (const pmIdValue of [paymongo_session_id, paymongo_source_id, paymongo_intent_id]) {
-        if (!pmIdValue) continue;
+      // Deduplication guard
+      for (const pmRef of [paymongo_session_id, paymongo_source_id, paymongo_intent_id].filter(Boolean)) {
         const [existing] = await pool.query<RowDataPacket[]>(
           `SELECT payment_id FROM payments WHERE notes LIKE ? LIMIT 1`,
-          [`%${pmIdValue}%`]
+          [`%${pmRef}%`]
         );
         if (existing.length > 0)
           return res.json({
@@ -750,22 +810,23 @@ async function startServer() {
       if (loanRows.length === 0)
         return res.status(404).json({ success: false, message: "Loan not found." });
 
-      const loan       = loanRows[0];
-      const payAmount  = Number(amount);
-      const newBalance = Math.max(0, Number(loan.remaining_balance) - payAmount);
+      const loan        = loanRows[0];
+      const payAmount   = Number(amount);
+      const newBalance  = Math.max(0, Number(loan.remaining_balance) - payAmount);
       const isFullyPaid = newBalance <= 0;
 
-      const notesParts = [
-        paymongo_session_id ? `Session ID: ${paymongo_session_id}` : null,
-        paymongo_source_id  ? `Source ID: ${paymongo_source_id}`   : null,
-        paymongo_intent_id  ? `Intent ID: ${paymongo_intent_id}`   : null,
-      ].filter(Boolean);
-      const notes = notesParts.length ? notesParts.join(", ") : "PayMongo payment";
+      const notes = [
+        paymongo_session_id  ? `Session ID: ${paymongo_session_id}`   : null,
+        paymongo_source_id   ? `Source ID: ${paymongo_source_id}`     : null,
+        paymongo_intent_id   ? `Intent ID: ${paymongo_intent_id}`     : null,
+        paymongo_method_type ? `PM Type: ${paymongo_method_type}`     : null,
+      ].filter(Boolean).join(", ") || "PayMongo payment";
 
       const [payResult] = await pool.query<ResultSetHeader>(
-        `INSERT INTO payments (loan_id, amount, payment_date, method, notes, tenant_id, or_no)
-         VALUES (?, ?, NOW(), ?, ?, ?, ?)`,
-        [loan_id, payAmount, normalizedMethod, notes, loan.tenant_id, or_no]
+        `INSERT INTO payments
+           (loan_id, amount, payment_date, created_at, method, paymongo_method_type, notes, tenant_id, or_no)
+         VALUES (?, ?, CURDATE(), NOW(), ?, ?, ?, ?, ?)`,
+        [loan_id, payAmount, normalizedMethod, paymongo_method_type ?? null, notes, loan.tenant_id, or_no]
       );
 
       await pool.query(
@@ -787,12 +848,13 @@ async function startServer() {
       );
 
       res.json({
-        success:    true,
-        payment_id: payResult.insertId,
+        success:     true,
+        payment_id:  payResult.insertId,
         new_balance: newBalance,
         fully_paid:  isFullyPaid,
+        method:      normalizedMethod,
         or_no,
-        message: isFullyPaid ? "Loan fully paid!" : "Payment recorded successfully.",
+        message:     isFullyPaid ? "Loan fully paid!" : "Payment recorded successfully.",
       });
     } catch (err: any) {
       console.error("Record payment error:", err.message);
@@ -800,7 +862,7 @@ async function startServer() {
     }
   });
 
-  // ── Static / Vite ─────────────────────────────────────────────────────────
+  // ── Static / Vite ───────────────────────────────────────────────────────────
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
       server: { middlewareMode: true },
