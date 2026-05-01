@@ -9,6 +9,7 @@ export default function Profile() {
   const navigate = useNavigate();
   const [user, setUser] = React.useState<any>(null);
   const [showLogoutModal, setShowLogoutModal] = React.useState(false);
+  const [loggingOut, setLoggingOut] = React.useState(false);
 
   React.useEffect(() => {
     const storedUser = localStorage.getItem('user');
@@ -24,14 +25,78 @@ export default function Profile() {
   }, [navigate]);
 
   const handleLogout = () => {
-    localStorage.removeItem('user');
-    navigate('/login', { replace: true });
+    setShowLogoutModal(false);
+    setLoggingOut(true);
+    setTimeout(() => {
+      localStorage.removeItem('user');
+      navigate('/login', { replace: true });
+    }, 2000);
   };
 
   if (!user) return null;
 
   return (
     <div className="min-h-screen bg-background pb-32">
+
+      {/* ── Logout Loading Screen ─────────────────────────────────────────── */}
+      <AnimatePresence>
+        {loggingOut && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[60] bg-background flex flex-col items-center justify-center"
+          >
+            {/* Ambient glow */}
+            <div className="absolute inset-0 overflow-hidden pointer-events-none">
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-red-500/10 rounded-full blur-[100px]" />
+            </div>
+
+            {/* Icon */}
+            <motion.div
+              initial={{ scale: 0.6, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ type: 'spring', stiffness: 240, damping: 18 }}
+              className="w-20 h-20 rounded-3xl bg-red-500/10 border border-red-500/20 flex items-center justify-center mb-8 shadow-2xl shadow-red-500/10"
+            >
+              <LogOut className="text-red-500" size={38} />
+            </motion.div>
+
+            {/* Text */}
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2 }}
+              className="text-center"
+            >
+              <h2 className="font-headline font-bold text-2xl text-on-surface tracking-tight mb-2">
+                Signing out…
+              </h2>
+              <p className="text-on-surface-variant text-sm">
+                See you next time on <span className="text-primary font-semibold">CredenceLend</span>
+              </p>
+            </motion.div>
+
+            {/* Pulse dots */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.4 }}
+              className="flex gap-2 mt-12"
+            >
+              {[0, 1, 2].map((i) => (
+                <motion.div
+                  key={i}
+                  animate={{ opacity: [0.3, 1, 0.3], scale: [0.8, 1, 0.8] }}
+                  transition={{ duration: 1.1, repeat: Infinity, delay: i * 0.18 }}
+                  className="w-1.5 h-1.5 rounded-full bg-red-500"
+                />
+              ))}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <TopBar title="My Profile" />
 
       <main className="pt-24 pb-12 px-6 max-w-md mx-auto space-y-8">
@@ -141,7 +206,6 @@ export default function Profile() {
       <AnimatePresence>
         {showLogoutModal && (
           <>
-            {/* Backdrop */}
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -150,7 +214,6 @@ export default function Profile() {
               className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
             />
 
-            {/* Modal */}
             <motion.div
               initial={{ opacity: 0, y: 60, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}

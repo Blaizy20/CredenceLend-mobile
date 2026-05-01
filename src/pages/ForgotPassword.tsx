@@ -1,12 +1,12 @@
 import React from 'react';
-import { Mail, ArrowLeft, ArrowRight, CheckCircle2, KeyRound, ShieldCheck } from 'lucide-react';
+import { Mail, ArrowLeft, ArrowRight, CheckCircle2, KeyRound, ShieldCheck, Sparkles } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { motion, AnimatePresence } from 'motion/react';
 import { authAPI } from '../lib/api';
 
-type Step = 'email' | 'otp' | 'password' | 'done';
+type Step = 'email' | 'otp' | 'password' | 'resetting' | 'done';
 
 export default function ForgotPassword() {
   const navigate = useNavigate();
@@ -94,49 +94,146 @@ export default function ForgotPassword() {
       return setError('Passwords do not match.');
 
     setLoading(true);
+    // Show resetting splash immediately
+    setStep('resetting');
     try {
       const res = await authAPI.resetPassword(email, password);
-      if (!res.success)
-        return setError(res.message || 'Failed to reset password. Please try again.');
-      setStep('done');
+      if (!res.success) {
+        setStep('password');
+        setError(res.message || 'Failed to reset password. Please try again.');
+        return;
+      }
+      // Hold resetting screen for at least 1.8s for polish
+      setTimeout(() => setStep('done'), 1800);
     } catch {
+      setStep('password');
       setError('Unable to reset password. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  // ── Done ──────────────────────────────────────────────────────────────────
+  // ── Resetting Loading Screen ──────────────────────────────────────────────
+  if (step === 'resetting') {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="fixed inset-0 z-50 bg-background flex flex-col items-center justify-center px-8 text-center"
+      >
+        {/* Ambient glow */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-primary/10 rounded-full blur-[100px]" />
+        </div>
+
+        {/* Icon */}
+        <motion.div
+          initial={{ scale: 0.6, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ type: 'spring', stiffness: 240, damping: 18 }}
+          className="w-24 h-24 rounded-3xl bg-primary/10 border border-primary/20 flex items-center justify-center mb-8 shadow-2xl shadow-primary/20"
+        >
+          <KeyRound className="text-primary" size={44} />
+        </motion.div>
+
+        {/* Text */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.2 }}
+          className="text-center"
+        >
+          <h2 className="font-headline font-bold text-2xl text-on-surface tracking-tight mb-2">
+            Resetting Password…
+          </h2>
+          <p className="text-on-surface-variant text-sm">
+            Please wait while we secure your account.
+          </p>
+        </motion.div>
+
+        {/* Pulse dots */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.4 }}
+          className="flex gap-2 mt-12"
+        >
+          {[0, 1, 2].map((i) => (
+            <motion.div
+              key={i}
+              animate={{ opacity: [0.3, 1, 0.3], scale: [0.8, 1, 0.8] }}
+              transition={{ duration: 1.1, repeat: Infinity, delay: i * 0.18 }}
+              className="w-1.5 h-1.5 rounded-full bg-primary"
+            />
+          ))}
+        </motion.div>
+      </motion.div>
+    );
+  }
+
+  // ── Done Confirmation Screen ──────────────────────────────────────────────
   if (step === 'done') {
     return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6">
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="fixed inset-0 z-50 bg-background flex flex-col items-center justify-center px-8 text-center"
+      >
+        {/* Ambient glow */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-green-500/10 rounded-full blur-[100px]" />
+        </div>
+
+        {/* Icon */}
         <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="w-full max-w-md bg-surface-container-low rounded-[2rem] p-8 shadow-2xl border-t border-white/5 text-center"
+          initial={{ scale: 0, rotate: -20 }}
+          animate={{ scale: 1, rotate: 0 }}
+          transition={{ type: 'spring', stiffness: 260, damping: 18, delay: 0.1 }}
+          className="w-24 h-24 rounded-3xl bg-green-500/10 border border-green-500/20 flex items-center justify-center mb-8 shadow-2xl shadow-green-500/10"
         >
-          <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-green-500/10 text-green-500 mb-6">
-            <CheckCircle2 size={48} />
-          </div>
-          <h2 className="font-headline font-bold text-2xl text-on-surface mb-2">Password Reset!</h2>
-          <p className="text-on-surface-variant text-sm mb-8">
-            Your password has been updated. You can now log in with your new password.
+          <CheckCircle2 className="text-green-500" size={48} />
+        </motion.div>
+
+        {/* Text */}
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.25 }}
+          className="space-y-2 mb-10"
+        >
+          <p className="text-on-surface-variant text-sm font-bold uppercase tracking-widest">
+            All done
           </p>
+          <h1 className="font-headline font-extrabold text-4xl text-on-surface tracking-tight">
+            Password Reset<span className="text-green-500">.</span>
+          </h1>
+          <p className="text-on-surface-variant text-sm mt-3 max-w-xs mx-auto">
+            Your password has been updated. You can now sign in with your new credentials.
+          </p>
+        </motion.div>
+
+        {/* CTA */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.45 }}
+          className="w-full max-w-xs"
+        >
           <Button onClick={() => navigate('/login')}>
             Back to Login <ArrowRight size={20} />
           </Button>
         </motion.div>
-      </div>
+      </motion.div>
     );
   }
 
   const steps: Step[] = ['email', 'otp', 'password'];
-  const stepIndex = steps.indexOf(step);
+  const stepIndex = steps.indexOf(step as any);
 
   const stepMeta = {
-    email:    { icon: <Mail size={24} />,       title: 'Reset Password',      subtitle: 'Enter your registered email address' },
+    email:    { icon: <Mail size={24} />,        title: 'Reset Password',     subtitle: 'Enter your registered email address' },
     otp:      { icon: <ShieldCheck size={24} />, title: 'Verify Your Email',  subtitle: `Enter the 6-digit code sent to ${email}` },
-    password: { icon: <KeyRound size={24} />,    title: 'New Password',        subtitle: 'Choose a strong new password' },
+    password: { icon: <KeyRound size={24} />,    title: 'New Password',       subtitle: 'Choose a strong new password' },
   };
 
   const meta = stepMeta[step as keyof typeof stepMeta];
@@ -149,7 +246,7 @@ export default function ForgotPassword() {
         className="relative z-10 w-full max-w-md"
       >
         <button
-          onClick={() => step === 'email' ? navigate('/login') : setStep(steps[stepIndex - 1])}
+          onClick={() => step === 'email' ? navigate('/login') : setStep(steps[stepIndex - 1] as Step)}
           className="flex items-center gap-2 text-primary font-bold mb-8 hover:opacity-80 transition-opacity"
         >
           <ArrowLeft size={20} />

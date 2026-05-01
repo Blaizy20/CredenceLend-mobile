@@ -17,13 +17,20 @@ function getGreeting() {
 export default function Login() {
   const navigate = useNavigate();
 
-  const [username, setUsername]       = React.useState('');
-  const [password, setPassword]       = React.useState('');
-  const [showPassword, setShowPassword] = React.useState(false);
-  const [error, setError]             = React.useState('');
-  const [loading, setLoading]         = React.useState(false);
+  const [username, setUsername]           = React.useState('');
+  const [password, setPassword]           = React.useState('');
+  const [showPassword, setShowPassword]   = React.useState(false);
+  const [error, setError]                 = React.useState('');
+  const [loading, setLoading]             = React.useState(false);
   const [usernameError, setUsernameError] = React.useState('');
-  const [greeting, setGreeting]       = React.useState<{ name: string } | null>(null);
+  const [greeting, setGreeting]           = React.useState<{ name: string } | null>(null);
+  const [splashVisible, setSplashVisible] = React.useState(true);
+
+  // App launch splash — shown briefly before the login form appears
+  React.useEffect(() => {
+    const timer = setTimeout(() => setSplashVisible(false), 1800);
+    return () => clearTimeout(timer);
+  }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,7 +50,6 @@ export default function Login() {
 
       if (result.success && result.customer) {
         localStorage.setItem('user', JSON.stringify(result.customer));
-        // Show greeting splash, then navigate after 2.2s
         setGreeting({ name: result.customer.first_name });
         setTimeout(() => navigate('/dashboard', { replace: true }), 2200);
       } else {
@@ -60,7 +66,66 @@ export default function Login() {
 
   return (
     <>
-      {/* ── Greeting Splash ──────────────────────────────────────────────── */}
+      {/* ── App Launch Splash ─────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {splashVisible && (
+          <motion.div
+            initial={{ opacity: 1 }}
+            exit={{ opacity: 0, scale: 1.04 }}
+            transition={{ duration: 0.5, ease: 'easeInOut' }}
+            className="fixed inset-0 z-[60] bg-background flex flex-col items-center justify-center"
+          >
+            {/* Ambient glow */}
+            <div className="absolute inset-0 overflow-hidden pointer-events-none">
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-primary/10 rounded-full blur-[120px]" />
+            </div>
+
+            {/* Logo */}
+            <motion.div
+              initial={{ scale: 0.7, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ type: 'spring', stiffness: 220, damping: 18, delay: 0.1 }}
+              className="w-24 h-24 rounded-3xl bg-gradient-to-br from-primary to-primary-dim flex items-center justify-center shadow-2xl shadow-primary/30 mb-8"
+            >
+              <User className="text-on-primary" size={48} />
+            </motion.div>
+
+            {/* Brand name */}
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+              className="text-center"
+            >
+              <h1 className="font-headline font-extrabold text-4xl tracking-tighter text-on-surface">
+                Credence<span className="text-primary">Lend</span>
+              </h1>
+              <p className="text-on-surface-variant text-xs font-bold uppercase tracking-widest mt-2">
+                Customer Portal
+              </p>
+            </motion.div>
+
+            {/* Pulse dots */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.6 }}
+              className="flex gap-2 mt-14"
+            >
+              {[0, 1, 2].map((i) => (
+                <motion.div
+                  key={i}
+                  animate={{ opacity: [0.3, 1, 0.3], scale: [0.8, 1, 0.8] }}
+                  transition={{ duration: 1.1, repeat: Infinity, delay: i * 0.18 }}
+                  className="w-1.5 h-1.5 rounded-full bg-primary"
+                />
+              ))}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Post-Login Greeting Splash ────────────────────────────────────── */}
       <AnimatePresence>
         {greeting && (
           <motion.div
@@ -128,7 +193,8 @@ export default function Login() {
 
         <motion.div
           initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
+          animate={{ opacity: splashVisible ? 0 : 1, y: splashVisible ? 20 : 0 }}
+          transition={{ duration: 0.4, ease: 'easeOut' }}
           className="relative z-10 w-full max-w-md flex flex-col items-center"
         >
           {/* Brand Identity */}
@@ -154,7 +220,7 @@ export default function Login() {
                 <motion.div
                   initial={{ opacity: 0, y: -8 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="p-4 bg-error/10 border border-error/20 rounded-xl text-error text-xs font-bold text-center"
+                  className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-500 text-xs font-bold text-center"
                 >
                   {error}
                 </motion.div>
