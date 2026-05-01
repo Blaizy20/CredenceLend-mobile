@@ -6,15 +6,12 @@ import path from "path";
 import { fileURLToPath } from "url";
 import mysql, { ResultSetHeader, RowDataPacket } from "mysql2/promise";
 
-// ── Path helpers ──────────────────────────────────────────────────────────────
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
-// ── Constants (non-sensitive only at module level) ────────────────────────────
 const PORT              = Number(process.env.PORT              || 3000);
 const DEFAULT_TENANT_ID = Number(process.env.DEFAULT_TENANT_ID || 1);
 
-// ── DB Pool ───────────────────────────────────────────────────────────────────
 const pool = mysql.createPool({
   host:               process.env.DB_HOST,
   port:               Number(process.env.DB_PORT),
@@ -27,7 +24,6 @@ const pool = mysql.createPool({
   ssl:                { rejectUnauthorized: false },
 });
 
-// ── Types ─────────────────────────────────────────────────────────────────────
 type CustomerRow = RowDataPacket & {
   customer_id: number;
   tenant_id:   number | null;
@@ -47,7 +43,23 @@ type CustomerRow = RowDataPacket & {
   is_active:   number;
 };
 
-// ── Sequence helpers ──────────────────────────────────────────────────────────
+// Valid payment methods — single source of truth
+const VALID_METHODS = ["gcash", "maya", "card", "bank", "walkin"] as const;
+type PaymentMethod  = typeof VALID_METHODS[number];
+
+const METHOD_MAP: Record<string, PaymentMethod> = {
+  gcash:  "gcash",
+  maya:   "maya",
+  wallet: "gcash",  // fallback if 'wallet' slips through
+  card:   "card",
+  bank:   "bank",
+  walkin: "walkin",
+};
+
+function normalizeMethod(method: string): PaymentMethod {
+  return METHOD_MAP[method] ?? "walkin";
+}
+
 function getNextCustomerNo(lastNo: string | null, year: number): string {
   if (!lastNo) return `CUST-${year}-0001`;
   const seq = Number(lastNo.split("-")[2] || 0);
@@ -60,7 +72,6 @@ function getNextReferenceNo(lastRef: string | null, year: number): string {
   return `LOAN-${year}-${String(seq + 1).padStart(4, "0")}`;
 }
 
-// ── Notification helper ───────────────────────────────────────────────────────
 async function insertNotification(
   customerId: number,
   tenantId:   number,
@@ -88,7 +99,6 @@ async function insertNotification(
   }
 }
 
-// ── Email helper ──────────────────────────────────────────────────────────────
 async function sendOtpEmail(toEmail: string, otp: string): Promise<void> {
   const response = await fetch("https://api.brevo.com/v3/smtp/email", {
     method:  "POST",
@@ -124,9 +134,7 @@ async function sendOtpEmail(toEmail: string, otp: string): Promise<void> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
 async function startServer() {
-  // ── Validate required env vars before anything else ───────────────────────
   const REQUIRED_ENV = [
     "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD",
     "PAYMONGO_SECRET_KEY",
@@ -138,7 +146,6 @@ async function startServer() {
     process.exit(1);
   }
 
-  // ── PayMongo credentials (safe to build here — env vars confirmed above) ──
   const PAYMONGO_SECRET  = process.env.PAYMONGO_SECRET_KEY!;
   const PAYMONGO_AUTH    = Buffer.from(`${PAYMONGO_SECRET}:`).toString("base64");
   const PAYMONGO_HEADERS = {
@@ -147,7 +154,6 @@ async function startServer() {
   };
 
   const app = express();
-
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: true, limit: "10mb" }));
   app.use(cors({ origin: true, credentials: true }));
@@ -158,7 +164,6 @@ async function startServer() {
       await pool.query("SELECT 1");
       res.json({ status: "ok", database: "connected ✅" });
     } catch (err: any) {
-      console.error("Health error:", err.message);
       res.status(500).json({ status: "error", database: "disconnected ❌", error: err.message });
     }
   });
@@ -167,48 +172,39 @@ async function startServer() {
   app.get("/api/auth/check-username", async (req, res) => {
     try {
       const username = String(req.query.username || "").trim();
-      if (!username)
-        return res.status(400).json({ taken: false, message: "Username is required." });
+      if (!username) return res.status(400).json({ taken: false, message: "Username is required." });
       const [rows] = await pool.query<RowDataPacket[]>(
-        "SELECT customer_id FROM customers WHERE username = ? LIMIT 1",
-        [username]
+        "SELECT customer_id FROM customers WHERE username = ? LIMIT 1", [username]
       );
       res.json({ taken: rows.length > 0 });
     } catch (err: any) {
-      console.error("Check username error:", err.message);
-      res.status(500).json({ taken: false, message: "An unexpected error occurred. Please try again." });
+      res.status(500).json({ taken: false, message: "An unexpected error occurred." });
     }
   });
 
   app.get("/api/auth/check-email", async (req, res) => {
     try {
       const email = String(req.query.email || "").trim();
-      if (!email)
-        return res.status(400).json({ taken: false, message: "Email address is required." });
+      if (!email) return res.status(400).json({ taken: false, message: "Email is required." });
       const [rows] = await pool.query<RowDataPacket[]>(
-        "SELECT customer_id FROM customers WHERE email = ? LIMIT 1",
-        [email]
+        "SELECT customer_id FROM customers WHERE email = ? LIMIT 1", [email]
       );
       res.json({ taken: rows.length > 0 });
     } catch (err: any) {
-      console.error("Check email error:", err.message);
-      res.status(500).json({ taken: false, message: "An unexpected error occurred. Please try again." });
+      res.status(500).json({ taken: false, message: "An unexpected error occurred." });
     }
   });
 
   app.get("/api/auth/check-contact", async (req, res) => {
     try {
       const contactNo = String(req.query.contactNo || "").trim();
-      if (!contactNo)
-        return res.status(400).json({ taken: false, message: "Contact number is required." });
+      if (!contactNo) return res.status(400).json({ taken: false, message: "Contact number is required." });
       const [rows] = await pool.query<RowDataPacket[]>(
-        "SELECT customer_id FROM customers WHERE contact_no = ? LIMIT 1",
-        [contactNo]
+        "SELECT customer_id FROM customers WHERE contact_no = ? LIMIT 1", [contactNo]
       );
       res.json({ taken: rows.length > 0 });
     } catch (err: any) {
-      console.error("Check contact error:", err.message);
-      res.status(500).json({ taken: false, message: "An unexpected error occurred. Please try again." });
+      res.status(500).json({ taken: false, message: "An unexpected error occurred." });
     }
   });
 
@@ -216,12 +212,10 @@ async function startServer() {
   app.post("/api/auth/send-otp", async (req, res) => {
     try {
       const { email } = req.body;
-      if (!email)
-        return res.status(400).json({ success: false, message: "Please provide your email address." });
+      if (!email) return res.status(400).json({ success: false, message: "Please provide your email address." });
 
       const [customers] = await pool.query<RowDataPacket[]>(
-        "SELECT customer_id FROM customers WHERE email = ? AND is_active = 1 LIMIT 1",
-        [email]
+        "SELECT customer_id FROM customers WHERE email = ? AND is_active = 1 LIMIT 1", [email]
       );
       if (customers.length === 0)
         return res.status(404).json({ success: false, message: "No account is associated with this email address." });
@@ -229,13 +223,9 @@ async function startServer() {
       const otp       = Math.floor(100000 + Math.random() * 900000).toString();
       const expiresAt = Date.now() + 10 * 60 * 1000;
 
-      await pool.query(
-        "REPLACE INTO otps (email, otp, expires_at) VALUES (?, ?, ?)",
-        [email, otp, expiresAt]
-      );
+      await pool.query("REPLACE INTO otps (email, otp, expires_at) VALUES (?, ?, ?)", [email, otp, expiresAt]);
       await sendOtpEmail(email, otp);
 
-      console.log(`[OTP] Sent to ${email}`);
       res.json({ success: true, message: "A verification code has been sent to your email." });
     } catch (err: any) {
       console.error("Send OTP error:", err.message);
@@ -248,23 +238,20 @@ async function startServer() {
     try {
       const { email, otp } = req.body;
       if (!email || !otp)
-        return res.status(400).json({ success: false, message: "Email address and verification code are required." });
+        return res.status(400).json({ success: false, message: "Email and verification code are required." });
 
       const [rows] = await pool.query<RowDataPacket[]>(
         "SELECT * FROM otps WHERE email = ? AND otp = ? AND expires_at > ? LIMIT 1",
         [email, otp, Date.now()]
       );
       if (rows.length === 0)
-        return res.status(400).json({
-          success: false,
-          message: "The verification code is invalid or has already expired. Please request a new one.",
-        });
+        return res.status(400).json({ success: false, message: "The verification code is invalid or has expired." });
 
       await pool.query("DELETE FROM otps WHERE email = ?", [email]);
       res.json({ success: true, message: "Verification successful." });
     } catch (err: any) {
       console.error("Verify OTP error:", err.message);
-      res.status(500).json({ success: false, message: "An unexpected error occurred. Please try again." });
+      res.status(500).json({ success: false, message: "An unexpected error occurred." });
     }
   });
 
@@ -280,22 +267,18 @@ async function startServer() {
         return res.status(400).json({ success: false, message: "Password must be at least 8 characters." });
 
       const [rows] = await pool.query<RowDataPacket[]>(
-        "SELECT customer_id FROM customers WHERE email = ? AND is_active = 1 LIMIT 1",
-        [email]
+        "SELECT customer_id FROM customers WHERE email = ? AND is_active = 1 LIMIT 1", [email]
       );
       if (rows.length === 0)
         return res.status(404).json({ success: false, message: "No account found with this email address." });
 
       const hashed = await bcrypt.hash(newPassword, 10);
-      await pool.query(
-        "UPDATE customers SET password = ? WHERE email = ? AND is_active = 1",
-        [hashed, email]
-      );
+      await pool.query("UPDATE customers SET password = ? WHERE email = ? AND is_active = 1", [hashed, email]);
 
       res.json({ success: true, message: "Your password has been reset successfully." });
     } catch (err: any) {
       console.error("Reset password error:", err.message);
-      res.status(500).json({ success: false, message: "An unexpected error occurred. Please try again." });
+      res.status(500).json({ success: false, message: "An unexpected error occurred." });
     }
   });
 
@@ -315,7 +298,7 @@ async function startServer() {
 
       if (!first_name || !last_name || !username || !contact_no ||
           !email || !password || !province || !city || !barangay || !street)
-        return res.status(400).json({ success: false, message: "All fields are required. Please complete the registration form." });
+        return res.status(400).json({ success: false, message: "All fields are required." });
 
       if (!/^09\d{9}$/.test(contact_no))
         return res.status(400).json({ success: false, message: "Please enter a valid Philippine mobile number (e.g. 09XXXXXXXXX)." });
@@ -324,17 +307,15 @@ async function startServer() {
         return res.status(400).json({ success: false, message: "Please enter a valid email address." });
 
       const [duplicateRows] = await pool.query<RowDataPacket[]>(
-        `SELECT customer_id, username, email, contact_no
-         FROM customers
-         WHERE username = ? OR email = ? OR contact_no = ?
-         LIMIT 1`,
+        `SELECT customer_id, username, email, contact_no FROM customers
+         WHERE username = ? OR email = ? OR contact_no = ? LIMIT 1`,
         [username, email, contact_no]
       );
 
       if (duplicateRows.length > 0) {
         const dup = duplicateRows[0];
-        if (dup.username   === username)   return res.status(409).json({ success: false, message: "This username is already taken. Please choose a different one." });
-        if (dup.email      === email)      return res.status(409).json({ success: false, message: "An account with this email address already exists." });
+        if (dup.username   === username)   return res.status(409).json({ success: false, message: "This username is already taken." });
+        if (dup.email      === email)      return res.status(409).json({ success: false, message: "An account with this email already exists." });
         if (dup.contact_no === contact_no) return res.status(409).json({ success: false, message: "An account with this contact number already exists." });
       }
 
@@ -358,7 +339,7 @@ async function startServer() {
 
       res.status(201).json({
         success:  true,
-        message:  "Your account has been successfully created.",
+        message:  "Your account has been created successfully.",
         customer: {
           customer_id: result.insertId,
           tenant_id: DEFAULT_TENANT_ID,
@@ -369,7 +350,7 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error("Register error:", err);
-      res.status(500).json({ success: false, message: "An unexpected error occurred during registration. Please try again.", error: err.message, code: err.code });
+      res.status(500).json({ success: false, message: "Registration failed. Please try again.", error: err.message });
     }
   });
 
@@ -380,7 +361,7 @@ async function startServer() {
       const password        = String(req.body.password ?? "");
 
       if (!usernameOrEmail || !password)
-        return res.status(400).json({ success: false, message: "Please enter your username and password to continue." });
+        return res.status(400).json({ success: false, message: "Please enter your username and password." });
 
       const [rows] = await pool.query<CustomerRow[]>(
         `SELECT customer_id, tenant_id, user_id, username, password,
@@ -393,18 +374,18 @@ async function startServer() {
       );
 
       if (rows.length === 0)
-        return res.status(401).json({ success: false, message: "The username or password you entered is incorrect. Please try again." });
+        return res.status(401).json({ success: false, message: "Incorrect username or password." });
 
       const customer = rows[0];
       const match    = await bcrypt.compare(password, customer.password);
       if (!match)
-        return res.status(401).json({ success: false, message: "The username or password you entered is incorrect. Please try again." });
+        return res.status(401).json({ success: false, message: "Incorrect username or password." });
 
       const { password: _pw, ...safeCustomer } = customer;
       res.json({ success: true, customer: safeCustomer });
     } catch (err: any) {
       console.error("Login error:", err.message);
-      res.status(500).json({ success: false, message: "An unexpected error occurred. Please try again later.", error: err.message });
+      res.status(500).json({ success: false, message: "An unexpected error occurred." });
     }
   });
 
@@ -415,22 +396,18 @@ async function startServer() {
         `SELECT customer_id, tenant_id, user_id, username, customer_no,
                 first_name, last_name, contact_no, email,
                 province, city, barangay, street, created_at, is_active
-         FROM customers
-         WHERE customer_id = ? AND is_active = 1
-         LIMIT 1`,
+         FROM customers WHERE customer_id = ? AND is_active = 1 LIMIT 1`,
         [req.params.customerId]
       );
       if (rows.length === 0)
-        return res.status(404).json({ success: false, message: "Customer account not found." });
+        return res.status(404).json({ success: false, message: "Customer not found." });
       res.json(rows[0]);
     } catch (err: any) {
-      console.error("Profile error:", err.message);
-      res.status(500).json({ success: false, message: "An unexpected error occurred. Please try again." });
+      res.status(500).json({ success: false, message: "An unexpected error occurred." });
     }
   });
 
   // ── Loans: Apply ──────────────────────────────────────────────────────────
-  // NOTE: must be defined before GET /api/loans/:customerId to avoid route conflict
   app.post("/api/loans/apply", async (req, res) => {
     try {
       const {
@@ -513,7 +490,7 @@ async function startServer() {
       });
     } catch (err: any) {
       console.error("Loan apply error:", err);
-      res.status(500).json({ success: false, message: "An unexpected error occurred while submitting your application. Please try again.", error: err.message, code: err.code });
+      res.status(500).json({ success: false, message: "Failed to submit loan application.", error: err.message });
     }
   });
 
@@ -534,17 +511,16 @@ async function startServer() {
         [customerId]
       );
 
-      // ── Status change detection & notifications ───────────────────────────
       const NOTIF_MAP: Record<string, { title: string; message: (ref: string) => string; type: string }> = {
-        active: { title: "Loan Approved ✅",        message: (ref) => `Your loan (${ref}) has been approved. View your payment schedule now.`,               type: "approved" },
-        denied: { title: "Loan Application Denied", message: (ref) => `Your loan application (${ref}) was not approved. Please contact your cooperative.`,  type: "denied"   },
-        paid:   { title: "Loan Fully Paid 🎉",      message: (ref) => `Congratulations! Your loan (${ref}) has been fully paid.`,                           type: "payment"  },
-        closed: { title: "Loan Closed",             message: (ref) => `Your loan (${ref}) has been closed.`,                                                 type: "general"  },
+        active: { title: "Loan Approved ✅",        message: (ref) => `Your loan (${ref}) has been approved. View your payment schedule now.`,              type: "approved" },
+        denied: { title: "Loan Application Denied", message: (ref) => `Your loan application (${ref}) was not approved. Please contact your cooperative.`, type: "denied"   },
+        paid:   { title: "Loan Fully Paid 🎉",      message: (ref) => `Congratulations! Your loan (${ref}) has been fully paid.`,                          type: "payment"  },
+        closed: { title: "Loan Closed",             message: (ref) => `Your loan (${ref}) has been closed.`,                                                type: "general"  },
       };
 
       for (const loan of rows) {
-        const newStatus  = String(loan.status ?? "").toLowerCase();
-        const tenantId   = loan.tenant_id ?? DEFAULT_TENANT_ID;
+        const newStatus = String(loan.status ?? "").toLowerCase();
+        const tenantId  = loan.tenant_id ?? DEFAULT_TENANT_ID;
 
         const [cached] = await pool.query<RowDataPacket[]>(
           `SELECT last_status FROM loan_status_cache WHERE loan_id = ? LIMIT 1`,
@@ -580,7 +556,7 @@ async function startServer() {
       res.json(rows.map(({ tenant_id: _tid, ...rest }) => rest));
     } catch (err: any) {
       console.error("Loans error:", err.message);
-      res.status(500).json({ success: false, message: "Unable to retrieve loan records. Please try again." });
+      res.status(500).json({ success: false, message: "Unable to retrieve loan records." });
     }
   });
 
@@ -592,17 +568,14 @@ async function startServer() {
                 payment_term, term_months, total_payable, remaining_balance,
                 status, due_date, denial_reason, notes,
                 activated_at, created_at, is_active
-         FROM loans
-         WHERE loan_id = ?
-         LIMIT 1`,
+         FROM loans WHERE loan_id = ? LIMIT 1`,
         [req.params.loanId]
       );
       if (rows.length === 0)
-        return res.status(404).json({ success: false, message: "Loan record not found." });
+        return res.status(404).json({ success: false, message: "Loan not found." });
       res.json(rows[0]);
     } catch (err: any) {
-      console.error("Loan error:", err.message);
-      res.status(500).json({ success: false, message: "Unable to retrieve loan details. Please try again." });
+      res.status(500).json({ success: false, message: "Unable to retrieve loan details." });
     }
   });
 
@@ -611,15 +584,12 @@ async function startServer() {
     try {
       const [rows] = await pool.query<RowDataPacket[]>(
         `SELECT payment_id, loan_id, amount, payment_date, method, or_no, notes, created_at
-         FROM payments
-         WHERE loan_id = ?
-         ORDER BY payment_date DESC`,
+         FROM payments WHERE loan_id = ? ORDER BY payment_date DESC`,
         [req.params.loanId]
       );
       res.json(rows);
     } catch (err: any) {
-      console.error("Payments error:", err.message);
-      res.status(500).json({ success: false, message: "Unable to retrieve payment records. Please try again." });
+      res.status(500).json({ success: false, message: "Unable to retrieve payment records." });
     }
   });
 
@@ -636,7 +606,6 @@ async function startServer() {
       );
       res.json(rows);
     } catch (err: any) {
-      console.error("Notifications error:", err.message);
       res.status(500).json({ success: false, message: "Unable to retrieve notifications." });
     }
   });
@@ -650,7 +619,6 @@ async function startServer() {
       );
       res.json({ success: true });
     } catch (err: any) {
-      console.error("Mark read error:", err.message);
       res.status(500).json({ success: false, message: "Unable to update notifications." });
     }
   });
@@ -660,23 +628,23 @@ async function startServer() {
     try {
       const [rows] = await pool.query<RowDataPacket[]>(
         `SELECT id, loan_id, type, amount, date, status
-         FROM transactions
-         WHERE customer_id = ?
-         ORDER BY date DESC`,
+         FROM transactions WHERE customer_id = ? ORDER BY date DESC`,
         [req.params.customerId]
       );
       res.json(rows);
     } catch (err: any) {
-      console.error("Transactions error:", err.message);
-      res.status(500).json({ success: false, message: "Unable to retrieve transaction history. Please try again." });
+      res.status(500).json({ success: false, message: "Unable to retrieve transactions." });
     }
   });
 
   // ── PayMongo: Create E-wallet Source (GCash / Maya) ───────────────────────
   app.post("/api/paymongo/source", async (req, res) => {
     try {
-      const { amount, type, reference_no, redirect_success, redirect_failed,
-              billing_name, billing_email, billing_phone } = req.body;
+      const {
+        amount, type, reference_no,
+        redirect_success, redirect_failed,
+        billing_name, billing_email, billing_phone,
+      } = req.body;
 
       if (!amount || !type || !redirect_success || !redirect_failed)
         return res.status(400).json({ success: false, message: "Missing required payment fields." });
@@ -713,7 +681,7 @@ async function startServer() {
     }
   });
 
-  // ── PayMongo: Create Payment Intent (Card / Online Banking) ───────────────
+  // ── PayMongo: Create Payment Intent (Card) ────────────────────────────────
   app.post("/api/paymongo/intent", async (req, res) => {
     try {
       const { amount, description } = req.body;
@@ -729,7 +697,7 @@ async function startServer() {
             attributes: {
               amount:                 Math.round(Number(amount) * 100),
               currency:               "PHP",
-              payment_method_allowed: ["card", "dob", "dob_ubp"],
+              payment_method_allowed: ["card"],   // ← only card; dob/dob_ubp removed
               capture_type:           "automatic",
               ...(description && { description }),
             },
@@ -755,7 +723,6 @@ async function startServer() {
         `https://api.paymongo.com/v1/sources/${req.params.sourceId}`,
         { headers: PAYMONGO_HEADERS }
       );
-
       const data = await response.json();
       if (!response.ok)
         return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to retrieve source status." });
@@ -763,7 +730,7 @@ async function startServer() {
       res.json({ success: true, source: data.data });
     } catch (err: any) {
       console.error("PayMongo source status error:", err.message);
-      res.status(500).json({ success: false, message: "Payment service unavailable. Please try again." });
+      res.status(500).json({ success: false, message: "Payment service unavailable." });
     }
   });
 
@@ -775,11 +742,26 @@ async function startServer() {
       if (!loan_id || !amount || !method)
         return res.status(400).json({ success: false, message: "Missing required fields." });
 
+      // Normalize to valid DB ENUM value
+      const normalizedMethod = normalizeMethod(String(method));
+
+      // Guard against duplicate PayMongo payments
+      if (paymongo_source_id) {
+        const [existing] = await pool.query<RowDataPacket[]>(
+          `SELECT payment_id FROM payments WHERE notes LIKE ? LIMIT 1`,
+          [`%${paymongo_source_id}%`]
+        );
+        if (existing.length > 0)
+          return res.json({
+            success:    true,
+            payment_id: existing[0].payment_id,
+            message:    "Payment already recorded.",
+          });
+      }
+
       const [loanRows] = await pool.query<RowDataPacket[]>(
         `SELECT loan_id, customer_id, remaining_balance, tenant_id
-         FROM loans
-         WHERE loan_id = ?
-         LIMIT 1`,
+         FROM loans WHERE loan_id = ? LIMIT 1`,
         [loan_id]
       );
       if (loanRows.length === 0)
@@ -798,7 +780,7 @@ async function startServer() {
       const [payResult] = await pool.query<ResultSetHeader>(
         `INSERT INTO payments (loan_id, amount, payment_date, method, notes)
          VALUES (?, ?, NOW(), ?, ?)`,
-        [loan_id, payAmount, method, notes]
+        [loan_id, payAmount, normalizedMethod, notes]
       );
 
       await pool.query(
@@ -820,8 +802,8 @@ async function startServer() {
       );
 
       res.json({
-        success:    true,
-        payment_id: payResult.insertId,
+        success:     true,
+        payment_id:  payResult.insertId,
         new_balance: newBalance,
         fully_paid:  isFullyPaid,
         message:     isFullyPaid ? "Loan fully paid!" : "Payment recorded successfully.",

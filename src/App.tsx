@@ -18,7 +18,7 @@ import AdminLoans from './pages/AdminLoans';
 import ApplyLoanStep1 from './pages/ApplyLoanStep1';
 import ApplyLoanStep2 from './pages/ApplyLoanStep2';
 import PaymentOptions from './pages/PaymentOptions';
-import Payment from './pages/Payment';
+import PaymentGateway from './pages/PaymentGateway';
 import PaymentSuccess from './pages/PaymentSuccess';
 import Profile from './pages/Profile';
 import Inbox from './pages/Inbox';
@@ -47,6 +47,7 @@ export default function App() {
         <Route path="/profile" element={<Profile />} />
         <Route path="/inbox" element={<Inbox />} />
         <Route path="/transactions" element={<Transactions />} />
+        <Route path="/loan/:id/pay/confirm" element={<PaymentGateway />} />
       </Routes>
     </Router>
   );

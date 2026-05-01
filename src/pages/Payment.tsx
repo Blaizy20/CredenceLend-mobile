@@ -13,7 +13,7 @@ import { loansAPI } from '../lib/api';
 
 const EWALLET_OPTIONS = [
   { id: 'gcash',   label: 'GCash', logo: '🔵' },
-  { id: 'paymaya', label: 'Maya',  logo: '💚' },
+  { id: 'maya', label: 'Maya',  logo: '💚' },
 ];
 
 const METHODS = [
