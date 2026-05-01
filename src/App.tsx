@@ -23,6 +23,7 @@ import Payment from './pages/Payment';
 import Profile from './pages/Profile';
 import Inbox from './pages/Inbox';
 import Transactions from './pages/Transactions';
+import PaymentSuccess from './pages/PaymentSuccess';
 
 // Removed ProtectedRoute, use localStorage checks in pages
 

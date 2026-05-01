@@ -143,7 +143,7 @@ export default function Payment() {
           amount:           dueAmount,
           type:             selectedEwallet,
           reference_no:     loan.reference_no,
-          redirect_success: `${origin}/loan/${id}/pay/success?method=wallet&amount=${dueAmount}`,
+          redirect_success: `${origin}/loan/${id}/pay/success?method=wallet&amount=${parseFloat(dueAmount.toFixed(2))}`,
           redirect_failed:  `${origin}/loan/${id}/pay/failed`,
           billing_name:     billing.name,
           billing_email:    billing.email,
