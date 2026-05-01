@@ -43,10 +43,8 @@ type CustomerRow = RowDataPacket & {
   is_active:   number;
 };
 
-const VALID_METHODS = ["gcash", "maya", "card", "bank", "walkin"] as const;
-type PaymentMethod  = typeof VALID_METHODS[number];
-
-const METHOD_MAP: Record<string, PaymentMethod> = {
+// ── Payment method normalization ──────────────────────────────────────────
+const METHOD_MAP: Record<string, string> = {
   gcash:  "GCASH",
   maya:   "DIGITAL",
   wallet: "GCASH",
@@ -58,8 +56,8 @@ const METHOD_MAP: Record<string, PaymentMethod> = {
   other:  "OTHER",
 };
 
-function normalizeMethod(method: string): PaymentMethod {
-  return METHOD_MAP[method] ?? "walkin";
+function normalizeMethod(method: string): string {
+  return METHOD_MAP[method.toLowerCase()] ?? "OTHER";
 }
 
 function getNextCustomerNo(lastNo: string | null, year: number): string {
@@ -344,7 +342,7 @@ async function startServer() {
         message:  "Your account has been created successfully.",
         customer: {
           customer_id: result.insertId,
-          tenant_id: DEFAULT_TENANT_ID,
+          tenant_id:   DEFAULT_TENANT_ID,
           username, customer_no, first_name, last_name,
           contact_no, email, province, city, barangay, street,
           is_active: 1,
@@ -813,9 +811,17 @@ async function startServer() {
       if (!loan_id || !amount || !method)
         return res.status(400).json({ success: false, message: "Missing required fields." });
 
+      // ── Normalize method to match DB ENUM ────────────────────────────────
       const normalizedMethod = normalizeMethod(String(method));
 
-      // Guard against duplicate payments from the same source/intent
+      // ── Generate OR number from PayMongo IDs ──────────────────────────────
+      const or_no = paymongo_source_id
+        ? `OR-PM-${String(paymongo_source_id).slice(-8).toUpperCase()}`
+        : paymongo_intent_id
+        ? `OR-PM-${String(paymongo_intent_id).slice(-8).toUpperCase()}`
+        : `OR-${Date.now()}`;
+
+      // ── Guard against duplicate source payments ───────────────────────────
       if (paymongo_source_id) {
         const [existing] = await pool.query<RowDataPacket[]>(
           `SELECT payment_id FROM payments WHERE notes LIKE ? LIMIT 1`,
@@ -829,6 +835,7 @@ async function startServer() {
           });
       }
 
+      // ── Guard against duplicate intent payments ───────────────────────────
       if (paymongo_intent_id) {
         const [existing] = await pool.query<RowDataPacket[]>(
           `SELECT payment_id FROM payments WHERE notes LIKE ? LIMIT 1`,
@@ -842,7 +849,7 @@ async function startServer() {
           });
       }
 
-      // ── FIX: use COALESCE to resolve tenant_id from customers if loans.tenant_id is NULL
+      // ── Resolve tenant_id via COALESCE ────────────────────────────────────
       const [loanRows] = await pool.query<RowDataPacket[]>(
         `SELECT l.loan_id, l.customer_id, l.remaining_balance,
                 COALESCE(l.tenant_id, c.tenant_id, ?) AS tenant_id
@@ -865,12 +872,14 @@ async function startServer() {
         paymongo_intent_id ? `Intent ID: ${paymongo_intent_id}` : null,
       ].filter(Boolean).join(", ") || "PayMongo payment";
 
+      // ── Insert payment with all required columns ───────────────────────────
       const [payResult] = await pool.query<ResultSetHeader>(
         `INSERT INTO payments (loan_id, amount, payment_date, method, notes, tenant_id, or_no)
          VALUES (?, ?, NOW(), ?, ?, ?, ?)`,
         [loan_id, payAmount, normalizedMethod, notes, loan.tenant_id, or_no]
       );
 
+      // ── Update loan balance and status ────────────────────────────────────
       await pool.query(
         `UPDATE loans
          SET remaining_balance = ?,
@@ -879,9 +888,10 @@ async function startServer() {
         [newBalance, newBalance, loan_id]
       );
 
+      // ── Notify customer ───────────────────────────────────────────────────
       await insertNotification(
         loan.customer_id,
-        loan.tenant_id ?? DEFAULT_TENANT_ID,
+        Number(loan.tenant_id) || DEFAULT_TENANT_ID,
         isFullyPaid ? "Loan Fully Paid 🎉" : "Payment Received",
         isFullyPaid
           ? "Congratulations! Your loan has been fully paid. Thank you!"
@@ -894,6 +904,7 @@ async function startServer() {
         payment_id:  payResult.insertId,
         new_balance: newBalance,
         fully_paid:  isFullyPaid,
+        or_no,
         message:     isFullyPaid ? "Loan fully paid!" : "Payment recorded successfully.",
       });
     } catch (err: any) {
