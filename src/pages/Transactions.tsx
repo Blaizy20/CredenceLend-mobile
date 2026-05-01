@@ -1,221 +1,286 @@
-import React from 'react';
-import { useNavigate } from 'react-router-dom';
-import { TopBar } from '../components/TopBar';
-import { BottomNav } from '../components/BottomNav';
-import { ReceiptText, ArrowUpRight, ArrowDownLeft, Calendar, FileDown, Loader2 } from 'lucide-react';
-import { motion } from 'motion/react';
-import { API_BASE } from '../lib/api';
+import React, { useEffect, useState, useCallback } from "react";
+import {
+  IonPage, IonContent, IonHeader, IonToolbar, IonTitle,
+  IonRefresher, IonRefresherContent, IonSpinner, IonRippleEffect,
+} from "@ionic/react";
 
-interface Transaction {
-  id:      number;
+// ── Types ─────────────────────────────────────────────────────────────────────
+interface PaymentRecord {
+  payment_id: number;
   loan_id: number;
-  type:    string;
-  amount:  number | string;
-  date:    string;
-  status:  string;
+  reference_no: string;
+  amount: number;
+  method: string;
+  or_no: string | null;
+  notes: string | null;
+  created_at: string;
 }
 
-export default function Transactions() {
-  const navigate = useNavigate();
-  const [transactions, setTransactions] = React.useState<Transaction[]>([]);
-  const [loading, setLoading]           = React.useState(true);
-  const [error, setError]               = React.useState('');
+// ── Method display config ─────────────────────────────────────────────────────
+const METHOD_CONFIG: Record<string, { label: string; icon: string; color: string; bg: string }> = {
+  GCASH:       { label: "GCash",       icon: "💙", color: "#0070ba", bg: "#e8f4ff" },
+  MAYA:        { label: "Maya",        icon: "💚", color: "#00a651", bg: "#e6f7ed" },
+  CARD:        { label: "Card",        icon: "💳", color: "#5b4fcf", bg: "#f0eeff" },
+  QRPH:        { label: "QR Ph",       icon: "📱", color: "#c0392b", bg: "#fdecea" },
+  GRAB_PAY:    { label: "GrabPay",     icon: "🟢", color: "#00b14f", bg: "#e6f8ee" },
+  BPI:         { label: "BPI",         icon: "🏦", color: "#c0392b", bg: "#fdecea" },
+  UNIONBANK:   { label: "UnionBank",   icon: "🏛️", color: "#003087", bg: "#e6ecf8" },
+  BRANKAS_BDO: { label: "BDO",         icon: "🏦", color: "#0056a2", bg: "#e6eef8" },
+  CASH:        { label: "Cash",        icon: "💵", color: "#27ae60", bg: "#eafaf1" },
+  CHEQUE:      { label: "Cheque",      icon: "📝", color: "#7f8c8d", bg: "#f4f4f4" },
+  BANK:        { label: "Bank Transfer",icon: "🏦", color: "#2c3e50", bg: "#ecf0f1" },
+  OTHER:       { label: "Other",       icon: "💸", color: "#7f8c8d", bg: "#f4f4f4" },
+};
 
-  React.useEffect(() => {
-    let user: any = null;
-    try { user = JSON.parse(localStorage.getItem('user') || 'null'); } catch {}
-    if (!user?.customer_id) {
-      navigate('/login', { replace: true });
-      return;
-    }
-    fetchTransactions(user.customer_id);
-  }, [navigate]);
+function getMethodConfig(method: string) {
+  return METHOD_CONFIG[method?.toUpperCase()] ?? METHOD_CONFIG.OTHER;
+}
 
-  const fetchTransactions = async (customerId: number) => {
-    try {
-      const res  = await fetch(`${API_BASE}/api/transactions/${customerId}`);
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data?.message || 'Failed to load transactions.');
-        return;
-      }
-      setTransactions(Array.isArray(data) ? data : []);
-    } catch {
-      setError('Unable to load transactions. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
+// ── Date helpers ──────────────────────────────────────────────────────────────
+function formatDate(dateStr: string) {
+  const d = new Date(dateStr);
+  return d.toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" });
+}
 
-  const formatTime = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-  };
+function formatTime(dateStr: string) {
+  const d = new Date(dateStr);
+  return d.toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit", hour12: true });
+}
 
-  const handleRequestHistory = () => {
-    alert('Your full transaction history request has been received. A PDF report will be sent to your registered email address within 24 hours.');
-  };
-
-  const groupTransactionsByDate = (txs: Transaction[]) => {
-    const groups: { [key: string]: Transaction[] } = {};
-    txs.forEach(tx => {
-      const dateKey = new Date(tx.date).toLocaleDateString('en-US', {
-        month: 'long', day: 'numeric', year: 'numeric',
-      });
-      if (!groups[dateKey]) groups[dateKey] = [];
-      groups[dateKey].push(tx);
-    });
-    return groups;
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-background pb-32">
-        <TopBar title="Transactions" showBack={false} />
-        <div className="pt-24 flex justify-center">
-          <Loader2 className="text-primary animate-spin" size={36} />
-        </div>
-        <BottomNav />
-      </div>
-    );
+function groupByDate(payments: PaymentRecord[]) {
+  const groups: Record<string, PaymentRecord[]> = {};
+  for (const p of payments) {
+    const key = formatDate(p.created_at);
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(p);
   }
+  return groups;
+}
 
-  if (error) {
-    return (
-      <div className="min-h-screen bg-background pb-32">
-        <TopBar title="Transactions" showBack={false} />
-        <div className="pt-24 px-6 flex flex-col items-center gap-4 text-center">
-          <p className="text-red-500 text-sm font-medium">{error}</p>
-          <button
-            onClick={() => { setLoading(true); setError(''); fetchTransactions(0); }}
-            className="text-primary text-sm font-bold hover:underline"
-          >
-            Try again
-          </button>
-        </div>
-        <BottomNav />
-      </div>
-    );
-  }
+function isToday(dateStr: string) {
+  const d = new Date(dateStr);
+  const now = new Date();
+  return d.getDate() === now.getDate() && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+}
 
-  const displayedTransactions = transactions.slice(0, 20);
-  const groupedTransactions   = groupTransactionsByDate(displayedTransactions);
-  const hasMore               = transactions.length > 20;
+function isYesterday(dateStr: string) {
+  const d = new Date(dateStr);
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  return d.getDate() === yesterday.getDate() && d.getMonth() === yesterday.getMonth() && d.getFullYear() === yesterday.getFullYear();
+}
 
+function friendlyDateLabel(dateStr: string) {
+  if (isToday(dateStr)) return "Today";
+  if (isYesterday(dateStr)) return "Yesterday";
+  return dateStr;
+}
+
+// ── Loading skeleton ──────────────────────────────────────────────────────────
+function SkeletonRow() {
   return (
-    <div className="min-h-screen bg-background pb-32">
-      <TopBar
-        title="Transactions"
-        showBack={false}
-        rightElement={
-          <button
-            onClick={handleRequestHistory}
-            className="p-2 text-primary hover:bg-primary/10 rounded-full transition-colors active:scale-90"
-            title="Request History"
-          >
-            <FileDown size={24} />
-          </button>
-        }
-      />
-
-      <main className="pt-24 px-6">
-        <div className="mb-6">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-primary">Activity Log</p>
-          <h2 className="text-xl font-headline font-extrabold text-on-surface">
-            As of {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
-          </h2>
-        </div>
-
-        {transactions.length === 0 ? (
-          <div className="flex flex-col items-center justify-center min-h-[50vh] text-center">
-            <div className="w-20 h-20 rounded-full bg-surface-container-high flex items-center justify-center mb-6">
-              <ReceiptText className="text-outline/40" size={40} />
-            </div>
-            <h2 className="text-xl font-headline font-bold text-on-surface">No transactions</h2>
-            <p className="text-on-surface-variant text-sm mt-2">
-              Your transaction history will appear here.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-8">
-            {Object.entries(groupedTransactions).map(([date, txs], groupIndex) => (
-              <div key={date} className="space-y-3">
-                <div className="sticky top-16 bg-background/95 backdrop-blur-md py-3 z-20 border-b border-outline-variant/10">
-                  <h3 className="text-[11px] font-bold text-primary uppercase tracking-[0.2em]">{date}</h3>
-                </div>
-                <div className="space-y-3">
-                  {txs.map((transaction, index) => {
-                    const isCredit = transaction.type === 'Loan Received';
-                    return (
-                      <motion.div
-                        key={transaction.id}
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: (groupIndex * 0.1) + (index * 0.05) }}
-                        className="bg-surface-container-low rounded-2xl p-4 flex items-center justify-between border border-outline-variant/20 shadow-sm"
-                      >
-                        <div className="flex items-center gap-4">
-                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                            isCredit ? 'bg-green-500/10 text-green-600' : 'bg-blue-500/10 text-blue-600'
-                          }`}>
-                            {isCredit ? <ArrowDownLeft size={20} /> : <ArrowUpRight size={20} />}
-                          </div>
-                          <div>
-                            <h4 className="font-bold text-sm text-on-surface">{transaction.type}</h4>
-                            <div className="flex items-center gap-2 text-on-surface-variant text-[10px] mt-0.5">
-                              <span className="flex items-center gap-1">
-                                <Calendar size={10} className="text-outline/40" />
-                                {formatTime(transaction.date)}
-                              </span>
-                              <span className="text-outline/20">|</span>
-                              <span className="font-mono bg-surface-container-high px-1.5 rounded text-outline">
-                                #{String(transaction.id).slice(-5)}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <p className={`font-bold text-sm ${isCredit ? 'text-green-600' : 'text-on-surface'}`}>
-                            {isCredit ? '+' : '-'} ₱{Number(transaction.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                          </p>
-                          <div className="flex items-center justify-end gap-1 mt-1">
-                            <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                            <span className="text-[9px] text-green-700 font-bold uppercase tracking-wider">
-                              {transaction.status}
-                            </span>
-                          </div>
-                        </div>
-                      </motion.div>
-                    );
-                  })}
-                </div>
-              </div>
-            ))}
-
-            {hasMore && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="pt-4 pb-8">
-                <div className="bg-surface-container-high/30 rounded-3xl p-8 text-center border border-dashed border-outline-variant/50">
-                  <div className="w-12 h-12 bg-primary/10 text-primary rounded-full flex items-center justify-center mx-auto mb-4">
-                    <FileDown size={24} />
-                  </div>
-                  <h4 className="font-bold text-on-surface mb-2">Need more history?</h4>
-                  <p className="text-xs text-on-surface-variant mb-6 leading-relaxed">
-                    We only show your 20 most recent activities here. You can request a full PDF statement of your account.
-                  </p>
-                  <button
-                    onClick={handleRequestHistory}
-                    className="w-full py-3.5 bg-primary text-on-primary font-bold rounded-full text-sm active:scale-95 transition-all shadow-lg shadow-primary/20"
-                  >
-                    Request Full Statement
-                  </button>
-                </div>
-              </motion.div>
-            )}
-          </div>
-        )}
-      </main>
-
-      <BottomNav />
+    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "14px 16px" }}>
+      <div style={{ width: 44, height: 44, borderRadius: "50%", background: "#e8e8e8", flexShrink: 0, animation: "shimmer 1.4s ease-in-out infinite" }} />
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ height: 13, width: "55%", borderRadius: 6, background: "#e8e8e8", animation: "shimmer 1.4s ease-in-out infinite" }} />
+        <div style={{ height: 11, width: "35%", borderRadius: 6, background: "#efefef", animation: "shimmer 1.4s ease-in-out infinite 0.1s" }} />
+      </div>
+      <div style={{ height: 16, width: 72, borderRadius: 6, background: "#e8e8e8", animation: "shimmer 1.4s ease-in-out infinite 0.2s" }} />
     </div>
   );
 }
+
+// ── Empty state ───────────────────────────────────────────────────────────────
+function EmptyState() {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "64px 32px", gap: 12, textAlign: "center" }}>
+      <div style={{ width: 72, height: 72, borderRadius: "50%", background: "#f0f0f0", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, marginBottom: 4 }}>
+        🧾
+      </div>
+      <p style={{ margin: 0, fontWeight: 600, fontSize: 16, color: "#1a1a1a" }}>No payments yet</p>
+      <p style={{ margin: 0, fontSize: 13, color: "#9e9e9e", maxWidth: 240, lineHeight: 1.5 }}>
+        Once you make a payment on any of your loans, it will appear here.
+      </p>
+    </div>
+  );
+}
+
+// ── Summary bar ───────────────────────────────────────────────────────────────
+function SummaryBar({ payments }: { payments: PaymentRecord[] }) {
+  const total = payments.reduce((s, p) => s + Number(p.amount), 0);
+  const count = payments.length;
+  const thisMonth = payments.filter(p => {
+    const d = new Date(p.created_at);
+    const now = new Date();
+    return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+  });
+  const monthTotal = thisMonth.reduce((s, p) => s + Number(p.amount), 0);
+
+  return (
+    <div style={{ display: "flex", gap: 10, padding: "12px 16px 4px", overflowX: "auto" }}>
+      {[
+        { label: "Total Paid",    value: `₱${total.toLocaleString("en-PH", { minimumFractionDigits: 2 })}`, accent: "#1976d2" },
+        { label: "This Month",   value: `₱${monthTotal.toLocaleString("en-PH", { minimumFractionDigits: 2 })}`, accent: "#27ae60" },
+        { label: "Transactions", value: String(count), accent: "#7c3aed" },
+      ].map(({ label, value, accent }) => (
+        <div key={label} style={{ flex: "0 0 auto", minWidth: 110, background: "#fff", borderRadius: 14, padding: "12px 14px", boxShadow: "0 1px 4px rgba(0,0,0,0.07)", border: "1px solid #f0f0f0" }}>
+          <p style={{ margin: 0, fontSize: 11, color: "#9e9e9e", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</p>
+          <p style={{ margin: "4px 0 0", fontSize: 16, fontWeight: 700, color: accent, fontVariantNumeric: "tabular-nums" }}>{value}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Payment card ──────────────────────────────────────────────────────────────
+function PaymentCard({ payment }: { payment: PaymentRecord }) {
+  const cfg = getMethodConfig(payment.method);
+  return (
+    <div
+      className="ion-activatable ripple-parent"
+      style={{ position: "relative", display: "flex", alignItems: "center", gap: 12, padding: "13px 16px", background: "#fff", borderBottom: "1px solid #f5f5f5", overflow: "hidden", cursor: "default" }}
+    >
+      <IonRippleEffect />
+      {/* Method icon bubble */}
+      <div style={{ width: 44, height: 44, borderRadius: "50%", background: cfg.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>
+        {cfg.icon}
+      </div>
+
+      {/* Middle info */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{ margin: 0, fontWeight: 600, fontSize: 14, color: "#1a1a1a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {cfg.label} Payment
+        </p>
+        <p style={{ margin: "2px 0 0", fontSize: 12, color: "#9e9e9e" }}>
+          {payment.reference_no}
+          {payment.or_no ? ` · ${payment.or_no}` : ""}
+        </p>
+        <p style={{ margin: "2px 0 0", fontSize: 11, color: "#bdbdbd" }}>
+          {formatTime(payment.created_at)}
+        </p>
+      </div>
+
+      {/* Amount */}
+      <div style={{ textAlign: "right", flexShrink: 0 }}>
+        <p style={{ margin: 0, fontSize: 15, fontWeight: 700, color: "#27ae60", fontVariantNumeric: "tabular-nums" }}>
+          −₱{Number(payment.amount).toLocaleString("en-PH", { minimumFractionDigits: 2 })}
+        </p>
+        <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: 20, background: cfg.bg, color: cfg.color }}>
+          {cfg.label}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+const Transactions: React.FC = () => {
+  const [payments, setPayments]   = useState<PaymentRecord[]>([]);
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState<string | null>(null);
+
+  const getCustomerId = () => {
+    try {
+      const raw = localStorage.getItem("customer") ?? sessionStorage.getItem("customer") ?? "{}";
+      return JSON.parse(raw)?.customer_id ?? null;
+    } catch { return null; }
+  };
+
+  const fetchPayments = useCallback(async () => {
+    const customerId = getCustomerId();
+    if (!customerId) { setLoading(false); setError("Not logged in."); return; }
+    try {
+      const res  = await fetch(`/api/payments/customer/${customerId}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Failed to load payments.");
+      setPayments(Array.isArray(data) ? data : []);
+      setError(null);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchPayments(); }, [fetchPayments]);
+
+  const handleRefresh = async (e: CustomEvent) => {
+    await fetchPayments();
+    (e.target as HTMLIonRefresherElement).complete();
+  };
+
+  const grouped = groupByDate(payments);
+
+  return (
+    <IonPage>
+      <style>{`
+        @keyframes shimmer {
+          0%   { opacity: 1; }
+          50%  { opacity: 0.45; }
+          100% { opacity: 1; }
+        }
+        .tx-date-label {
+          font-size: 11px;
+          font-weight: 700;
+          color: #9e9e9e;
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
+          padding: 10px 16px 4px;
+          background: #fafafa;
+          border-bottom: 1px solid #f0f0f0;
+        }
+      `}</style>
+
+      <IonHeader>
+        <IonToolbar>
+          <IonTitle>Payment History</IonTitle>
+        </IonToolbar>
+      </IonHeader>
+
+      <IonContent fullscreen style={{ "--background": "#f7f7f7" } as React.CSSProperties}>
+        <IonRefresher slot="fixed" onIonRefresh={handleRefresh}>
+          <IonRefresherContent />
+        </IonRefresher>
+
+        {/* Summary cards */}
+        {!loading && payments.length > 0 && <SummaryBar payments={payments} />}
+
+        {/* States */}
+        {loading && (
+          <div style={{ background: "#fff", margin: "12px 16px", borderRadius: 16, overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+            {[...Array(6)].map((_, i) => <SkeletonRow key={i} />)}
+          </div>
+        )}
+
+        {!loading && error && (
+          <div style={{ margin: "24px 16px", padding: "20px", background: "#fff3f3", borderRadius: 14, textAlign: "center" }}>
+            <p style={{ margin: 0, color: "#c0392b", fontWeight: 600, fontSize: 14 }}>Failed to load</p>
+            <p style={{ margin: "4px 0 0", color: "#e57373", fontSize: 13 }}>{error}</p>
+            <button
+              onClick={fetchPayments}
+              style={{ marginTop: 12, padding: "8px 20px", background: "#c0392b", color: "#fff", border: "none", borderRadius: 20, fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {!loading && !error && payments.length === 0 && <EmptyState />}
+
+        {/* Grouped payment list */}
+        {!loading && !error && payments.length > 0 && (
+          <div style={{ margin: "12px 0 24px", display: "flex", flexDirection: "column", gap: 8 }}>
+            {Object.entries(grouped).map(([date, items]) => (
+              <div key={date} style={{ background: "#fff", borderRadius: 16, overflow: "hidden", margin: "0 16px", boxShadow: "0 1px 4px rgba(0,0,0,0.05)" }}>
+                <div className="tx-date-label">{friendlyDateLabel(date)}</div>
+                {items.map(p => <PaymentCard key={p.payment_id} payment={p} />)}
+              </div>
+            ))}
+          </div>
+        )}
+      </IonContent>
+    </IonPage>
+  );
+};
+
+export default Transactions;
