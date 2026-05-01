@@ -1,221 +1,280 @@
 import React from 'react';
-import { Mail, ArrowLeft, ArrowRight, CheckCircle2, KeyRound, ShieldCheck, RefreshCcw } from 'lucide-react';
+import { Mail, ArrowLeft, ArrowRight, CheckCircle2, KeyRound, ShieldCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 import { motion, AnimatePresence } from 'motion/react';
 import { authAPI } from '../lib/api';
 
+type Step = 'email' | 'otp' | 'password' | 'done';
+
 export default function ForgotPassword() {
   const navigate = useNavigate();
 
+  const [step, setStep]         = React.useState<Step>('email');
   const [email, setEmail]       = React.useState('');
   const [otp, setOtp]           = React.useState('');
   const [password, setPassword] = React.useState('');
   const [confirm, setConfirm]   = React.useState('');
   const [loading, setLoading]   = React.useState(false);
-  const [verifying, setVerifying] = React.useState(false);
   const [error, setError]       = React.useState('');
-  const [otpSent, setOtpSent]   = React.useState(false);
-  const [otpVerified, setOtpVerified] = React.useState(false);
-  const [resendTimer, setResendTimer] = React.useState(0);
-  const [isDone, setIsDone] = React.useState(false);
+  const [resendCooldown, setResendCooldown] = React.useState(0);
 
-  // Timer for OTP resend
+  // Resend cooldown timer
   React.useEffect(() => {
-    let interval: any;
-    if (resendTimer > 0) {
-      interval = setInterval(() => setResendTimer(prev => prev - 1), 1000);
-    }
-    return () => clearInterval(interval);
-  }, [resendTimer]);
+    if (resendCooldown <= 0) return;
+    const t = setTimeout(() => setResendCooldown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendCooldown]);
 
-  const handleSendOtp = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
+  // ── Step 1: Send OTP ──────────────────────────────────────────────────────
+  const handleSendOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
     setError('');
-    if (!email.trim()) return setError('Please enter your email address.');
+    if (!email.trim())
+      return setError('Please enter your email address.');
 
     setLoading(true);
     try {
-      const res = await authAPI.sendOtp(email.trim().toLowerCase(), 'reset');
-      if (res.success) {
-        setOtpSent(true);
-        setResendTimer(30);
-      } else {
-        setError(res.message || 'No account found with that email.');
-      }
+      const res = await authAPI.sendOtp(email.trim().toLowerCase());
+      if (!res.success)
+        return setError(res.message || 'No account found with that email address.');
+      setStep('otp');
+      setResendCooldown(60);
     } catch {
-      setError('Network error. Check your connection.');
+      setError('Unable to send verification code. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
+  // ── Step 2: Verify OTP ────────────────────────────────────────────────────
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (!otp.trim()) return setError('Enter code.');
+    if (!otp.trim())
+      return setError('Please enter the verification code.');
 
-    setVerifying(true);
+    setLoading(true);
     try {
       const res = await authAPI.verifyOtp(email, otp.trim());
-      if (res.success) {
-        setOtpVerified(true);
-      } else {
-        setError(res.message || 'Invalid code.');
-      }
+      if (!res.success)
+        return setError(res.message || 'Invalid or expired verification code.');
+      setStep('password');
     } catch {
-      setError('Verification failed.');
+      setError('Unable to verify code. Please try again.');
     } finally {
-      setVerifying(false);
+      setLoading(false);
     }
   };
 
+  const handleResend = async () => {
+    if (resendCooldown > 0) return;
+    setError('');
+    setLoading(true);
+    try {
+      const res = await authAPI.sendOtp(email);
+      if (!res.success) return setError(res.message || 'Failed to resend code.');
+      setResendCooldown(60);
+    } catch {
+      setError('Unable to resend code. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ── Step 3: Reset Password ────────────────────────────────────────────────
   const handleResetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    if (password.length < 8) return setError('Password must be 8+ chars.');
-    if (password !== confirm) return setError('Passwords do not match.');
+    if (!password || password.length < 8)
+      return setError('Password must be at least 8 characters.');
+    if (password !== confirm)
+      return setError('Passwords do not match.');
 
     setLoading(true);
     try {
       const res = await authAPI.resetPassword(email, password);
-      if (res.success) {
-        setIsDone(true);
-      } else {
-        setError(res.message || 'Failed to reset.');
-      }
+      if (!res.success)
+        return setError(res.message || 'Failed to reset password. Please try again.');
+      setStep('done');
     } catch {
-      setError('Error resetting password.');
+      setError('Unable to reset password. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  if (isDone) {
+  // ── Done ──────────────────────────────────────────────────────────────────
+  if (step === 'done') {
     return (
-      <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6 text-center">
-        <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="max-w-md w-full">
-          <div className="w-20 h-20 bg-emerald-500/10 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6">
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6">
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="w-full max-w-md bg-surface-container-low rounded-[2rem] p-8 shadow-2xl border-t border-white/5 text-center"
+        >
+          <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-green-500/10 text-green-500 mb-6">
             <CheckCircle2 size={48} />
           </div>
-          <h2 className="text-2xl font-bold mb-2">Password Reset!</h2>
-          <p className="text-on-surface-variant mb-8">Your password has been successfully updated.</p>
-          <Button onClick={() => navigate('/login')}>Back to Login</Button>
+          <h2 className="font-headline font-bold text-2xl text-on-surface mb-2">Password Reset!</h2>
+          <p className="text-on-surface-variant text-sm mb-8">
+            Your password has been updated. You can now log in with your new password.
+          </p>
+          <Button onClick={() => navigate('/login')}>
+            Back to Login <ArrowRight size={20} />
+          </Button>
         </motion.div>
       </div>
     );
   }
 
+  const steps: Step[] = ['email', 'otp', 'password'];
+  const stepIndex = steps.indexOf(step);
+
+  const stepMeta = {
+    email:    { icon: <Mail size={24} />,       title: 'Reset Password',      subtitle: 'Enter your registered email address' },
+    otp:      { icon: <ShieldCheck size={24} />, title: 'Verify Your Email',  subtitle: `Enter the 6-digit code sent to ${email}` },
+    password: { icon: <KeyRound size={24} />,    title: 'New Password',        subtitle: 'Choose a strong new password' },
+  };
+
+  const meta = stepMeta[step as keyof typeof stepMeta];
+
   return (
-    <div className="min-h-screen bg-background p-6 flex flex-col items-center justify-center">
-      <div className="w-full max-w-md">
-        <button onClick={() => navigate('/login')} className="flex items-center gap-2 text-primary font-bold mb-8">
-          <ArrowLeft size={20} /> Back to Login
+    <div className="min-h-screen bg-background flex flex-col items-center justify-center px-6 relative overflow-hidden">
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="relative z-10 w-full max-w-md"
+      >
+        <button
+          onClick={() => step === 'email' ? navigate('/login') : setStep(steps[stepIndex - 1])}
+          className="flex items-center gap-2 text-primary font-bold mb-8 hover:opacity-80 transition-opacity"
+        >
+          <ArrowLeft size={20} />
+          <span>{step === 'email' ? 'Back to Login' : 'Back'}</span>
         </button>
 
-        <div className="bg-surface-container-low rounded-[2rem] p-8 shadow-xl border border-white/5">
-          <header className="mb-8 flex items-center gap-4">
-             <div className="w-12 h-12 bg-primary/10 text-primary rounded-2xl flex items-center justify-center">
-                {otpVerified ? <KeyRound size={24}/> : <Mail size={24} />}
-             </div>
-             <div>
-                <h2 className="text-2xl font-bold">{otpVerified ? 'New Password' : 'Forgot Password'}</h2>
-                <p className="text-xs text-on-surface-variant">
-                  {otpVerified ? 'Create a strong new password' : 'Enter email to receive code'}
-                </p>
-             </div>
-          </header>
+        <div className="w-full bg-surface-container-low rounded-[2rem] p-8 shadow-2xl border-t border-white/5">
 
+          {/* Progress dots */}
+          <div className="flex items-center gap-2 mb-8">
+            {steps.map((s, i) => (
+              <div
+                key={s}
+                className={`h-1.5 flex-1 rounded-full transition-all duration-300 ${
+                  i <= stepIndex ? 'bg-primary' : 'bg-surface-container-highest'
+                }`}
+              />
+            ))}
+          </div>
+
+          {/* Header */}
+          <div className="flex items-center gap-4 mb-8">
+            <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+              {meta.icon}
+            </div>
+            <div>
+              <h2 className="font-headline font-bold text-2xl text-on-surface">{meta.title}</h2>
+              <p className="text-on-surface-variant text-xs mt-0.5">{meta.subtitle}</p>
+            </div>
+          </div>
+
+          {/* Error */}
           <AnimatePresence>
             {error && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="mb-4 p-3 bg-red-500/10 text-red-500 rounded-xl text-sm">
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -8 }}
+                className="mb-5 px-4 py-3 bg-red-500/10 border border-red-500/20 rounded-xl text-red-500 text-sm font-medium"
+              >
                 {error}
               </motion.div>
             )}
           </AnimatePresence>
 
-          {!otpVerified ? (
-            <div className="space-y-6">
-              {/* Row 1: Email + Confirm */}
-              <div className="flex gap-3 items-end">
-                <div className="flex-1">
-                  <Input
-                    label="EMAIL ADDRESS"
-                    placeholder="your@email.com"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    icon={<Mail size={20} />}
-                  />
-                </div>
+          {/* Step 1: Email */}
+          {step === 'email' && (
+            <form className="space-y-6" onSubmit={handleSendOtp}>
+              <Input
+                label="EMAIL ADDRESS"
+                placeholder="your@email.com"
+                type="email"
+                icon={<Mail size={20} />}
+                value={email}
+                onChange={(e) => { setEmail(e.target.value); setError(''); }}
+                required
+              />
+              <Button type="submit" disabled={loading}>
+                {loading ? 'Sending Code...' : 'Send Verification Code'} <ArrowRight size={20} />
+              </Button>
+            </form>
+          )}
+
+          {/* Step 2: OTP */}
+          {step === 'otp' && (
+            <form className="space-y-6" onSubmit={handleVerifyOtp}>
+              <Input
+                label="VERIFICATION CODE"
+                placeholder="6-digit code"
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                icon={<ShieldCheck size={20} />}
+                value={otp}
+                onChange={(e) => { setOtp(e.target.value.replace(/\D/g, '')); setError(''); }}
+                required
+              />
+              <Button type="submit" disabled={loading}>
+                {loading ? 'Verifying...' : 'Verify Code'} <ArrowRight size={20} />
+              </Button>
+              <div className="text-center">
                 <button
                   type="button"
-                  onClick={() => handleSendOtp()}
-                  disabled={loading || resendTimer > 0}
-                  className="h-[56px] px-6 bg-primary text-on-primary rounded-xl font-bold text-xs disabled:opacity-50 transition-all active:scale-95"
+                  onClick={handleResend}
+                  disabled={resendCooldown > 0 || loading}
+                  className="text-sm text-primary font-semibold disabled:text-outline disabled:cursor-not-allowed transition-colors"
                 >
-                  {loading ? <RefreshCcw size={16} className="animate-spin" /> : 'Confirm'}
+                  {resendCooldown > 0
+                    ? `Resend code in ${resendCooldown}s`
+                    : 'Resend verification code'
+                  }
                 </button>
               </div>
+            </form>
+          )}
 
-              {/* Row 2: Code + Resend (Only if sent) */}
-              <AnimatePresence>
-                {otpSent && (
-                  <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="space-y-6 pt-2">
-                    <div className="flex gap-3 items-end">
-                      <div className="flex-1">
-                        <Input
-                          label="VERIFICATION CODE"
-                          placeholder="000000"
-                          type="number"
-                          value={otp}
-                          onChange={(e) => setOtp(e.target.value.slice(0, 6))}
-                          icon={<ShieldCheck size={20} />}
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleSendOtp()}
-                        disabled={loading || resendTimer > 0}
-                        className="h-[56px] px-4 border border-primary text-primary rounded-xl font-bold text-xs disabled:opacity-50"
-                      >
-                        {resendTimer > 0 ? `${resendTimer}s` : 'Resend'}
-                      </button>
-                    </div>
-                    <Button onClick={handleVerifyOtp} disabled={verifying || otp.length !== 6}>
-                       {verifying ? 'Verifying...' : 'Verify Code'}
-                    </Button>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          ) : (
-            <form onSubmit={handleResetPassword} className="space-y-6">
+          {/* Step 3: New Password */}
+          {step === 'password' && (
+            <form className="space-y-6" onSubmit={handleResetPassword}>
               <Input
                 label="NEW PASSWORD"
                 placeholder="At least 8 characters"
                 type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
                 icon={<KeyRound size={20} />}
+                value={password}
+                onChange={(e) => { setPassword(e.target.value); setError(''); }}
+                required
               />
               <Input
                 label="CONFIRM PASSWORD"
-                placeholder="Repeat new password"
+                placeholder="Re-enter your new password"
                 type="password"
-                value={confirm}
-                onChange={(e) => setConfirm(e.target.value)}
                 icon={<KeyRound size={20} />}
+                value={confirm}
+                onChange={(e) => { setConfirm(e.target.value); setError(''); }}
+                required
               />
               <Button type="submit" disabled={loading}>
                 {loading ? 'Resetting...' : 'Reset Password'} <ArrowRight size={20} />
               </Button>
             </form>
           )}
+
         </div>
-      </div>
+      </motion.div>
     </div>
   );
 }

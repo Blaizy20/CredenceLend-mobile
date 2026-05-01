@@ -16,14 +16,14 @@ export function TopBar({ title, showBack = true, onBack, rightElement, className
 
   return (
     <nav className={cn(
-      "fixed top-0 w-full z-50 flex items-center px-6 h-16 bg-background/60 backdrop-blur-xl border-b border-outline-variant/10",
+      "fixed top-0 w-full z-50 flex items-center px-6 h-16 bg-background/60 backdrop-blur-xl shadow-[0_20px_40px_rgba(0,0,0,0.4)]",
       className
     )}>
       <div className="flex items-center gap-4 w-full">
         {showBack && (
           <button 
             onClick={() => onBack ? onBack() : navigate(-1)}
-            className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-black/5 transition-colors active:scale-95 text-primary"
+            className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/5 transition-colors active:scale-95 text-primary"
           >
             <ChevronLeft size={24} />
           </button>

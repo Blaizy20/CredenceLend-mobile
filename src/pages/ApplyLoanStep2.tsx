@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { BadgeCheck, CreditCard, PenTool, AlertTriangle, CheckCircle2, User, MapPin, FileText, LayoutDashboard, X } from 'lucide-react';
+import { BadgeCheck, CreditCard, PenTool, AlertTriangle, CheckCircle2, User, MapPin, FileText, LayoutDashboard } from 'lucide-react';
 import { TopBar } from '../components/TopBar';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
@@ -19,10 +19,6 @@ interface CoMakerForm {
 }
 
 export default function ApplyLoanStep2() {
-  // Scroll to top on mount
-  React.useEffect(() => {
-    window.scrollTo(0, 0);
-  }, []);
   const navigate = useNavigate();
   const location = useLocation();
   const step1    = location.state?.step1;
@@ -72,14 +68,6 @@ export default function ApplyLoanStep2() {
     reader.readAsDataURL(file);
   };
 
-  const removeFile = (field: string) => {
-    setFiles(prev => {
-      const next = { ...prev };
-      delete next[field];
-      return next;
-    });
-  };
-
   const validate = () => {
     const newErrors: Record<string, string> = {};
     if (!formData.first_name.trim()) newErrors.first_name = 'First name is required.';
@@ -87,13 +75,6 @@ export default function ApplyLoanStep2() {
     if (!formData.contact_no.trim()) newErrors.contact_no = 'Contact number is required.';
     else if (!/^09\d{9}$/.test(formData.contact_no))
       newErrors.contact_no = 'Please enter a valid PH number (09XXXXXXXXX).';
-
-    if (!formData.email.trim()) {
-      newErrors.email = 'Email address is required.';
-    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      newErrors.email = 'Please enter a valid email address.';
-    }
-
     if (!formData.province.trim()) newErrors.province = 'Province is required.';
     if (!formData.city.trim())     newErrors.city     = 'City is required.';
     if (!formData.barangay.trim()) newErrors.barangay = 'Barangay is required.';
@@ -132,23 +113,17 @@ export default function ApplyLoanStep2() {
         id_type:          step1.id_type,
         collateral_type:  step1.collateral_type,
         co_maker:         formData,
-        documents: {
-          ...step1.documents,
-          coMakerIds: files
-        }
       });
 
-      if (result.success) {
-        // Force refresh user in storage to ensure their new loan shows up
-        const user = JSON.parse(localStorage.getItem('user') || '{}');
-        localStorage.setItem('user', JSON.stringify(user));
-
-        // ── Show loading → then success screen ──
-        setSuccessStep('loading');
-        setTimeout(() => setSuccessStep('done'), 2200);
-      } else {
-        setSubmitError(result.message || 'Failed to submit application.');
+      if (!result.success) {
+        setSubmitError(result.message || 'Submission failed. Please try again.');
+        setSubmitting(false);
+        return;
       }
+
+      // ── Show loading → then success screen ──
+      setSuccessStep('loading');
+      setTimeout(() => setSuccessStep('done'), 2200);
     } catch {
       setSubmitError('An unexpected error occurred. Please check your connection and try again.');
     } finally {
@@ -223,7 +198,7 @@ export default function ApplyLoanStep2() {
           </div>
           <Input label="Contact No." placeholder="09XXXXXXXXX" value={formData.contact_no}
             onChange={(e) => handleChange('contact_no', e.target.value)} error={errors.contact_no} />
-          <Input label="Email Address" placeholder="juan@example.com" type="email"
+          <Input label="Email Address (Optional)" placeholder="juan@example.com" type="email"
             value={formData.email} onChange={(e) => handleChange('email', e.target.value)} error={errors.email} />
         </section>
 
@@ -251,11 +226,12 @@ export default function ApplyLoanStep2() {
             <div className="w-1 h-6 bg-primary rounded-full" />
             <h2 className="font-headline font-bold text-lg text-on-surface">
               Identification
+              <span className="ml-2 text-on-surface-variant text-sm font-normal">— optional</span>
             </h2>
           </div>
           <div className="space-y-4">
             {idFields.map(({ key, label, icon }) => (
-              <div key={key} className="flex items-center justify-between p-4 bg-surface-container-low rounded-xl border border-white/5 relative">
+              <div key={key} className="flex items-center justify-between p-4 bg-surface-container-low rounded-xl border border-white/5">
                 <div className="flex items-center gap-3">
                   {icon}
                   <span className="text-sm font-medium">{label}</span>
@@ -263,19 +239,13 @@ export default function ApplyLoanStep2() {
                 <div className="flex flex-col items-end gap-1">
                   <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }}
                     id={`${key}Upload`} onChange={e => handleFileChange(e, key)} />
-                  {files[key] ? (
-                    <div className="flex items-center gap-2 bg-green-500/10 px-3 py-1.5 rounded-lg border border-green-500/20">
-                       <span className="text-[10px] text-green-600 font-bold uppercase">Ready</span>
-                       <button onClick={() => removeFile(key)} className="text-red-500">
-                          <X size={14} />
-                       </button>
-                    </div>
-                  ) : (
-                    <label htmlFor={`${key}Upload`}
-                      className="bg-primary text-on-primary-container text-[10px] font-bold px-4 py-2 rounded-lg uppercase tracking-wider shadow-lg shadow-primary/20 cursor-pointer">
-                      CHOOSE FILE
-                    </label>
-                  )}
+                  <label htmlFor={`${key}Upload`}
+                    className="bg-primary text-on-primary-container text-[10px] font-bold px-4 py-2 rounded-lg uppercase tracking-wider shadow-lg shadow-primary/20 cursor-pointer">
+                    CHOOSE FILE
+                  </label>
+                  {files[key]
+                    ? <span className="text-xs text-green-600">Attached ✓</span>
+                    : <span className="text-xs text-outline">No file selected</span>}
                 </div>
               </div>
             ))}

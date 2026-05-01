@@ -29,12 +29,12 @@ export default function PaymentOptions() {
           loansAPI.getLoan(Number(id)),
           loansAPI.getPayments(Number(id)),
         ]);
-        if (!loanData || loanData.success === false || !loanData.loan) {
+        if (!loanData || loanData.success === false) {
           setError(loanData?.message || 'Loan not found.');
           return;
         }
-        setLoan(loanData.loan);
-        setPayments(Array.isArray(paymentData.payments) ? paymentData.payments : (Array.isArray(paymentData) ? paymentData : []));
+        setLoan(loanData);
+        setPayments(Array.isArray(paymentData) ? paymentData : []);
       } catch {
         setError('Unable to load loan details. Please try again.');
       } finally {
@@ -66,48 +66,23 @@ export default function PaymentOptions() {
   const totalPayable      = Number(loan.total_payable     ?? 0);
   const remainingBalance  = Number(loan.remaining_balance ?? totalPayable);
   const termMonths        = Number(loan.term_months       ?? 1);
-
-  // Interest computation check: 2500 then 3.5% it's 4600?
-  // If principal is 2500 and rate is 3.5% per month for 24 months:
-  // 2500 + (2500 * 0.035 * 24) = 2500 + 2100 = 4600. Correct.
-
   const installmentAmount = termMonths > 0 ? totalPayable / termMonths : totalPayable;
 
-  // Fix: amountDue logic
-  // Calculate how much should have been paid by now based on schedule
-  const activatedDate = loan.activated_at ? new Date(loan.activated_at) : new Date(loan.created_at);
-  const now = new Date();
-
-  let monthsPassed = 0;
-  const term = (loan.payment_term || '').toLowerCase();
-  if (term.includes('daily')) {
-    monthsPassed = Math.floor((now.getTime() - activatedDate.getTime()) / (1000 * 60 * 60 * 24));
-  } else if (term.includes('weekly')) {
-    monthsPassed = Math.floor((now.getTime() - activatedDate.getTime()) / (1000 * 60 * 60 * 24 * 7));
-  } else if (term.includes('semi')) {
-    monthsPassed = Math.floor((now.getTime() - activatedDate.getTime()) / (1000 * 60 * 60 * 24 * 15));
-  } else {
-    monthsPassed = (now.getFullYear() - activatedDate.getFullYear()) * 12 + (now.getMonth() - activatedDate.getMonth());
-  }
-
-  // We should have paid (monthsPassed + 1) installments by now (including current month)
-  const targetPaid = Math.min(totalPayable, (Math.max(0, monthsPassed) + 1) * installmentAmount);
-  const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount ?? 0), 0);
-
-  // Amount due is what we are "behind" on the schedule
-  const amountDue = remainingBalance <= 0
+  const totalPaid   = payments.reduce((sum, p) => sum + Number(p.amount ?? 0), 0);
+  const partialInto = installmentAmount > 0 ? totalPaid % installmentAmount : 0;
+  const amountDue   = remainingBalance <= 0
     ? 0
-    : Math.max(installmentAmount, targetPaid - totalPaid);
-
-  // Ensure amountDue doesn't exceed remaining balance
-  const finalAmountDue = Math.min(remainingBalance, amountDue);
+    : Math.min(
+        remainingBalance,
+        Math.max(0, installmentAmount - (partialInto > 0.01 ? partialInto : 0))
+      );
 
   const handleContinue = () => {
     setCustomError('');
     let amount = 0;
 
     if (selectedOption === 'installment') {
-      amount = finalAmountDue;
+      amount = amountDue;
     } else if (selectedOption === 'full') {
       amount = remainingBalance;
     } else {
@@ -116,9 +91,12 @@ export default function PaymentOptions() {
         setCustomError('Please enter a valid amount.');
         return;
       }
-      // Allowed to pay any amount up to remaining balance,
-      // but warn if it's less than amount due? user said "if they pay more than amount the next due is reduced"
-      // so custom amount is fine.
+      if (val < amountDue) {
+        setCustomError(
+          `Amount must be at least ₱ ${amountDue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        );
+        return;
+      }
       if (val > remainingBalance) {
         setCustomError(
           `Amount cannot exceed remaining balance of ₱ ${remainingBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -164,10 +142,10 @@ export default function PaymentOptions() {
           <div>
             <p className="text-[10px] font-bold uppercase tracking-widest text-primary mb-1">Amount Due</p>
             <p className="font-headline font-bold text-xl text-on-surface">
-              ₱ {finalAmountDue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ₱ {amountDue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </p>
             <p className="text-xs text-on-surface-variant mt-1">
-              {totalPaid < targetPaid ? 'Pay overdue + current installment' : 'Next scheduled installment'}
+              {partialInto > 0.01 ? 'Remaining for this installment' : 'Regular installment payment'}
             </p>
           </div>
           <div className={radioClass(selectedOption === 'installment')}>
@@ -225,7 +203,7 @@ export default function PaymentOptions() {
                 error={customError}
               />
               <p className="text-[10px] text-on-surface-variant mt-2 italic">
-                Enter any amount you wish to pay.
+                Minimum: ₱ {amountDue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </p>
             </motion.div>
           )}

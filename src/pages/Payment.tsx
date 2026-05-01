@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { Copy, Store, Landmark, Wallet, CreditCard, CheckCircle, ShieldCheck, Loader2, AlertCircle, CheckCircle2, LayoutDashboard, Receipt, AlertTriangle, ExternalLink } from 'lucide-react';
+import { Copy, Store, Landmark, Wallet, CreditCard, CheckCircle, ShieldCheck, Loader2, AlertCircle, CheckCircle2, LayoutDashboard, Receipt, AlertTriangle } from 'lucide-react';
 import { TopBar } from '../components/TopBar';
 import { Button } from '../components/Button';
 import { motion, AnimatePresence } from 'motion/react';
@@ -85,11 +85,11 @@ export default function Payment() {
     const load = async () => {
       try {
         const loanData = await loansAPI.getLoan(Number(id));
-        if (!loanData || loanData.success === false || !loanData.loan) {
+        if (!loanData || loanData.success === false) {
           setError(loanData?.message || 'Loan not found.');
           return;
         }
-        setLoan(loanData.loan);
+        setLoan(loanData);
       } catch {
         setError('Unable to load loan details. Please try again.');
       } finally {
@@ -107,57 +107,10 @@ export default function Payment() {
     });
   };
 
-  const handleConfirmed = async () => {
-    // If it's a "live" method (wallet/card), we would normally call Paymongo here
-    // For now, let's just record the payment in our system
-    setSuccessStep('loading');
-
-    try {
-      const customer = JSON.parse(localStorage.getItem('customer') || '{}');
-      const customerId = customer.customer_id || loan.customer_id;
-
-      // If it's GCash, Maya, or Card, use Paymongo
-      if (['wallet', 'card'].includes(selectedMethod)) {
-        const checkoutRes = await loansAPI.createPaymongoCheckout(
-          dueAmount,
-          `Loan Payment for ${loan.reference_no}`,
-          `${loan.reference_no}-${Date.now()}`,
-          {
-            loan_id: id,
-            customer_id: customerId,
-            payment_type: paymentType
-          }
-        );
-
-        if (checkoutRes.success && checkoutRes.checkout_url) {
-          // Open the Paymongo checkout URL
-          window.location.href = checkoutRes.checkout_url;
-          return;
-        } else {
-          setError(checkoutRes.message || 'Failed to initialize payment gateway.');
-          setSuccessStep('idle');
-          return;
-        }
-      }
-
-      const res = await loansAPI.recordPayment(
-        Number(id),
-        customerId,
-        dueAmount,
-        selectedMethod
-      );
-
-      if (res.success) {
-        setTimeout(() => setSuccessStep('done'), 1500);
-      } else {
-        setError(res.message || 'Payment failed.');
-        setSuccessStep('idle');
-      }
-    } catch (err) {
-      setError('Connection error. Please try again.');
-      setSuccessStep('idle');
-    }
+  const handleConfirmed = () => {
     setShowConfirm(false);
+    setSuccessStep('loading');
+    setTimeout(() => setSuccessStep('done'), 2200);
   };
 
   if (loading) {

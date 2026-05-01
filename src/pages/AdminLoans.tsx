@@ -18,21 +18,16 @@ export default function AdminLoans() {
     fetchLoans();
   }, []);
 
-  const fetchLoans = async () => {
-    setLoading(true);
+  const fetchLoans = () => {
     try {
-      // Try to fetch from API first if possible, or just use mocks for now
-      // Since it's an admin view, we'd normally fetch all loans
-      // For this demo/test environment, let's use the same 'mock_loans'
-      const data = JSON.parse(localStorage.getItem('mock_loans') || '[]');
-
-      // Sort: Pending first, then newest
-      const sorted = data.sort((a: any, b: any) => {
+      let data = JSON.parse(localStorage.getItem('applications') || '[]');
+      // Sort: Pending first, then others
+      data = data.sort((a, b) => {
         if (a.status === 'Pending' && b.status !== 'Pending') return -1;
         if (a.status !== 'Pending' && b.status === 'Pending') return 1;
-        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        return 0;
       });
-      setLoans(sorted);
+      setLoans(data);
     } catch (error) {
       setLoans([]);
     } finally {
@@ -40,48 +35,34 @@ export default function AdminLoans() {
     }
   };
 
-  const handleStatusUpdate = (loanId: number, status: string) => {
-    const allLoans = JSON.parse(localStorage.getItem('mock_loans') || '[]');
-    const updated = allLoans.map((l: any) => {
-      if (l.loan_id === loanId) {
-        // Only update status, do not auto-approve or auto-pay
-        if (status === 'Active' || status === 'Approved') {
-          // Only add transaction and notification if admin explicitly approves
-          const transactions = JSON.parse(localStorage.getItem('mock_transactions') || '[]');
-          transactions.push({
-            transaction_id: Date.now(),
-            customer_id: l.customer_id,
-            type: 'Loan Disbursement',
-            amount: l.principal_amount || l.amount,
-            status: 'Completed',
-            reference_no: l.reference_no,
-            date: new Date().toISOString()
-          });
-          localStorage.setItem('mock_transactions', JSON.stringify(transactions));
-
-          // Add notification
-          const notifications = JSON.parse(localStorage.getItem('mock_notifications') || '[]');
-          notifications.unshift({
-            notification_id: Date.now(),
-            customer_id: l.customer_id,
-            title: 'Loan Approved!',
-            message: `Your loan application ${l.reference_no} has been approved.`,
-            type: 'success',
-            is_read: false,
-            created_at: new Date().toISOString()
-          });
-          localStorage.setItem('mock_notifications', JSON.stringify(notifications));
-          // Set status to 'Active' only, not 'Paid'
-          return { ...l, status: 'Active' };
+  const handleStatusUpdate = (loanId: string, status: string) => {
+    setLoans(prev => {
+      const updated = prev.map(l => {
+        if (l.id === loanId) {
+          // Add transaction if accepted
+          if (status === 'Active') {
+            let transactions = [];
+            try {
+              transactions = JSON.parse(localStorage.getItem('transactions') || '[]');
+            } catch {}
+            transactions.push({
+              id: 'TXN-' + Date.now(),
+              userId: l.username,
+              loanId: l.id,
+              type: 'Loan Received',
+              amount: l.amount,
+              date: new Date().toISOString(),
+              status: 'Completed',
+            });
+            localStorage.setItem('transactions', JSON.stringify(transactions));
+          }
+          return { ...l, status };
         }
-        // If not approved, just update status
-        return { ...l, status };
-      }
-      return l;
+        return l;
+      });
+      localStorage.setItem('applications', JSON.stringify(updated));
+      return updated;
     });
-
-    localStorage.setItem('mock_loans', JSON.stringify(updated));
-    setLoans(updated);
   };
 
   return (
@@ -110,19 +91,19 @@ export default function AdminLoans() {
             {loans.length > 0 ? (
               loans.map((loan) => (
                 <motion.div 
-                  key={loan.loan_id}
+                  key={loan.id}
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   className="bg-surface-container-low rounded-2xl p-6 border border-outline-variant/10 shadow-lg"
                 >
                   <div className="flex justify-between items-start mb-4">
                     <div>
-                      <span className="text-[10px] font-bold text-primary uppercase tracking-widest">REF: {loan.reference_no}</span>
-                      <h3 className="font-headline font-bold text-lg mt-1">₱ {Number(loan.principal_amount || loan.amount).toLocaleString()}</h3>
+                      <span className="text-[10px] font-bold text-primary uppercase tracking-widest">REF: {loan.id}</span>
+                      <h3 className="font-headline font-bold text-lg mt-1">P {Number(loan.amount).toLocaleString()}</h3>
                     </div>
                     <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase ${
-                      loan.status?.toLowerCase() === 'active' ? 'bg-green-500/10 text-green-500' :
-                      loan.status?.toLowerCase() === 'pending' ? 'bg-amber-500/10 text-amber-500' :
+                      loan.status === 'Active' ? 'bg-green-500/10 text-green-500' :
+                      loan.status === 'Pending' ? 'bg-amber-500/10 text-amber-500' :
                       'bg-red-500/10 text-red-500'
                     }`}>
                       {loan.status}
@@ -132,40 +113,40 @@ export default function AdminLoans() {
                   <div className="grid grid-cols-2 gap-4 mb-6">
                     <div className="flex items-center gap-2 text-on-surface-variant">
                       <User size={14} />
-                      <span className="text-xs truncate">Cust ID: {loan.customer_id}</span>
+                      <span className="text-xs truncate">User: {loan.userId}</span>
                     </div>
                     <div className="flex items-center gap-2 text-on-surface-variant">
                       <DollarSign size={14} />
-                      <span className="text-xs">{loan.payment_term || loan.term}</span>
+                      <span className="text-xs">{loan.term}</span>
                     </div>
                     <div className="flex items-center gap-2 text-on-surface-variant">
                       <Percent size={14} />
-                      <span className="text-xs">{loan.interest_rate || loan.interest}% Int.</span>
+                      <span className="text-xs">{loan.interest}% Int.</span>
                     </div>
                     <div className="flex items-center gap-2 text-on-surface-variant">
                       <Clock size={14} />
-                      <span className="text-xs">{loan.term_months || loan.installments} Months</span>
+                      <span className="text-xs">{loan.installments} Inst.</span>
                     </div>
                   </div>
 
-                  {loan.co_maker && (
+                  {loan.coMaker && (
                     <div className="mb-6 p-3 bg-surface-container rounded-xl border border-outline-variant/5">
                       <p className="text-[10px] font-bold text-primary uppercase tracking-widest mb-2">Co-maker</p>
-                      <p className="text-xs font-semibold">{loan.co_maker.first_name} {loan.co_maker.last_name}</p>
-                      <p className="text-[10px] text-on-surface-variant">{loan.co_maker.contact_no}</p>
+                      <p className="text-xs font-semibold">{loan.coMaker.firstName} {loan.coMaker.lastName}</p>
+                      <p className="text-[10px] text-on-surface-variant">{loan.coMaker.contactNo}</p>
                     </div>
                   )}
 
-                  {loan.status?.toLowerCase() === 'pending' && (
+                  {loan.status === 'Pending' && (
                     <div className="flex gap-3">
                       <button 
-                        onClick={() => handleStatusUpdate(loan.loan_id, 'Active')}
+                        onClick={() => handleStatusUpdate(loan.id, 'Active')}
                         className="flex-1 bg-primary text-on-primary py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 active:scale-95 transition-all"
                       >
                         <Check size={16} /> ACCEPT
                       </button>
                       <button 
-                        onClick={() => handleStatusUpdate(loan.loan_id, 'Denied')}
+                        onClick={() => handleStatusUpdate(loan.id, 'Rejected')}
                         className="flex-1 bg-surface-container-highest text-on-surface py-3 rounded-xl font-bold text-xs flex items-center justify-center gap-2 active:scale-95 transition-all"
                       >
                         <X size={16} /> REJECT
