@@ -47,12 +47,15 @@ const VALID_METHODS = ["gcash", "maya", "card", "bank", "walkin"] as const;
 type PaymentMethod  = typeof VALID_METHODS[number];
 
 const METHOD_MAP: Record<string, PaymentMethod> = {
-  gcash:  "gcash",
-  maya:   "maya",
-  wallet: "gcash",
-  card:   "card",
-  bank:   "bank",
-  walkin: "walkin",
+  gcash:  "GCASH",
+  maya:   "DIGITAL",
+  wallet: "GCASH",
+  card:   "DIGITAL",
+  bank:   "BANK",
+  walkin: "CASH",
+  cash:   "CASH",
+  cheque: "CHEQUE",
+  other:  "OTHER",
 };
 
 function normalizeMethod(method: string): PaymentMethod {
