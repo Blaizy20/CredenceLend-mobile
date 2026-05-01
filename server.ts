@@ -716,6 +716,44 @@ async function startServer() {
     }
   });
 
+  // ── PayMongo: Create Payment Link (all methods) ───────────────────────────
+  app.post("/api/paymongo/link", async (req, res) => {
+    try {
+      const { amount, description, reference_no } = req.body;
+
+      if (!amount)
+        return res.status(400).json({ success: false, message: "Payment amount is required." });
+
+      const response = await fetch("https://api.paymongo.com/v1/links", {
+        method:  "POST",
+        headers: PAYMONGO_HEADERS,
+        body: JSON.stringify({
+          data: {
+            attributes: {
+              amount:      Math.round(Number(amount) * 100),
+              description: description || "Loan Payment",
+              remarks:     reference_no || "",
+            },
+          },
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok)
+        return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to create payment link." });
+
+      res.json({
+        success:      true,
+        checkout_url: data.data.attributes.checkout_url,
+        link_id:      data.data.id,
+        reference_no: data.data.attributes.reference_number,
+      });
+    } catch (err: any) {
+      console.error("PayMongo link error:", err.message);
+      res.status(500).json({ success: false, message: "Payment service unavailable." });
+    }
+  });
+
   // ── PayMongo: Retrieve Source Status ──────────────────────────────────────
   app.get("/api/paymongo/source/:sourceId", async (req, res) => {
     try {

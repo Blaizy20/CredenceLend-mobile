@@ -149,41 +149,32 @@ export default function Payment() {
   const handleEwalletPay = async () => {
     setPayStatus('redirecting');
     try {
-      const origin  = window.location.origin;
-      const billing = getCustomerBilling();
-      const amount  = safeAmount(dueAmount);
+      const amount = safeAmount(dueAmount);
 
-      const res = await fetch('/api/paymongo/source', {
+      const res = await fetch('/api/paymongo/link', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           amount,
-          type:             selectedEwallet,          // 'gcash' or 'maya'
-          reference_no:     loan?.reference_no,
-          redirect_success: `${origin}/loan/${id}/pay/success?method=wallet&amount=${amount}`,
-          redirect_failed:  `${origin}/loan/${id}/pay/failed?method=wallet&amount=${amount}`,
-          billing_name:     billing.name,
-          billing_email:    billing.email,
-          billing_phone:    billing.phone,
+          description:  `Loan payment – ${loan?.reference_no}`,
+          reference_no: loan?.reference_no,
         }),
       });
 
       const data = await res.json();
-
-      if (!data.success || !data.source?.attributes?.redirect?.checkout_url) {
+      if (!data.success || !data.checkout_url) {
         setPayStatus('failed');
-        setPayError(data.message || 'Failed to initiate payment. Please try again.');
+        setPayError(data.message || 'Failed to create payment link.');
         return;
       }
 
-      // Hard redirect to GCash / Maya checkout
-      window.location.href = data.source.attributes.redirect.checkout_url;
+      window.location.href = data.checkout_url;
     } catch (err: any) {
       setPayStatus('failed');
-      setPayError(err.message || 'Unable to connect to payment service. Please try again.');
+      setPayError(err.message || 'Unable to connect to payment service.');
     }
   };
-
+  
   // ── Card ──────────────────────────────────────────────────────────────────
   const handleCardPay = async () => {
     setPayStatus('redirecting');
