@@ -27,6 +27,14 @@ interface Step1Data {
 
 export default function ApplyLoanStep1() {
   const navigate = useNavigate();
+  const [user, setUser] = useState<any>(null);
+
+  React.useEffect(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem('user') || 'null');
+      setUser(stored);
+    } catch {}
+  }, []);
 
   const [formData, setFormData] = useState<Step1Data>({
     amount: '',
@@ -98,6 +106,13 @@ export default function ApplyLoanStep1() {
           term_months:      selectedTerm.months,
           id_type:          formData.id_type,
           collateral_type:  formData.collateral_type.trim(),
+          // PASS FILES TO STEP 2
+          documents: {
+            idFront: formData.idFront,
+            idBack: formData.idBack,
+            collateralProof: formData.collateralProof,
+            otherDocs: formData.otherDocs
+          }
         },
       },
     });
@@ -187,24 +202,35 @@ export default function ApplyLoanStep1() {
             <div className="space-y-3">
               <label className="block text-[10px] font-bold tracking-widest text-on-surface-variant uppercase">
                 VALID ID (FRONT)
-                <span className="ml-1 text-outline normal-case tracking-normal font-normal">— optional</span>
+                <span className="ml-1 text-outline font-bold text-red-500">*</span>
               </label>
-              <div className="aspect-[3/2] bg-surface-container-low rounded-xl border-2 border-dashed border-outline-variant/30 flex flex-col items-center justify-center p-4 text-center group hover:border-primary/50 transition-colors">
-                <Camera className="text-outline group-hover:text-primary transition-colors mb-2" size={24} />
-                <input
-                  type="file"
-                  accept="image/*,application/pdf"
-                  style={{ display: 'none' }}
-                  id="idFrontUpload"
-                  onChange={e => handleFileChange(e, 'idFront')}
-                />
-                <label htmlFor="idFrontUpload" className="bg-primary/10 text-primary text-[10px] font-bold px-3 py-1.5 rounded-full uppercase tracking-tighter cursor-pointer">
-                  CHOOSE FILE
-                </label>
-                {formData.idFront
-                  ? <span className="text-xs text-green-600 mt-1">Attached ✓</span>
-                  : <span className="text-xs text-outline mt-1">No file selected</span>
-                }
+              <div className="relative aspect-[3/2] bg-surface-container-low rounded-xl border-2 border-dashed border-outline-variant/30 flex flex-col items-center justify-center p-4 text-center group hover:border-primary/50 transition-colors">
+                {formData.idFront ? (
+                   <>
+                     <img src={formData.idFront} alt="ID Front" className="absolute inset-0 w-full h-full object-cover rounded-xl" />
+                     <button
+                        onClick={() => setFormData(f => ({ ...f, idFront: '' }))}
+                        className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full shadow-lg z-10"
+                     >
+                        <X size={16} />
+                     </button>
+                   </>
+                ) : (
+                  <>
+                    <Camera className="text-outline group-hover:text-primary transition-colors mb-2" size={24} />
+                    <input
+                      type="file"
+                      accept="image/*"
+                      style={{ display: 'none' }}
+                      id="idFrontUpload"
+                      onChange={e => handleFileChange(e, 'idFront')}
+                    />
+                    <label htmlFor="idFrontUpload" className="bg-primary/10 text-primary text-[10px] font-bold px-3 py-1.5 rounded-full uppercase tracking-tighter cursor-pointer">
+                      CHOOSE FILE
+                    </label>
+                    <span className="text-xs text-outline mt-1">No file selected</span>
+                  </>
+                )}
               </div>
             </div>
 
@@ -212,24 +238,35 @@ export default function ApplyLoanStep1() {
             <div className="space-y-3">
               <label className="block text-[10px] font-bold tracking-widest text-on-surface-variant uppercase">
                 VALID ID (BACK)
-                <span className="ml-1 text-outline normal-case tracking-normal font-normal">— optional</span>
+                <span className="ml-1 text-outline font-bold text-red-500">*</span>
               </label>
-              <div className="aspect-[3/2] bg-surface-container-low rounded-xl border-2 border-dashed border-outline-variant/30 flex flex-col items-center justify-center p-4 text-center group hover:border-primary/50 transition-colors">
-                <Camera className="text-outline group-hover:text-primary transition-colors mb-2" size={24} />
-                <input
-                  type="file"
-                  accept="image/*,application/pdf"
-                  style={{ display: 'none' }}
-                  id="idBackUpload"
-                  onChange={e => handleFileChange(e, 'idBack')}
-                />
-                <label htmlFor="idBackUpload" className="bg-primary/10 text-primary text-[10px] font-bold px-3 py-1.5 rounded-full uppercase tracking-tighter cursor-pointer">
-                  CHOOSE FILE
-                </label>
-                {formData.idBack
-                  ? <span className="text-xs text-green-600 mt-1">Attached ✓</span>
-                  : <span className="text-xs text-outline mt-1">No file selected</span>
-                }
+              <div className="relative aspect-[3/2] bg-surface-container-low rounded-xl border-2 border-dashed border-outline-variant/30 flex flex-col items-center justify-center p-4 text-center group hover:border-primary/50 transition-colors">
+                {formData.idBack ? (
+                   <>
+                     <img src={formData.idBack} alt="ID Back" className="absolute inset-0 w-full h-full object-cover rounded-xl" />
+                     <button
+                        onClick={() => setFormData(f => ({ ...f, idBack: '' }))}
+                        className="absolute -top-2 -right-2 bg-red-500 text-white p-1 rounded-full shadow-lg z-10"
+                     >
+                        <X size={16} />
+                     </button>
+                   </>
+                ) : (
+                  <>
+                    <Camera className="text-outline group-hover:text-primary transition-colors mb-2" size={24} />
+                    <input
+                      type="file"
+                      accept="image/*"
+                      style={{ display: 'none' }}
+                      id="idBackUpload"
+                      onChange={e => handleFileChange(e, 'idBack')}
+                    />
+                    <label htmlFor="idBackUpload" className="bg-primary/10 text-primary text-[10px] font-bold px-3 py-1.5 rounded-full uppercase tracking-tighter cursor-pointer">
+                      CHOOSE FILE
+                    </label>
+                    <span className="text-xs text-outline mt-1">No file selected</span>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -248,12 +285,12 @@ export default function ApplyLoanStep1() {
             error={errors.collateral_type}
           />
 
-          <div className="flex items-center justify-between p-4 bg-surface-container-low rounded-xl border border-white/5">
+          <div className="flex items-center justify-between p-4 bg-surface-container-low rounded-xl border border-white/5 relative">
             <div className="flex items-center gap-3">
               <Paperclip className="text-primary" size={20} />
               <div>
                 <p className="text-sm font-medium">Collateral Proof</p>
-                <p className="text-xs text-on-surface-variant">Optional</p>
+                <p className="text-[10px] text-on-surface-variant uppercase tracking-widest font-bold">Required</p>
               </div>
             </div>
             <div className="flex flex-col items-end gap-1">
@@ -264,13 +301,18 @@ export default function ApplyLoanStep1() {
                 id="collateralProofUpload"
                 onChange={e => handleFileChange(e, 'collateralProof')}
               />
-              <label htmlFor="collateralProofUpload" className="bg-primary text-on-primary-container text-[10px] font-bold px-4 py-2 rounded-lg uppercase tracking-wider shadow-lg shadow-primary/20 cursor-pointer">
-                CHOOSE FILE
-              </label>
-              {formData.collateralProof
-                ? <span className="text-xs text-green-600">Attached ✓</span>
-                : <span className="text-xs text-outline">No file selected</span>
-              }
+              {formData.collateralProof ? (
+                <div className="flex items-center gap-2 bg-green-500/10 px-3 py-1.5 rounded-lg border border-green-500/20">
+                   <span className="text-[10px] text-green-600 font-bold">UPLOADED</span>
+                   <button onClick={() => setFormData(f => ({ ...f, collateralProof: '' }))} className="text-red-500">
+                      <X size={14} />
+                   </button>
+                </div>
+              ) : (
+                <label htmlFor="collateralProofUpload" className="bg-primary text-on-primary-container text-[10px] font-bold px-4 py-2 rounded-lg uppercase tracking-wider shadow-lg shadow-primary/20 cursor-pointer">
+                  CHOOSE FILE
+                </label>
+              )}
             </div>
           </div>
         </section>
@@ -279,15 +321,13 @@ export default function ApplyLoanStep1() {
         <section className="space-y-6 mb-10">
           <h3 className="text-sm font-bold tracking-wider text-primary/80 uppercase">
             Other Documents
-            <span className="ml-1 text-outline normal-case font-normal text-xs tracking-normal">— optional</span>
           </h3>
           {[1, 2, 3].map((i) => (
-            <div key={i} className="flex items-center justify-between p-4 bg-surface-container-low rounded-xl border border-white/5">
+            <div key={i} className="flex items-center justify-between p-4 bg-surface-container-low rounded-xl border border-white/5 relative">
               <div className="flex items-center gap-3">
                 <FileText className="text-primary" size={20} />
                 <div>
                   <p className="text-sm font-medium">Document {i}</p>
-                  <p className="text-xs text-on-surface-variant">Optional</p>
                 </div>
               </div>
               <div className="flex flex-col items-end gap-1">
@@ -298,13 +338,22 @@ export default function ApplyLoanStep1() {
                   id={`otherDocUpload${i}`}
                   onChange={e => handleFileChange(e, 'otherDocs', i - 1)}
                 />
-                <label htmlFor={`otherDocUpload${i}`} className="bg-primary text-on-primary-container text-[10px] font-bold px-4 py-2 rounded-lg uppercase tracking-wider shadow-lg shadow-primary/20 cursor-pointer">
-                  CHOOSE FILE
-                </label>
-                {formData.otherDocs[i - 1]
-                  ? <span className="text-xs text-green-600">Attached ✓</span>
-                  : <span className="text-xs text-outline">No file selected</span>
-                }
+                {formData.otherDocs[i-1] ? (
+                  <div className="flex items-center gap-2 bg-green-500/10 px-3 py-1.5 rounded-lg border border-green-500/20">
+                     <span className="text-[10px] text-green-600 font-bold truncate max-w-[80px]">FILE {i}</span>
+                     <button onClick={() => {
+                        const updated = [...formData.otherDocs];
+                        updated[i-1] = '';
+                        setFormData({...formData, otherDocs: updated});
+                     }} className="text-red-500">
+                        <X size={14} />
+                     </button>
+                  </div>
+                ) : (
+                  <label htmlFor={`otherDocUpload${i}`} className="bg-primary text-on-primary-container text-[10px] font-bold px-4 py-2 rounded-lg uppercase tracking-wider shadow-lg shadow-primary/20 cursor-pointer">
+                    CHOOSE FILE
+                  </label>
+                )}
               </div>
             </div>
           ))}

@@ -28,6 +28,8 @@ const notifBg: Record<string, string> = {
   general:  'bg-surface-container-high border-outline-variant/10',
 };
 
+import { notificationsAPI } from '../lib/api';
+
 export default function Inbox() {
   const navigate = useNavigate();
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -46,18 +48,15 @@ export default function Inbox() {
     setLoading(true);
     setError('');
     try {
-      const res  = await fetch(`/api/notifications/${customerId}`);
-      const data = await res.json();
+      const data = await notificationsAPI.getAll(customerId);
 
-      if (!res.ok) {
-        setError(data?.message || 'Failed to load notifications.');
-        return;
+      if (data.success) {
+        setNotifications(data.notifications || []);
+        // Mark all read
+        notificationsAPI.markAllRead(customerId).catch(() => {});
+      } else {
+        setError(data.message || 'Failed to load notifications.');
       }
-
-      setNotifications(Array.isArray(data) ? data : []);
-
-      // Mark all read — non-fatal, fire and forget
-      fetch(`/api/notifications/${customerId}/read-all`, { method: 'PATCH' }).catch(() => {});
     } catch {
       setError('Unable to load notifications. Check your connection and try again.');
     } finally {

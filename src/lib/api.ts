@@ -1,4 +1,12 @@
-const BASE = import.meta.env.VITE_API_URL ?? '';
+import { Capacitor } from '@capacitor/core';
+
+const RAILWAY_URL = 'https://credencelend-mobile.up.railway.app';
+
+// On native Android/iOS → absolute Railway URL
+// On web (dev/prod)    → relative URL (empty string, uses same origin or Vite proxy)
+const BASE = Capacitor.isNativePlatform()
+  ? RAILWAY_URL
+  : (import.meta.env.VITE_API_URL ?? '');
 
 export const authAPI = {
   login: async (username: string, password: string) => {
@@ -89,23 +97,23 @@ export const loansAPI = {
   },
 
   applyLoan: async (data: {
-    customer_id:     number;
-    tenant_id:       number;
+    customer_id:      number;
+    tenant_id:        number;
     principal_amount: number;
-    payment_term:    string;
-    interest_rate:   number;
-    term_months:     number;
-    id_type:         string;
-    collateral_type: string;
+    payment_term:     string;
+    interest_rate:    number;
+    term_months:      number;
+    id_type:          string;
+    collateral_type:  string;
     co_maker: {
-      first_name:  string;
-      last_name:   string;
-      contact_no:  string;
-      email:       string;
-      province:    string;
-      city:        string;
-      barangay:    string;
-      street:      string;
+      first_name: string;
+      last_name:  string;
+      contact_no: string;
+      email:      string;
+      province:   string;
+      city:       string;
+      barangay:   string;
+      street:     string;
     };
   }) => {
     const res = await fetch(`${BASE}/api/loans/apply`, {

@@ -46,10 +46,17 @@ export default function RegisterStep2() {
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-    if (errors[e.target.name]) {
-      setErrors({ ...errors, [e.target.name]: '' });
+    const { name, value } = e.target;
+    const updated = { ...formData, [name]: value };
+    setFormData(updated);
+    if (errors[name]) {
+      setErrors({ ...errors, [name]: '' });
     }
+    // Auto-save progress
+    try {
+      const saved = JSON.parse(localStorage.getItem('registerData') || '{}');
+      localStorage.setItem('registerData', JSON.stringify({ ...saved, ...updated }));
+    } catch {}
   };
 
   return (

@@ -40,8 +40,12 @@ export default function Profile() {
         <section className="flex flex-col items-center text-center space-y-4">
           <div className="relative group">
             <div className="absolute -inset-1 bg-gradient-to-tr from-primary to-primary-container rounded-full blur opacity-25"></div>
-            <div className="relative w-28 h-28 rounded-full flex items-center justify-center border-2 border-primary-container/30 bg-surface-container-high">
-              <User className="text-primary" size={60} strokeWidth={1.5} />
+            <div className="relative w-28 h-28 rounded-full flex items-center justify-center border-2 border-primary-container/30 bg-surface-container-high overflow-hidden">
+              {user.facePhoto ? (
+                <img src={user.facePhoto} alt="Profile" className="w-full h-full object-cover" />
+              ) : (
+                <User className="text-primary" size={60} strokeWidth={1.5} />
+              )}
             </div>
             <div className="absolute bottom-1 right-1 bg-primary text-on-primary p-1.5 rounded-full shadow-lg">
               <Verified size={18} fill="currentColor" />
@@ -52,7 +56,7 @@ export default function Profile() {
               {user.first_name} {user.last_name}
             </h2>
             <p className="text-primary font-medium tracking-wide text-sm bg-primary/10 px-3 py-0.5 rounded-full inline-block">
-              PREMIUM MEMBER
+              BASIC MEMBER
             </p>
           </div>
         </section>
@@ -77,7 +81,7 @@ export default function Profile() {
               </div>
               <div className="space-y-1">
                 <p className="text-xs font-semibold text-outline tracking-wider uppercase">Contact No.</p>
-                <p className="text-on-surface text-base">{user.contact_no || 'N/A'}</p>
+                <p className="text-on-surface text-base">{user.contact_no || user.contactNo || 'N/A'}</p>
               </div>
               <div className="space-y-1">
                 <p className="text-xs font-semibold text-outline tracking-wider uppercase">Email Address</p>

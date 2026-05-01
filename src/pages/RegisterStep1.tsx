@@ -1,15 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Mail, Phone, Lock, Eye, EyeOff } from 'lucide-react';
+import { ArrowRight, Mail, Phone, Lock, Eye, EyeOff, CheckCircle2, RefreshCcw } from 'lucide-react';
 import { TopBar } from '../components/TopBar';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
+import { authAPI } from '../lib/api';
 
 export default function RegisterStep1() {
   const navigate = useNavigate();
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [verifyingOtp, setVerifyingOtp] = useState(false);
+  const [resendingOtp, setResendingOtp] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
+  const [otpVerified, setOtpVerified] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [resendTimer, setResendTimer] = useState(0);
 
   const [formData, setFormData] = useState({
     firstName: '',
@@ -20,8 +27,23 @@ export default function RegisterStep1() {
     password: '',
     confirmPassword: ''
   });
+
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [passwordStrength, setPasswordStrength] = useState<'weak' | 'okay' | 'strong'>('weak');
+
+  // Timer for OTP resend
+  useEffect(() => {
+    let interval: any;
+    if (resendTimer > 0) {
+      interval = setInterval(() => setResendTimer(prev => prev - 1), 1000);
+    }
+    return () => clearInterval(interval);
+  }, [resendTimer]);
+
+  // Remove auto-load to ensure a fresh start as requested
+  useEffect(() => {
+    localStorage.removeItem('registerData');
+  }, []);
 
   const passwordRequirements = [
     { label: '8+ chars',    test: (pw: string) => pw.length >= 8 },
@@ -76,42 +98,87 @@ export default function RegisterStep1() {
     return Object.keys(newErrors).length === 0;
   };
 
+  const handleSendOtp = async () => {
+    if (!/\S+@\S+\.\S+/.test(formData.email)) {
+      setErrors(prev => ({ ...prev, email: 'Enter a valid email first' }));
+      return;
+    }
+    setLoading(true);
+    try {
+      const data = await authAPI.sendOtp(formData.email, 'registration');
+      if (data.success) {
+        setOtpSent(true);
+        setResendTimer(30);
+        setErrors(prev => ({ ...prev, email: '' }));
+      } else {
+        setErrors(prev => ({ ...prev, email: data.message || 'Failed to send OTP' }));
+      }
+    } catch {
+      setErrors(prev => ({ ...prev, email: 'Network error' }));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (otpCode.length !== 6) return;
+    setVerifyingOtp(true);
+    try {
+      const data = await authAPI.verifyOtp(formData.email, otpCode);
+      if (data.success) {
+        setOtpVerified(true);
+        setOtpSent(false);
+        // Save verification status
+        const saved = JSON.parse(localStorage.getItem('registerData') || '{}');
+        localStorage.setItem('registerData', JSON.stringify({ ...saved, otpVerified: true }));
+      } else {
+        setErrors(prev => ({ ...prev, otp: data.message || 'Invalid code' }));
+      }
+    } catch {
+      setErrors(prev => ({ ...prev, otp: 'Verification failed' }));
+    } finally {
+      setVerifyingOtp(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validate()) return;
+    if (!validate()) {
+      return;
+    }
 
     setLoading(true);
     try {
-      // ✅ Check username/email against MySQL via API
-      const checkUsername = await fetch(`/api/auth/check-username?username=${encodeURIComponent(formData.username)}`);
-      const usernameResult = await checkUsername.json();
-      if (usernameResult.taken) {
-        setErrors(prev => ({ ...prev, username: 'Username is already taken' }));
+      // 1. Check if username exists
+      const userRes = await authAPI.checkUsername(formData.username);
+      if (userRes.exists) {
+        setErrors(prev => ({ ...prev, username: 'Username already taken' }));
         setLoading(false);
         return;
       }
 
-      const checkEmail = await fetch(`/api/auth/check-email?email=${encodeURIComponent(formData.email)}`);
-      const emailResult = await checkEmail.json();
-      if (emailResult.taken) {
-        setErrors(prev => ({ ...prev, email: 'Email is already registered' }));
+      // 2. Check if email exists
+      const emailRes = await authAPI.checkEmail(formData.email);
+      if (emailRes.exists) {
+        setErrors(prev => ({ ...prev, email: 'Email already registered' }));
         setLoading(false);
         return;
       }
 
-      // Save to localStorage and proceed
-      localStorage.setItem('registerData', JSON.stringify({
-        ...JSON.parse(localStorage.getItem('registerData') || '{}'),
-        ...formData
-      }));
+      // 3. Check if contact number exists
+      const contactRes = await authAPI.checkContact(formData.contactNo);
+      if (contactRes.exists) {
+        setErrors(prev => ({ ...prev, contactNo: 'Contact number already registered' }));
+        setLoading(false);
+        return;
+      }
+
+      // If all checks pass, navigate to step 2
       navigate('/register/step2');
-
     } catch (err) {
-      // If API check fails, still allow proceeding — backend will catch duplicates on submit
-      localStorage.setItem('registerData', JSON.stringify({
-        ...JSON.parse(localStorage.getItem('registerData') || '{}'),
-        ...formData
-      }));
+      console.error("Registration check failed:", err);
+      // If server is down, we allow bypass as per previous logic, but ideally we should notify the user
+      // For now, let's allow it to proceed to avoid blocking the user if the local API isn't running
       navigate('/register/step2');
     } finally {
       setLoading(false);
@@ -119,8 +186,16 @@ export default function RegisterStep1() {
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-    if (errors[e.target.name]) setErrors({ ...errors, [e.target.name]: '' });
+    const { name, value } = e.target;
+    const updated = { ...formData, [name]: value };
+    setFormData(updated);
+    if (errors[name]) setErrors({ ...errors, [name]: '' });
+
+    // Auto-save progress
+    try {
+      const saved = JSON.parse(localStorage.getItem('registerData') || '{}');
+      localStorage.setItem('registerData', JSON.stringify({ ...saved, ...updated }));
+    } catch {}
   };
 
   return (
@@ -146,7 +221,7 @@ export default function RegisterStep1() {
           <header>
             <h2 className="font-headline text-[32px] font-extrabold tracking-tight text-on-surface mb-2">Create Account</h2>
             <p className="text-on-surface-variant text-sm leading-relaxed opacity-80">
-              Please provide your legal information to begin your loan application journey.
+              Please provide your legal information in order to use the application.
             </p>
           </header>
 
@@ -190,6 +265,7 @@ export default function RegisterStep1() {
               error={errors.contactNo}
             />
 
+            {/* Email Address */}
             <Input
               label="Email Address"
               placeholder="your@email.com"
@@ -200,6 +276,8 @@ export default function RegisterStep1() {
               onChange={handleChange}
               error={errors.email}
             />
+
+
 
             <div>
               <Input

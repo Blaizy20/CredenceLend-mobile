@@ -1,5 +1,6 @@
 import React from 'react';
 import { Wallet, ReceiptText, ChevronDown } from 'lucide-react';
+import loginLogo from '../assets/logo.png';
 import { useNavigate } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
 import { BottomNav } from '../components/BottomNav';
@@ -17,11 +18,11 @@ interface Loan {
 }
 
 const statusStyle: Record<string, string> = {
-  paid:    'bg-emerald-500/10 text-emerald-400',
-  active:  'bg-green-500/10 text-green-500',
-  pending: 'bg-blue-500/10 text-blue-500',
-  denied:  'bg-red-500/10 text-red-500',
-  closed:  'bg-outline/10 text-outline',
+  paid:    'bg-emerald-100 text-emerald-700',
+  active:  'bg-green-100 text-green-700',
+  pending: 'bg-blue-100 text-blue-700',
+  denied:  'bg-red-100 text-red-700',
+  closed:  'bg-slate-100 text-slate-600',
 };
 
 const getStatusStyle = (status: string) =>
@@ -60,14 +61,17 @@ export default function Dashboard() {
     setLoading(true);
     try {
       const data = await loansAPI.getLoans(customerId);
-      const loanList = Array.isArray(data) ? data : [];
+      // data is { success: true, loans: [...] }
+      const loanList = data.loans || [];
       setLoans(loanList);
 
+      // Only include 'Active' loans in outstanding balance
       const total = loanList
         .filter((l: Loan) => l.status?.toLowerCase() === 'active')
-        .reduce((sum: number, l: Loan) => sum + Number(l.remaining_balance ?? 0), 0);
+        .reduce((sum: number, l: Loan) => sum + Number(l.remaining_balance ?? l.principal_amount ?? 0), 0);
       setTotalBalance(total);
-    } catch {
+    } catch (err) {
+      console.error("Dashboard fetchLoans error:", err);
       setLoans([]);
       setTotalBalance(0);
     } finally {
@@ -92,7 +96,7 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-background pb-32">
-      <TopBar title="Loan Manager" showBack={false} />
+      <TopBar title={<span className="flex items-center gap-2"><img src={loginLogo} alt="Logo" className="w-7 h-7 rounded-lg" /> Loan Manager</span>} showBack={false} />
       <main className="mt-20 px-6 max-w-md mx-auto w-full">
 
         {/* Welcome */}

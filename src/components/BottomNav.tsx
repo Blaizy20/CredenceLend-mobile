@@ -45,7 +45,7 @@ export function BottomNav() {
   ];
 
   return (
-    <nav className="fixed bottom-0 left-0 w-full h-20 bg-background/80 backdrop-blur-2xl flex justify-around items-center px-6 pb-safe z-50 rounded-t-3xl shadow-[0_-10px_30px_rgba(0,0,0,0.3)]">
+    <nav className="fixed bottom-0 left-0 w-full h-20 bg-background/80 backdrop-blur-2xl flex justify-around items-center px-6 pb-safe z-50 rounded-t-3xl border-t border-outline-variant/10">
       {navItems.map((item) => {
         const isActive  = location.pathname === item.path;
         const isInbox   = item.path === '/inbox';

@@ -2,27 +2,46 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
 import { BottomNav } from '../components/BottomNav';
-import { ReceiptText, ArrowUpRight, ArrowDownLeft, Calendar, FileDown, Loader2 } from 'lucide-react';
-import { motion } from 'motion/react';
+import { ReceiptText, ArrowUpRight, ArrowDownLeft, Calendar, FileDown, Loader2, Filter, ChevronDown } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { loansAPI } from '../lib/api';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 interface Transaction {
-  id:      number;
-  loan_id: number;
-  type:    string;
-  amount:  number | string;
-  date:    string;
-  status:  string;
+  id?:            number; // Server uses id
+  transaction_id?: number; // Mock uses transaction_id
+  customer_id:    number;
+  type:           string;
+  amount:         number | string;
+  date:           string;
+  status:         string;
+  reference_no?:  string;
 }
 
 export default function Transactions() {
   const navigate = useNavigate();
   const [transactions, setTransactions] = React.useState<Transaction[]>([]);
+  const [filteredTxs, setFilteredTxs]   = React.useState<Transaction[]>([]);
   const [loading, setLoading]           = React.useState(true);
   const [error, setError]               = React.useState('');
+  const [filterDays, setFilterDays]     = React.useState(30);
+  const [showFilterMenu, setShowFilterMenu] = React.useState(false);
+
+  const filterOptions = [
+    { label: 'Last 7 Days', value: 7 },
+    { label: 'Last 30 Days', value: 30 },
+    { label: 'Last 60 Days', value: 60 },
+    { label: 'Last 90 Days', value: 90 },
+    { label: 'All Time', value: 3650 },
+  ];
 
   React.useEffect(() => {
     let user: any = null;
-    try { user = JSON.parse(localStorage.getItem('user') || 'null'); } catch {}
+    try {
+      user = JSON.parse(localStorage.getItem('customer') || localStorage.getItem('user') || 'null');
+    } catch {}
+
     if (!user?.customer_id) {
       navigate('/login', { replace: true });
       return;
@@ -30,15 +49,18 @@ export default function Transactions() {
     fetchTransactions(user.customer_id);
   }, [navigate]);
 
+  React.useEffect(() => {
+    applyFilter();
+  }, [transactions, filterDays]);
+
   const fetchTransactions = async (customerId: number) => {
     try {
-      const res  = await fetch(`/api/transactions/${customerId}`);
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data?.message || 'Failed to load transactions.');
-        return;
+      const data = await loansAPI.getTransactions(customerId);
+      if (data.success) {
+        setTransactions(data.transactions || []);
+      } else {
+        setError(data.message || 'Failed to load transactions.');
       }
-      setTransactions(Array.isArray(data) ? data : []);
     } catch {
       setError('Unable to load transactions. Please try again.');
     } finally {
@@ -46,13 +68,57 @@ export default function Transactions() {
     }
   };
 
+  const applyFilter = () => {
+    const now = new Date();
+    const cutoff = new Date();
+    cutoff.setDate(now.getDate() - filterDays);
+
+    const filtered = transactions.filter(tx => {
+      const txDate = new Date(tx.date);
+      return txDate >= cutoff;
+    });
+
+    setFilteredTxs(filtered.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
+  };
+
+  const generatePDF = () => {
+    const doc = new jsPDF();
+    const user = JSON.parse(localStorage.getItem('customer') || '{}');
+    const dateStr = new Date().toLocaleDateString();
+
+    // Header
+    doc.setFontSize(20);
+    doc.setTextColor(1, 105, 111); // Brand color #01696F
+    doc.text('CredenceLend Statement', 14, 22);
+
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.text(`Account Holder: ${user.first_name} ${user.last_name}`, 14, 30);
+    doc.text(`Customer No: ${user.customer_no || 'N/A'}`, 14, 35);
+    doc.text(`Report Period: ${filterOptions.find(o => o.value === filterDays)?.label}`, 14, 40);
+    doc.text(`Generated on: ${dateStr}`, 14, 45);
+
+    const tableData = filteredTxs.map(tx => [
+      new Date(tx.date).toLocaleDateString(),
+      tx.type,
+      tx.status,
+      `PHP ${Number(tx.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+    ]);
+
+    autoTable(doc, {
+      startY: 55,
+      head: [['Date', 'Description', 'Status', 'Amount']],
+      body: tableData,
+      headStyles: { fillColor: [1, 105, 111] },
+      alternateRowStyles: { fillColor: [240, 247, 248] },
+    });
+
+    doc.save(`CredenceLend_Statement_${dateStr.replace(/\//g, '-')}.pdf`);
+  };
+
   const formatTime = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-  };
-
-  const handleRequestHistory = () => {
-    alert('Your full transaction history request has been received. A PDF report will be sent to your registered email address within 24 hours.');
   };
 
   const groupTransactionsByDate = (txs: Transaction[]) => {
@@ -79,27 +145,7 @@ export default function Transactions() {
     );
   }
 
-  if (error) {
-    return (
-      <div className="min-h-screen bg-background pb-32">
-        <TopBar title="Transactions" showBack={false} />
-        <div className="pt-24 px-6 flex flex-col items-center gap-4 text-center">
-          <p className="text-red-500 text-sm font-medium">{error}</p>
-          <button
-            onClick={() => { setLoading(true); setError(''); }}
-            className="text-primary text-sm font-bold hover:underline"
-          >
-            Try again
-          </button>
-        </div>
-        <BottomNav />
-      </div>
-    );
-  }
-
-  const displayedTransactions = transactions.slice(0, 20);
-  const groupedTransactions   = groupTransactionsByDate(displayedTransactions);
-  const hasMore               = transactions.length > 20;
+  const groupedTransactions = groupTransactionsByDate(filteredTxs);
 
   return (
     <div className="min-h-screen bg-background pb-32">
@@ -108,9 +154,9 @@ export default function Transactions() {
         showBack={false}
         rightElement={
           <button
-            onClick={handleRequestHistory}
+            onClick={generatePDF}
             className="p-2 text-primary hover:bg-primary/10 rounded-full transition-colors active:scale-90"
-            title="Request History"
+            title="Download PDF Statement"
           >
             <FileDown size={24} />
           </button>
@@ -118,21 +164,60 @@ export default function Transactions() {
       />
 
       <main className="pt-24 px-6">
-        <div className="mb-6">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-primary">Activity Log</p>
-          <h2 className="text-xl font-headline font-extrabold text-on-surface">
-            As of {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
-          </h2>
+        <div className="flex justify-between items-end mb-6">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-primary">Activity Log</p>
+            <h2 className="text-xl font-headline font-extrabold text-on-surface">
+              {filterOptions.find(o => o.value === filterDays)?.label}
+            </h2>
+          </div>
+
+          <div className="relative">
+            <button
+              onClick={() => setShowFilterMenu(!showFilterMenu)}
+              className="flex items-center gap-2 bg-surface-container-high px-3 py-1.5 rounded-full border border-outline-variant/30 text-xs font-bold text-on-surface-variant active:scale-95 transition-transform"
+            >
+              <Filter size={14} />
+              Filter
+              <ChevronDown size={14} className={showFilterMenu ? 'rotate-180 transition-transform' : 'transition-transform'} />
+            </button>
+
+            <AnimatePresence>
+              {showFilterMenu && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                  className="absolute right-0 mt-2 w-40 bg-surface-container-highest rounded-2xl shadow-2xl border border-outline-variant/20 py-2 z-50 overflow-hidden"
+                >
+                  {filterOptions.map((opt) => (
+                    <button
+                      key={opt.value}
+                      onClick={() => {
+                        setFilterDays(opt.value);
+                        setShowFilterMenu(false);
+                      }}
+                      className={`w-full text-left px-4 py-2.5 text-xs font-semibold transition-colors ${
+                        filterDays === opt.value ? 'bg-primary text-on-primary' : 'text-on-surface hover:bg-primary/10'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
 
-        {transactions.length === 0 ? (
+        {filteredTxs.length === 0 ? (
           <div className="flex flex-col items-center justify-center min-h-[50vh] text-center">
             <div className="w-20 h-20 rounded-full bg-surface-container-high flex items-center justify-center mb-6">
               <ReceiptText className="text-outline/40" size={40} />
             </div>
-            <h2 className="text-xl font-headline font-bold text-on-surface">No transactions</h2>
+            <h2 className="text-xl font-headline font-bold text-on-surface">No records found</h2>
             <p className="text-on-surface-variant text-sm mt-2">
-              Your transaction history will appear here.
+              Try changing your filter to see more history.
             </p>
           </div>
         ) : (
@@ -144,10 +229,11 @@ export default function Transactions() {
                 </div>
                 <div className="space-y-3">
                   {txs.map((transaction, index) => {
-                    const isCredit = transaction.type === 'Loan Received';
+                    const isCredit = transaction.type.toLowerCase().includes('received') || transaction.type.toLowerCase().includes('application');
+                    const txId = transaction.id || transaction.transaction_id || Math.random();
                     return (
                       <motion.div
-                        key={transaction.id}
+                        key={txId}
                         initial={{ opacity: 0, x: -10 }}
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ delay: (groupIndex * 0.1) + (index * 0.05) }}
@@ -168,7 +254,7 @@ export default function Transactions() {
                               </span>
                               <span className="text-outline/20">|</span>
                               <span className="font-mono bg-surface-container-high px-1.5 rounded text-outline">
-                                #{String(transaction.id).slice(-5)}
+                                #{String(txId).slice(-5)}
                               </span>
                             </div>
                           </div>
@@ -178,8 +264,10 @@ export default function Transactions() {
                             {isCredit ? '+' : '-'} ₱{Number(transaction.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                           </p>
                           <div className="flex items-center justify-end gap-1 mt-1">
-                            <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                            <span className="text-[9px] text-green-700 font-bold uppercase tracking-wider">
+                            <div className={`w-1.5 h-1.5 rounded-full ${transaction.status === 'Completed' ? 'bg-green-500' : 'bg-orange-500'}`} />
+                            <span className={`text-[9px] font-bold uppercase tracking-wider ${
+                              transaction.status === 'Completed' ? 'text-green-700' : 'text-orange-700'
+                            }`}>
                               {transaction.status}
                             </span>
                           </div>
@@ -190,26 +278,6 @@ export default function Transactions() {
                 </div>
               </div>
             ))}
-
-            {hasMore && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="pt-4 pb-8">
-                <div className="bg-surface-container-high/30 rounded-3xl p-8 text-center border border-dashed border-outline-variant/50">
-                  <div className="w-12 h-12 bg-primary/10 text-primary rounded-full flex items-center justify-center mx-auto mb-4">
-                    <FileDown size={24} />
-                  </div>
-                  <h4 className="font-bold text-on-surface mb-2">Need more history?</h4>
-                  <p className="text-xs text-on-surface-variant mb-6 leading-relaxed">
-                    We only show your 20 most recent activities here. You can request a full PDF statement of your account.
-                  </p>
-                  <button
-                    onClick={handleRequestHistory}
-                    className="w-full py-3.5 bg-primary text-on-primary font-bold rounded-full text-sm active:scale-95 transition-all shadow-lg shadow-primary/20"
-                  >
-                    Request Full Statement
-                  </button>
-                </div>
-              </motion.div>
-            )}
           </div>
         )}
       </main>

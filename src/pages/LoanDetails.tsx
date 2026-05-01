@@ -39,13 +39,13 @@ export default function LoanDetails() {
           loansAPI.getPayments(Number(id)),
         ]);
 
-        if (!loanData || loanData.success === false) {
+        if (!loanData || loanData.success === false || !loanData.loan) {
           setError(loanData?.message || 'Loan not found.');
           return;
         }
 
-        setLoan(loanData);
-        setPayments(Array.isArray(paymentData) ? paymentData : []);
+        setLoan(loanData.loan);
+        setPayments(Array.isArray(paymentData.payments) ? paymentData.payments : []);
       } catch {
         setError('Unable to load loan details. Please try again.');
       } finally {
