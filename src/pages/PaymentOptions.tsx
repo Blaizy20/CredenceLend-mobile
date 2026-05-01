@@ -1,49 +1,52 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronRight, Loader2, AlertCircle, Calculator, Wallet2, SplitSquareHorizontal } from 'lucide-react';
-import { TopBar } from '../components/TopBar';
-import { Button } from '../components/Button';
-import { motion } from 'motion/react';
-import { cn } from '@/src/lib/utils';
+import {
+  ChevronRight, Loader2, AlertCircle, Calculator,
+  Wallet2, SplitSquareHorizontal, FastForward,
+} from 'lucide-react';
+import { TopBar }   from '../components/TopBar';
+import { Button }   from '../components/Button';
+import { motion, AnimatePresence } from 'motion/react';
+import { cn }       from '@/src/lib/utils';
 import { loansAPI } from '../lib/api';
 
-// ── helpers ───────────────────────────────────────────────────────────────
+// ── helpers ────────────────────────────────────────────────────────────────
 function fmt(n: number) {
   return n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 /**
- * Compute the installment amount due for this period.
- *
- * Strategy:
- *   monthly_due = total_payable / term_months
- *   paid_so_far = total_payable - remaining_balance
- *   periods_paid = Math.floor(paid_so_far / monthly_due)
- *   If the current period is already fully paid → next period's due = monthly_due
- *   Cap at remaining_balance so we never over-charge
+ * Computes how much is still owed for the CURRENT unpaid period.
+ * Returns 0 if the current period is already fully paid.
  */
 function computeInstallmentDue(loan: any): number {
-  const total     = Number(loan.total_payable)    || 0;
+  const total     = Number(loan.total_payable)     || 0;
   const remaining = Number(loan.remaining_balance) || 0;
   const months    = Number(loan.term_months)       || 1;
 
   if (remaining <= 0) return 0;
 
-  const monthly   = parseFloat((total / months).toFixed(2));
-  const paidSoFar = parseFloat((total - remaining).toFixed(2));
-
-  // How many full periods have been paid?
+  const monthly      = parseFloat((total / months).toFixed(2));
+  const paidSoFar    = parseFloat((total - remaining).toFixed(2));
   const periodsPaid  = monthly > 0 ? Math.floor(paidSoFar / monthly) : 0;
-  // Amount credited toward the current (unpaid) period
   const partialCredit = parseFloat((paidSoFar - periodsPaid * monthly).toFixed(2));
-  // What's left for the current period
   const currentDue   = parseFloat((monthly - partialCredit).toFixed(2));
 
-  // clamp so we never exceed actual remaining balance
   return Math.min(Math.max(currentDue, 0), remaining);
 }
 
-type Option = 'installment' | 'full' | 'custom';
+/**
+ * How many full periods have been paid already?
+ */
+function computePeriodsPaid(loan: any): number {
+  const total   = Number(loan.total_payable) || 0;
+  const months  = Number(loan.term_months)   || 1;
+  const monthly = total / months;
+  const paid    = total - (Number(loan.remaining_balance) || 0);
+  return monthly > 0 ? Math.floor(paid / monthly) : 0;
+}
+
+type Option = 'installment' | 'advance' | 'full' | 'custom';
 
 export default function PaymentOptions() {
   const navigate = useNavigate();
@@ -74,6 +77,7 @@ export default function PaymentOptions() {
     })();
   }, [id]);
 
+  // ── guards ────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -87,34 +91,100 @@ export default function PaymentOptions() {
       <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6 text-center space-y-4">
         <AlertCircle className="text-red-500" size={40} />
         <h2 className="text-xl font-bold text-on-surface">{error || 'Loan not found.'}</h2>
-        <button onClick={() => navigate('/dashboard')} className="bg-primary text-on-primary px-6 py-3 rounded-full font-bold">
+        <button
+          onClick={() => navigate('/dashboard')}
+          className="bg-primary text-on-primary px-6 py-3 rounded-full font-bold"
+        >
           Back to Dashboard
         </button>
       </div>
     );
   }
 
-  const remaining     = Number(loan.remaining_balance) || 0;
-  const total         = Number(loan.total_payable)     || 0;
-  const months        = Number(loan.term_months)       || 1;
-  const monthly       = parseFloat((total / months).toFixed(2));
+  // ── derived values ────────────────────────────────────────────────────
+  const total          = Number(loan.total_payable)     || 0;
+  const remaining      = Number(loan.remaining_balance) || 0;
+  const months         = Number(loan.term_months)       || 1;
+  const monthly        = parseFloat((total / months).toFixed(2));
+  const paidSoFar      = parseFloat((total - remaining).toFixed(2));
+  const progress       = total > 0 ? Math.min((paidSoFar / total) * 100, 100) : 0;
   const installmentDue = computeInstallmentDue(loan);
-  const paidSoFar     = parseFloat((total - remaining).toFixed(2));
-  const progress      = total > 0 ? Math.min((paidSoFar / total) * 100, 100) : 0;
+  const periodsPaid    = computePeriodsPaid(loan);
+
+  // Is the current period fully paid?
+  const currentPeriodPaid = installmentDue <= 0;
+
+  // Advance payment = next period's monthly due (capped at remaining balance)
+  const advanceAmount = Math.min(monthly, remaining);
+
+  // Which period number would the advance cover?
+  const advancePeriodNo = periodsPaid + (currentPeriodPaid ? 2 : 1);
 
   const customValue = parseFloat(customAmt) || 0;
 
-  const AMOUNT_FOR_TYPE: Record<Option, number> = {
+  // Build OPTIONS dynamically — swap installment ↔ advance based on state
+  const OPTIONS: {
+    id: Option;
+    icon: any;
+    label: string;
+    sub: string;
+    amount: number | null;
+    badge?: string;
+    badgeClass?: string;
+  }[] = [
+    currentPeriodPaid
+      ? {
+          id:         'advance',
+          icon:       FastForward,
+          label:      'Advance Next Payment',
+          sub:        `Pay ahead for period ${advancePeriodNo}`,
+          amount:     advanceAmount,
+          badge:      'Advance',
+          badgeClass: 'bg-purple-500/10 text-purple-500',
+        }
+      : {
+          id:         'installment',
+          icon:       SplitSquareHorizontal,
+          label:      'Pay Installment',
+          sub:        `Period ${periodsPaid + 1} — current due`,
+          amount:     installmentDue,
+          badge:      'Due Now',
+          badgeClass: 'bg-orange-500/10 text-orange-500',
+        },
+    {
+      id:         'full',
+      icon:       Wallet2,
+      label:      'Full Settlement',
+      sub:        'Clear entire remaining balance',
+      amount:     remaining,
+    },
+    {
+      id:         'custom',
+      icon:       Calculator,
+      label:      'Custom Amount',
+      sub:        `Min ₱1.00 · Max ₱${fmt(remaining)}`,
+      amount:     null,
+    },
+  ];
+
+  // Sync default selection when period status changes
+  const defaultOption = currentPeriodPaid ? 'advance' : 'installment';
+  const effectiveSelected =
+    selected === 'installment' && currentPeriodPaid ? 'advance' :
+    selected === 'advance' && !currentPeriodPaid    ? 'installment' :
+    selected;
+
+  const AMOUNT_FOR: Record<string, number> = {
     installment: installmentDue,
+    advance:     advanceAmount,
     full:        remaining,
     custom:      customValue,
   };
 
-  const finalAmount = AMOUNT_FOR_TYPE[selected];
+  const finalAmount = AMOUNT_FOR[effectiveSelected] ?? 0;
 
-  // Validate custom amount
   const validateAndProceed = () => {
-    if (selected === 'custom') {
+    if (effectiveSelected === 'custom') {
       if (!customAmt || isNaN(customValue) || customValue <= 0) {
         setCustomError('Please enter a valid amount.');
         return;
@@ -123,44 +193,15 @@ export default function PaymentOptions() {
         setCustomError(`Cannot exceed remaining balance of ₱${fmt(remaining)}.`);
         return;
       }
-      if (customValue < 1) {
-        setCustomError('Minimum payment is ₱1.00.');
-        return;
-      }
     }
-    const type = selected === 'full' ? 'full' : selected === 'custom' ? 'custom' : 'installment';
+    const type =
+      effectiveSelected === 'full'    ? 'full'    :
+      effectiveSelected === 'custom'  ? 'custom'  :
+      effectiveSelected === 'advance' ? 'advance' :
+      'installment';
+
     navigate(`/loan/${id}/pay/confirm?amount=${finalAmount}&type=${type}`);
   };
-
-  const OPTIONS = [
-    {
-      id:      'installment' as Option,
-      icon:    SplitSquareHorizontal,
-      label:   'Pay Installment',
-      sub:     `Current period due`,
-      amount:  installmentDue,
-      badge:   installmentDue <= 0 ? 'Paid' : 'Due Now',
-      badgeOk: installmentDue <= 0,
-    },
-    {
-      id:      'full' as Option,
-      icon:    Wallet2,
-      label:   'Full Settlement',
-      sub:     'Clear entire remaining balance',
-      amount:  remaining,
-      badge:   null,
-      badgeOk: false,
-    },
-    {
-      id:      'custom' as Option,
-      icon:    Calculator,
-      label:   'Custom Amount',
-      sub:     `Min ₱1.00 · Max ₱${fmt(remaining)}`,
-      amount:  null,
-      badge:   null,
-      badgeOk: false,
-    },
-  ];
 
   return (
     <div className="min-h-screen bg-background flex flex-col items-center">
@@ -168,12 +209,13 @@ export default function PaymentOptions() {
 
       <main className="w-full max-w-md px-6 pt-24 pb-36 flex-1 space-y-6">
 
-        {/* Loan summary card */}
+        {/* ── Loan summary card ── */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           className="bg-surface-container-highest rounded-2xl p-5 shadow-lg border border-outline-variant/10 space-y-4"
         >
+          {/* Reference + status */}
           <div className="flex justify-between items-start">
             <div>
               <p className="text-on-surface-variant text-[10px] uppercase tracking-widest mb-0.5">Loan Reference</p>
@@ -206,7 +248,7 @@ export default function PaymentOptions() {
             <p className="text-[10px] text-on-surface-variant mt-1 text-right">{progress.toFixed(1)}% complete</p>
           </div>
 
-          {/* Breakdown grid */}
+          {/* Stats grid */}
           <div className="grid grid-cols-3 gap-3 pt-1 border-t border-outline-variant/10">
             {[
               { label: 'Principal',   value: `₱${fmt(Number(loan.principal_amount))}` },
@@ -219,16 +261,31 @@ export default function PaymentOptions() {
               </div>
             ))}
           </div>
+
+          {/* "Current period paid" banner */}
+          {currentPeriodPaid && (
+            <motion.div
+              initial={{ opacity: 0, y: 4 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex items-center gap-2 bg-green-500/8 border border-green-500/20 rounded-xl px-3 py-2.5"
+            >
+              <span className="text-green-500 text-base">✓</span>
+              <div>
+                <p className="text-xs font-bold text-green-500">Period {periodsPaid} is fully paid!</p>
+                <p className="text-[10px] text-on-surface-variant">You can advance your next payment below.</p>
+              </div>
+            </motion.div>
+          )}
         </motion.div>
 
-        {/* Amount options */}
+        {/* ── Amount options ── */}
         <section className="space-y-3">
           <h3 className="font-headline font-bold text-on-surface-variant uppercase text-[10px] tracking-widest px-1">
             How much to pay?
           </h3>
 
           {OPTIONS.map((opt, i) => {
-            const isSelected = selected === opt.id;
+            const isSelected = effectiveSelected === opt.id;
             return (
               <motion.button
                 key={opt.id}
@@ -248,16 +305,16 @@ export default function PaymentOptions() {
                     'w-10 h-10 rounded-xl flex items-center justify-center shrink-0',
                     isSelected ? 'bg-primary/10' : 'bg-surface-container-highest'
                   )}>
-                    <opt.icon className="text-primary" size={20} />
+                    <opt.icon
+                      className={cn(isSelected ? 'text-primary' : 'text-on-surface-variant')}
+                      size={20}
+                    />
                   </div>
                   <div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <p className="font-semibold text-sm text-on-surface">{opt.label}</p>
                       {opt.badge && (
-                        <span className={cn(
-                          'text-[8px] px-1.5 py-0.5 rounded font-bold uppercase tracking-tight',
-                          opt.badgeOk ? 'bg-green-500/10 text-green-500' : 'bg-orange-500/10 text-orange-500'
-                        )}>
+                        <span className={cn('text-[8px] px-1.5 py-0.5 rounded font-bold uppercase tracking-tight', opt.badgeClass)}>
                           {opt.badge}
                         </span>
                       )}
@@ -267,7 +324,7 @@ export default function PaymentOptions() {
                 </div>
                 <div className="text-right shrink-0 ml-2">
                   {opt.amount !== null
-                    ? <p className={cn('font-bold text-sm', isSelected ? 'text-primary' : 'text-on-surface')}>
+                    ? <p className={cn('font-bold text-sm tabular-nums', isSelected ? 'text-primary' : 'text-on-surface')}>
                         ₱{fmt(opt.amount)}
                       </p>
                     : <ChevronRight size={16} className="text-on-surface-variant" />
@@ -278,60 +335,75 @@ export default function PaymentOptions() {
           })}
 
           {/* Custom amount input */}
-          {selected === 'custom' && (
-            <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: 'auto' }}
-              className="overflow-hidden"
-            >
-              <div className="bg-surface-container-low border border-outline-variant/10 rounded-2xl p-4 space-y-2">
-                <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Enter Amount</p>
-                <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-on-surface-variant font-bold text-sm">₱</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={remaining}
-                    step="0.01"
-                    value={customAmt}
-                    onChange={(e) => { setCustomAmt(e.target.value); setCustomError(''); }}
-                    placeholder="0.00"
-                    className={cn(
-                      'w-full pl-8 pr-4 py-3 rounded-xl text-sm font-semibold text-on-surface bg-surface-container-high border focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all',
-                      customError ? 'border-red-500/50' : 'border-outline-variant/20'
-                    )}
-                  />
+          <AnimatePresence>
+            {effectiveSelected === 'custom' && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="overflow-hidden"
+              >
+                <div className="bg-surface-container-low border border-outline-variant/10 rounded-2xl p-4 space-y-2">
+                  <p className="text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">Enter Amount</p>
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-on-surface-variant font-bold text-sm">₱</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={remaining}
+                      step="0.01"
+                      value={customAmt}
+                      onChange={(e) => { setCustomAmt(e.target.value); setCustomError(''); }}
+                      placeholder="0.00"
+                      className={cn(
+                        'w-full pl-8 pr-4 py-3 rounded-xl text-sm font-semibold text-on-surface bg-surface-container-high border focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all',
+                        customError ? 'border-red-500/50' : 'border-outline-variant/20'
+                      )}
+                    />
+                  </div>
+                  {customError && (
+                    <p className="text-red-500 text-xs flex items-center gap-1">
+                      <AlertCircle size={12} /> {customError}
+                    </p>
+                  )}
                 </div>
-                {customError && (
-                  <p className="text-red-500 text-xs flex items-center gap-1">
-                    <AlertCircle size={12} /> {customError}
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </section>
+
+        {/* ── Selected amount summary ── */}
+        <AnimatePresence>
+          {finalAmount > 0 && (
+            <motion.div
+              key={`${effectiveSelected}-${finalAmount}`}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 6 }}
+              className="bg-primary/5 border border-primary/15 rounded-2xl p-4 flex justify-between items-center"
+            >
+              <div>
+                <p className="text-sm font-semibold text-on-surface">You will pay</p>
+                {effectiveSelected === 'advance' && (
+                  <p className="text-[10px] text-on-surface-variant mt-0.5">
+                    Advance payment for period {advancePeriodNo}
                   </p>
                 )}
               </div>
+              <p className="font-headline font-extrabold text-2xl text-primary tabular-nums">
+                ₱{fmt(finalAmount)}
+              </p>
             </motion.div>
           )}
-        </section>
-
-        {/* Selected amount summary */}
-        {(selected !== 'custom' || customValue > 0) && finalAmount > 0 && (
-          <motion.div
-            key={`${selected}-${finalAmount}`}
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="bg-primary/5 border border-primary/15 rounded-2xl p-4 flex justify-between items-center"
-          >
-            <p className="text-sm font-semibold text-on-surface">You will pay</p>
-            <p className="font-headline font-extrabold text-2xl text-primary">₱{fmt(finalAmount)}</p>
-          </motion.div>
-        )}
+        </AnimatePresence>
       </main>
 
-      {/* CTA */}
+      {/* ── CTA ── */}
       <div className="fixed bottom-0 left-0 w-full bg-background/80 backdrop-blur-xl pt-4 pb-10 px-6 rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.4)]">
         <div className="max-w-md mx-auto">
           <Button
             onClick={validateAndProceed}
-            disabled={finalAmount <= 0 && selected !== 'custom'}
+            disabled={finalAmount <= 0}
           >
             Continue to Payment <ChevronRight size={18} />
           </Button>
