@@ -1,3 +1,4 @@
+import { API_BASE } from '../lib/api';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
@@ -38,7 +39,6 @@ export default function Inbox() {
     let user: any = null;
     try { user = JSON.parse(localStorage.getItem('user') || 'null'); } catch {}
     if (!user?.customer_id) { navigate('/login', { replace: true }); return; }
-
     loadNotifications(user.customer_id);
   }, []);
 
@@ -46,7 +46,7 @@ export default function Inbox() {
     setLoading(true);
     setError('');
     try {
-      const res  = await fetch(`/api/notifications/${customerId}`);
+      const res  = await fetch(`${API_BASE}/api/notifications/${customerId}`);
       const data = await res.json();
 
       if (!res.ok) {
@@ -57,7 +57,7 @@ export default function Inbox() {
       setNotifications(Array.isArray(data) ? data : []);
 
       // Mark all read — non-fatal, fire and forget
-      fetch(`/api/notifications/${customerId}/read-all`, { method: 'PATCH' }).catch(() => {});
+      fetch(`${API_BASE}/api/notifications/${customerId}/read-all`, { method: 'PATCH' }).catch(() => {});
     } catch {
       setError('Unable to load notifications. Check your connection and try again.');
     } finally {

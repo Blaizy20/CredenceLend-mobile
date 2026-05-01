@@ -4,6 +4,7 @@ import { TopBar } from '../components/TopBar';
 import { BottomNav } from '../components/BottomNav';
 import { ReceiptText, ArrowUpRight, ArrowDownLeft, Calendar, FileDown, Loader2 } from 'lucide-react';
 import { motion } from 'motion/react';
+import { API_BASE } from '../lib/api';
 
 interface Transaction {
   id:      number;
@@ -32,7 +33,7 @@ export default function Transactions() {
 
   const fetchTransactions = async (customerId: number) => {
     try {
-      const res  = await fetch(`/api/transactions/${customerId}`);
+      const res  = await fetch(`${API_BASE}/api/transactions/${customerId}`);
       const data = await res.json();
       if (!res.ok) {
         setError(data?.message || 'Failed to load transactions.');
@@ -86,7 +87,7 @@ export default function Transactions() {
         <div className="pt-24 px-6 flex flex-col items-center gap-4 text-center">
           <p className="text-red-500 text-sm font-medium">{error}</p>
           <button
-            onClick={() => { setLoading(true); setError(''); }}
+            onClick={() => { setLoading(true); setError(''); fetchTransactions(0); }}
             className="text-primary text-sm font-bold hover:underline"
           >
             Try again

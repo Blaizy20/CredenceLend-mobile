@@ -2,11 +2,15 @@ import { Capacitor } from '@capacitor/core';
 
 const RAILWAY_URL = 'https://credencelend-mobile.up.railway.app';
 
-// On native Android/iOS → absolute Railway URL
-// On web (dev/prod)    → relative URL (empty string, uses same origin or Vite proxy)
+// Web (browser/Railway) → relative URLs (empty string, same origin)
+// Android/iOS native   → absolute Railway URL (no origin exists on device)
 const BASE = Capacitor.isNativePlatform()
   ? RAILWAY_URL
   : (import.meta.env.VITE_API_URL ?? '');
+
+// Export so Inbox.tsx, Transactions.tsx, and any other direct-fetch files
+// can use the same base URL without duplicating the logic
+export { BASE as API_BASE };
 
 export const authAPI = {
   login: async (username: string, password: string) => {
