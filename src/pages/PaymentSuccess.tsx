@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { CheckCircle2, LayoutDashboard, Receipt, Loader2, AlertTriangle } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Button } from '../components/Button';
+import { API_BASE } from '../lib/api';
 
 type Status = 'verifying' | 'recording' | 'done' | 'failed';
 
@@ -76,16 +77,13 @@ export default function PaymentSuccess() {
       let intentId  = searchParams.get('payment_intent_id') ?? '';
       let amount    = Number(searchParams.get('amount') ?? 0);
 
-      // PRIMARY: session_id in URL (PayMongo replaced {CHECKOUT_SESSION_ID})
-      const urlSessionId = searchParams.get('session_id') ?? '';
-      if (urlSessionId && urlSessionId !== '{CHECKOUT_SESSION_ID}') {
-        sessionId = urlSessionId;
-      }
+      // URL session_id is not used (PayMongo placeholder not supported on all plans)
+      // PRIMARY: localStorage set in Payment.tsx before redirect — survives cross-domain navigation
 
       // FALLBACK: sessionStorage (may be empty after Capacitor WebView external redirect)
       if (!sessionId) {
         try {
-          const storedRaw = sessionStorage.getItem(SS_PENDING_KEY);
+          const storedRaw = localStorage.getItem(SS_PENDING_KEY);
           if (storedRaw) {
             const stored = JSON.parse(storedRaw);
             if (stored.session_id) sessionId = stored.session_id;
@@ -119,7 +117,7 @@ export default function PaymentSuccess() {
       // Checkout Session flow
       if (sessionId) {
         setStatus('verifying');
-        const statusRes  = await fetch(`/api/paymongo/checkout-status/${sessionId}`);
+        const statusRes  = await fetch(`${API_BASE}/api/paymongo/checkout-status/${sessionId}`);
         const statusData = await statusRes.json();
 
         if (!statusData.success || statusData.payment_status !== 'paid') {
@@ -171,7 +169,7 @@ export default function PaymentSuccess() {
       setPaidMethod(resolvedMethod);
       setStatus('recording');
 
-      const res = await fetch('/api/paymongo/record-payment', {
+      const res = await fetch(`${API_BASE}/api/paymongo/record-payment`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -197,7 +195,7 @@ export default function PaymentSuccess() {
       if (data.pm_payment_id) setPmPaymentId(data.pm_payment_id);
 
       // Clean up sessionStorage
-      sessionStorage.removeItem(SS_PENDING_KEY);
+      localStorage.removeItem(SS_PENDING_KEY);
       setStatus('done');
     } catch (err: any) {
       setError(err.message || 'An unexpected error occurred.');
@@ -209,7 +207,7 @@ export default function PaymentSuccess() {
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise(r => setTimeout(r, 1500));
       try {
-        const res  = await fetch(`/api/paymongo/source/${sourceId}`);
+        const res  = await fetch(`${API_BASE}/api/paymongo/source/${sourceId}`);
         const data = await res.json();
         const st   = data.source?.attributes?.status ?? '';
         if (st === 'chargeable' || st === 'consumed') return true;

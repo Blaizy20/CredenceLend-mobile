@@ -9,7 +9,7 @@ import { TopBar }   from '../components/TopBar';
 import { Button }   from '../components/Button';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn }       from '@/src/lib/utils';
-import { loansAPI } from '../lib/api';
+import { loansAPI, API_BASE } from '../lib/api';
 
 // ── helpers ───────────────────────────────────────────────────────────────
 function fmt(n: number) {
@@ -149,22 +149,19 @@ export default function Payment() {
 
     try {
       const amount  = safeAmount(dueAmount);
-      const origin  = window.location.origin;
+      // PayMongo redirects must use a real HTTPS URL — never capacitor://localhost
+      const origin  = 'https://credencelend-mobile.up.railway.app';
       const billing = getCustomerBilling();
 
-      const res = await fetch('/api/paymongo/checkout', {
+      const res = await fetch(`${API_BASE}/api/paymongo/checkout`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           amount,
           description:   `Loan payment – ${loan.reference_no}`,
           reference_no:  loan.reference_no,
-          // FIX: Embed {CHECKOUT_SESSION_ID} directly in the URL.
-          // PayMongo replaces this placeholder server-side before redirecting
-          // the user — so the actual URL the user lands on contains the real
-          // session ID. This is the most reliable method for Capacitor WebView
-          // because sessionStorage is wiped when navigating to an external domain.
-          success_url:   `${origin}/loan/${id}/pay/success?session_id={CHECKOUT_SESSION_ID}&amount=${amount}`,
+          // success_url uses plain URL — session_id is stored in localStorage before redirect.
+          success_url:   `${origin}/loan/${id}/pay/success?amount=${amount}`,
           cancel_url:    `${origin}/loan/${id}/pay?amount=${amount}&type=${paymentType}`,
           billing_name:  billing.name,
           billing_email: billing.email,
@@ -183,7 +180,7 @@ export default function Payment() {
       // SECONDARY: also store in sessionStorage as a fallback for browsers
       // that do preserve it across same-origin redirects.
       try {
-        sessionStorage.setItem(SS_PENDING_KEY, JSON.stringify({
+        localStorage.setItem(SS_PENDING_KEY, JSON.stringify({
           session_id:   data.session_id   ?? '',
           loan_id:      id,
           amount,

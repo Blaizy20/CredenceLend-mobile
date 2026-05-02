@@ -1,7 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 
-// On native Android/iOS, point directly to your Railway server.
-// On web, use relative URLs (empty string) so the dev server proxy works.
-const RAILWAY_URL = 'credencelend-mobile.up.railway.app';
+const RAILWAY_URL = 'https://credencelend-mobile.up.railway.app';
 
-export const API_BASE = Capacitor.isNativePlatform() ? RAILWAY_URL : 'credencelend-mobile.up.railway.app';
+// Native (Android/iOS APK): use full Railway URL — device has no local server
+// Web / dev server: use empty string so Vite proxy handles /api/... calls
+export const API_BASE = Capacitor.isNativePlatform() ? RAILWAY_URL : '';
