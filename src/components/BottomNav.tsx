@@ -41,7 +41,6 @@ export function BottomNav() {
     { icon: Inbox,           label: 'Inbox',        path: '/inbox'        },
     { icon: ReceiptText,     label: 'Transactions', path: '/transactions' },
     { icon: User,            label: 'Profile',      path: '/profile'      },
-    { icon: ShieldCheck,     label: 'Admin',        path: '/admin/loans'  },
   ];
 
   return (
