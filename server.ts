@@ -13,10 +13,10 @@ const PORT = Number(process.env.PORT || 3000);
 const DEFAULT_TENANT_ID = Number(process.env.DEFAULT_TENANT_ID || 1);
 
 const pool = mysql.createPool({
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT),
+  host:     process.env.DB_HOST,
+  port:     Number(process.env.DB_PORT),
   database: process.env.DB_NAME,
-  user: process.env.DB_USER,
+  user:     process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   waitForConnections: true,
   connectionLimit: 10,
@@ -45,12 +45,10 @@ type CustomerRow = RowDataPacket & {
 
 // ── Payment method normalization ──────────────────────────────────────────────
 const METHOD_MAP: Record<string, string> = {
-  // Offline
   walkin:            "CASH",
   cash:              "CASH",
   cheque:            "CHEQUE",
   bank:              "BANK",
-  // PayMongo types
   gcash:             "GCASH",
   paymaya:           "MAYA",
   maya:              "MAYA",
@@ -68,7 +66,6 @@ const METHOD_MAP: Record<string, string> = {
   dob:               "BANK",
   dob_ubp:           "BANK",
   billease:          "OTHER",
-  // Generic fallbacks
   wallet:            "GCASH",
   digital:           "OTHER",
   online:            "OTHER",
@@ -119,13 +116,13 @@ async function sendOtpEmail(toEmail: string, otp: string): Promise<void> {
   const response = await fetch("https://api.brevo.com/v3/smtp/email", {
     method: "POST",
     headers: {
-      "accept": "application/json",
-      "api-key": process.env.BREVO_API_KEY ?? "",
+      "accept":       "application/json",
+      "api-key":      process.env.BREVO_API_KEY ?? "",
       "content-type": "application/json",
     },
     body: JSON.stringify({
       sender: {
-        name: process.env.BREVO_SENDER_NAME ?? "Loan Manager",
+        name:  process.env.BREVO_SENDER_NAME  ?? "Loan Manager",
         email: process.env.BREVO_SENDER_EMAIL ?? "",
       },
       to: [{ email: toEmail }],
@@ -160,14 +157,27 @@ async function startServer() {
   const PAYMONGO_SECRET  = process.env.PAYMONGO_SECRET_KEY!;
   const PAYMONGO_AUTH    = Buffer.from(`${PAYMONGO_SECRET}:`).toString("base64");
   const PAYMONGO_HEADERS = {
-    Authorization: `Basic ${PAYMONGO_AUTH}`,
+    Authorization:  `Basic ${PAYMONGO_AUTH}`,
     "Content-Type": "application/json",
   };
 
   const app = express();
   app.use(express.json({ limit: "10mb" }));
   app.use(express.urlencoded({ extended: true, limit: "10mb" }));
-  app.use(cors({ origin: true, credentials: true }));
+
+  // ── CORS ──────────────────────────────────────────────────────────────────
+  // FIX: replaced `origin: true` with explicit list so Capacitor WebView
+  // requests (origin: capacitor://localhost) are accepted by the server.
+  app.use(cors({
+    origin: [
+      "https://credencelend-mobile.up.railway.app",
+      "capacitor://localhost",   // Android/iOS Capacitor WebView
+      "http://localhost",
+      "http://localhost:3000",
+      "http://localhost:5173",   // Vite dev server
+    ],
+    credentials: true,
+  }));
 
   // ── Health ────────────────────────────────────────────────────────────────
   app.get("/api/health", async (_req, res) => {
@@ -323,8 +333,8 @@ async function startServer() {
         [DEFAULT_TENANT_ID, username, hashedPassword, customer_no, first_name, last_name, contact_no, email, province, city, barangay, street]
       );
       res.status(201).json({
-        success: true,
-        message: "Your account has been created successfully.",
+        success:  true,
+        message:  "Your account has been created successfully.",
         customer: { customer_id: result.insertId, tenant_id: DEFAULT_TENANT_ID, username, customer_no, first_name, last_name, contact_no, email, province, city, barangay, street, is_active: 1 },
       });
     } catch (err: any) {
@@ -548,7 +558,11 @@ async function startServer() {
         return res.status(400).json({ success: false, message: "amount, success_url and cancel_url are required." });
 
       const desc = description || "Loan Payment";
-      // Pass success_url verbatim — PayMongo replaces {CHECKOUT_SESSION_ID} itself.
+
+      // IMPORTANT: success_url is passed verbatim to PayMongo.
+      // The frontend sends: .../success?session_id={CHECKOUT_SESSION_ID}&amount=...
+      // PayMongo replaces {CHECKOUT_SESSION_ID} server-side before redirecting.
+      // Do NOT encode or modify success_url here.
       const response = await fetch("https://api.paymongo.com/v1/checkout_sessions", {
         method: "POST",
         headers: PAYMONGO_HEADERS,
@@ -572,8 +586,8 @@ async function startServer() {
               ],
               description:      desc,
               reference_number: reference_no || "",
-              success_url:      success_url,
-              cancel_url:       cancel_url,
+              success_url,
+              cancel_url,
               ...(billing_name || billing_email || billing_phone
                 ? { billing: { name: billing_name || "", email: billing_email || "", phone: billing_phone || "" } }
                 : {}),
@@ -811,7 +825,6 @@ async function startServer() {
   // ── PayMongo: Record Payment ──────────────────────────────────────────────
   app.post("/api/paymongo/record-payment", async (req, res) => {
     try {
-      // PATCHED: added paymongo_payment_id
       const {
         loan_id,
         amount,
@@ -832,7 +845,7 @@ async function startServer() {
       const pmId  = paymongo_session_id ?? paymongo_source_id ?? paymongo_intent_id;
       const or_no = pmId ? `OR-PM-${String(pmId).slice(-8).toUpperCase()}` : `OR-${Date.now()}`;
 
-      // Deduplication guard — PATCHED: also checks paymongo_payment_id
+      // Deduplication guard
       for (const pmRef of [paymongo_session_id, paymongo_source_id, paymongo_intent_id, paymongo_payment_id].filter(Boolean)) {
         const [existing] = await pool.query<RowDataPacket[]>(
           `SELECT payment_id FROM payments WHERE notes LIKE ? LIMIT 1`, [`%${pmRef}%`]
@@ -853,19 +866,19 @@ async function startServer() {
       const newBalance = Math.max(0, Number(loan.remaining_balance) - payAmount);
       const isFullyPaid = newBalance <= 0;
 
-      // PATCHED: added PM Payment ID line to notes
-      const notes = [
-        paymongo_session_id  ? `Session ID: ${paymongo_session_id}`          : null,
-        paymongo_source_id   ? `Source ID: ${paymongo_source_id}`            : null,
-        paymongo_intent_id   ? `Intent ID: ${paymongo_intent_id}`            : null,
-        paymongo_payment_id  ? `PM Payment ID: ${paymongo_payment_id}`       : null,
-        paymongo_method_type ? `PM Type: ${paymongo_method_type}`            : null,
-      ].filter(Boolean).join(", ") || "PayMongo payment";
+      // Route PayMongo reference ID to the correct column based on method
+      const isGcashMethod = ["GCASH", "gcash", "grab_pay", "GRAB_PAY", "QRPH", "qrph", "MAYA", "maya", "paymaya"].includes(rawType);
+      const pmRef         = paymongo_payment_id ?? paymongo_session_id ?? paymongo_source_id ?? paymongo_intent_id ?? null;
+      const gcash_reference_no = isGcashMethod ? pmRef : null;
+      const bank_reference_no  = isGcashMethod ? null  : pmRef;
+
+      // Clean, formal notes for the payment record
+      const notes = `Online Payment via PayMongo (${normalizedMethod})`;
 
       const [payResult] = await pool.query<ResultSetHeader>(
-        `INSERT INTO payments (loan_id, amount, payment_date, method, notes, tenant_id, or_no)
-         VALUES (?, ?, CURDATE(), ?, ?, ?, ?)`,
-        [loan_id, payAmount, normalizedMethod, notes, loan.tenant_id, or_no]
+        `INSERT INTO payments (loan_id, amount, payment_date, method, notes, tenant_id, or_no, gcash_reference_no, bank_reference_no)
+         VALUES (?, ?, CURDATE(), ?, ?, ?, ?, ?, ?)`,
+        [loan_id, payAmount, normalizedMethod, notes, loan.tenant_id, or_no, gcash_reference_no, bank_reference_no]
       );
 
       await pool.query(
@@ -882,16 +895,15 @@ async function startServer() {
         "payment"
       );
 
-      // PATCHED: added pm_payment_id to response
       res.json({
-        success:         true,
-        payment_id:      payResult.insertId,
-        pm_payment_id:   paymongo_payment_id ?? null,
-        new_balance:     newBalance,
-        fully_paid:      isFullyPaid,
-        method:          normalizedMethod,
+        success:       true,
+        payment_id:    payResult.insertId,
+        pm_payment_id: paymongo_payment_id ?? null,
+        new_balance:   newBalance,
+        fully_paid:    isFullyPaid,
+        method:        normalizedMethod,
         or_no,
-        message:         isFullyPaid ? "Loan fully paid!" : "Payment recorded successfully.",
+        message:       isFullyPaid ? "Loan fully paid!" : "Payment recorded successfully.",
       });
     } catch (err: any) {
       console.error("Record payment error:", err.message);
