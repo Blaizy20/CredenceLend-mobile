@@ -868,7 +868,7 @@ async function startServer() {
 
       // Route PayMongo reference ID to the correct column based on method
       // Check against normalizedMethod (always uppercase) — not rawType which can vary
-      const isGcashMethod = ["GCASH", "MAYA", "GRAB_PAY", "QRPH"].includes(normalizedMethod);
+      const isGcashMethod = normalizedMethod === "GCASH";
       const pmRef         = paymongo_payment_id ?? paymongo_session_id ?? paymongo_source_id ?? paymongo_intent_id ?? null;
       const gcash_reference_no = isGcashMethod ? pmRef : null;
       const bank_reference_no  = isGcashMethod ? null  : pmRef;
