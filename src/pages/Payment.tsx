@@ -34,6 +34,9 @@ function getCustomerBilling() {
   }
 }
 
+// ── constants ─────────────────────────────────────────────────────────────
+const SS_PENDING_KEY = 'paymongo_pending';
+
 // ── payment mode ──────────────────────────────────────────────────────────
 type PayMode   = 'online' | 'manual';
 type PayStatus = 'idle' | 'redirecting' | 'loading' | 'done' | 'failed';
@@ -86,15 +89,15 @@ export default function Payment() {
   const { id }   = useParams();
   const location = useLocation();
 
-  const [loan, setLoan]                     = useState<any>(null);
-  const [loading, setLoading]               = useState(true);
-  const [error, setError]                   = useState('');
-  const [copied, setCopied]                 = useState(false);
-  const [payMode, setPayMode]               = useState<PayMode>('online');
-  const [manualType, setManualType]         = useState<ManualType>('walkin');
-  const [showConfirm, setShowConfirm]       = useState(false);
-  const [payStatus, setPayStatus]           = useState<PayStatus>('idle');
-  const [payError, setPayError]             = useState('');
+  const [loan, setLoan]               = useState<any>(null);
+  const [loading, setLoading]         = useState(true);
+  const [error, setError]             = useState('');
+  const [copied, setCopied]           = useState(false);
+  const [payMode, setPayMode]         = useState<PayMode>('online');
+  const [manualType, setManualType]   = useState<ManualType>('walkin');
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [payStatus, setPayStatus]     = useState<PayStatus>('idle');
+  const [payError, setPayError]       = useState('');
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -108,7 +111,7 @@ export default function Payment() {
     custom:      'Custom Payment',
   };
 
-  // ── load loan ──────────────────────────────────────────────────────────
+  // ── load loan ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (!id) return;
     (async () => {
@@ -136,15 +139,17 @@ export default function Payment() {
     });
   };
 
-  // ── PayMongo Checkout ──────────────────────────────────────────────────
-  async function handleCheckoutPay() {
+  // ── PayMongo Checkout ─────────────────────────────────────────────────
+  const handleCheckoutPay = async () => {
     if (!loan || !id) return;
 
-    setPayStatus('loading');
+    setPayStatus('redirecting');
     setPayError('');
 
     try {
-      const origin = window.location.origin;
+      const amount  = safeAmount(dueAmount);
+      const origin  = window.location.origin;
+      const billing = getCustomerBilling();
 
       const res = await fetch('/api/paymongo/checkout', {
         method:  'POST',
@@ -153,8 +158,10 @@ export default function Payment() {
           amount,
           description:   `Loan payment – ${loan.reference_no}`,
           reference_no:  loan.reference_no,
-          // Do NOT append ?session_id= here — PayMongo replaces {CHECKOUT_SESSION_ID} itself.
-          // We store session_id in sessionStorage instead (see below).
+          // SUCCESS URL: no {CHECKOUT_SESSION_ID} in the URL.
+          // session_id is stored in sessionStorage below so PaymentSuccess.tsx
+          // can always retrieve it — even if PayMongo fails to replace the
+          // placeholder (common in Capacitor WebView / test mode).
           success_url:   `${origin}/loan/${id}/pay/success?amount=${amount}`,
           cancel_url:    `${origin}/loan/${id}/pay?amount=${amount}&type=${paymentType}`,
           billing_name:  billing.name,
@@ -171,27 +178,38 @@ export default function Payment() {
         return;
       }
 
-      // ── Store pending session in sessionStorage ──────────────────────────
-      // PaymentSuccess.tsx reads this on redirect-back so it can always find
-      // the session_id, even when {CHECKOUT_SESSION_ID} is not replaced in the URL.
-      sessionStorage.setItem('paymongo_pending', JSON.stringify({
-        session_id:   data.session_id,
+      // ── Persist session metadata before redirect ─────────────────────
+      // PaymentSuccess.tsx reads SS_PENDING_KEY on load to get session_id,
+      // loan_id, amount, etc. This is the reliable path — URL params can be
+      // lost or unreplaced in Capacitor WebView redirects.
+      sessionStorage.setItem(SS_PENDING_KEY, JSON.stringify({
+        session_id:   data.session_id   ?? '',
         loan_id:      id,
         amount,
         payment_type: paymentType,
         reference_no: loan.reference_no ?? '',
       }));
 
-      // Redirect to PayMongo hosted checkout page
+      // Redirect to PayMongo hosted checkout
       window.location.href = data.checkout_url;
     } catch (err: any) {
       setPayStatus('failed');
-      setPayError(err.message || 'An unexpected error occurred. Please try again.');
+      setPayError(err.message || 'Unable to connect to payment service. Please try again.');
     }
-  }
+  };
 
+  const handleConfirmed = async () => {
+    setShowConfirm(false);
+    if (payMode === 'online') {
+      await handleCheckoutPay();
+    } else {
+      // Manual: show recording screen then done
+      setPayStatus('loading');
+      setTimeout(() => setPayStatus('done'), 2000);
+    }
+  };
 
-  // ── loading guard ──────────────────────────────────────────────────────
+  // ── loading guard ─────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -212,7 +230,7 @@ export default function Payment() {
     );
   }
 
-  // ── overlay screens ────────────────────────────────────────────────────
+  // ── overlay screens ───────────────────────────────────────────────────
   if (payStatus === 'redirecting') {
     return (
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
@@ -336,7 +354,7 @@ export default function Payment() {
     );
   }
 
-  // ── derived values ─────────────────────────────────────────────────────
+  // ── derived values ────────────────────────────────────────────────────
   const total      = Number(loan.total_payable)     || 0;
   const remaining  = Number(loan.remaining_balance) || 0;
   const months     = Number(loan.term_months)       || 1;
@@ -622,10 +640,10 @@ export default function Payment() {
               {/* Summary */}
               <div className="bg-surface-container-high rounded-xl p-4 space-y-2.5 mb-5">
                 {[
-                  { label: 'Amount',        value: `₱${fmt(dueAmount)}`,                                accent: true  },
-                  { label: 'Method',        value: payMode === 'online' ? 'PayMongo Checkout' : MANUAL_INSTRUCTIONS[manualType].label },
-                  { label: 'Reference',     value: loan.reference_no                                                  },
-                  { label: 'After Payment', value: isFullPay ? '₱0.00 (Fully Paid 🎉)' : `₱${fmt(newBalance)} remaining` },
+                  { label: 'Amount',        value: `₱${fmt(dueAmount)}`,                                                              accent: true  },
+                  { label: 'Method',        value: payMode === 'online' ? 'PayMongo Checkout' : MANUAL_INSTRUCTIONS[manualType].label               },
+                  { label: 'Reference',     value: loan.reference_no                                                                                 },
+                  { label: 'After Payment', value: isFullPay ? '₱0.00 (Fully Paid 🎉)' : `₱${fmt(newBalance)} remaining`                            },
                 ].map(({ label, value, accent }) => (
                   <div key={label} className="flex justify-between items-center">
                     <p className="text-xs text-on-surface-variant">{label}</p>
