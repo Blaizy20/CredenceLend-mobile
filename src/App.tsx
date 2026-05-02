@@ -14,7 +14,6 @@ import RegisterStep4 from './pages/RegisterStep4';
 import Dashboard from './pages/Dashboard';
 import TrackLoan from './pages/TrackLoan';
 import LoanDetails from './pages/LoanDetails';
-import AdminLoans from './pages/AdminLoans';
 import ApplyLoanStep1 from './pages/ApplyLoanStep1';
 import ApplyLoanStep2 from './pages/ApplyLoanStep2';
 import PaymentOptions from './pages/PaymentOptions';
@@ -39,7 +38,6 @@ export default function App() {
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/track" element={<TrackLoan />} />
         <Route path="/loan/:id" element={<LoanDetails />} />
-        <Route path="/admin/loans" element={<AdminLoans />} />
         <Route path="/apply" element={<ApplyLoanStep1 />} />
         <Route path="/apply/step2" element={<ApplyLoanStep2 />} />
         <Route path="/loan/:id/pay" element={<PaymentOptions />} />
