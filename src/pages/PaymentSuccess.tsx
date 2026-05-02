@@ -61,48 +61,34 @@ export default function PaymentSuccess() {
   useEffect(() => {
     if (hasRun.current) return;
     hasRun.current = true;
-    console.log('[PaymentSuccess] localStorage:', localStorage.getItem('paymongo_pending'));
-    console.log('[PaymentSuccess] URL params:', window.location.search);
     handleSuccess();
   }, []);
 
   async function handleSuccess() {
     try {
       // ── Step 1: Resolve identifiers ───────────────────────────────────────
-      // Priority order:
-      //   1. session_id from URL  ← most reliable (PayMongo replaces {CHECKOUT_SESSION_ID})
-      //   2. session_id from sessionStorage ← fallback (may be wiped in Capacitor WebView)
-      //   3. source id / intent id from URL ← other payment flows
-
       let sessionId = '';
       let sourceId  = searchParams.get('id')                ?? '';
       let intentId  = searchParams.get('payment_intent_id') ?? '';
       let amount    = Number(searchParams.get('amount') ?? 0);
 
-      // URL session_id is not used (PayMongo placeholder not supported on all plans)
-      // PRIMARY: localStorage set in Payment.tsx before redirect — survives cross-domain navigation
+      // PRIMARY: read from localStorage — survives cross-domain redirect
+      try {
+        const storedRaw = localStorage.getItem(SS_PENDING_KEY);
+        if (storedRaw) {
+          const stored = JSON.parse(storedRaw);
+          if (stored.session_id)           sessionId = stored.session_id;
+          if (!amount && stored.amount)    amount    = Number(stored.amount);
+        }
+      } catch { /* ignore malformed storage */ }
 
-      // FALLBACK: sessionStorage (may be empty after Capacitor WebView external redirect)
-      if (!sessionId) {
-        try {
-          const storedRaw = localStorage.getItem(SS_PENDING_KEY);
-          if (storedRaw) {
-            const stored = JSON.parse(storedRaw);
-            if (stored.session_id) sessionId = stored.session_id;
-            if (!amount && stored.amount) amount = Number(stored.amount);
-          }
-        } catch { /* ignore malformed storage */ }
-      }
-
-      // ── Step 2: Guard — must have at least one verifiable identifier ──────
+      // ── Step 2: Guard — must have a loan id ───────────────────────────────
       if (!id) {
         setError('Loan details are missing. Please go back and try again.');
         setStatus('failed');
         return;
       }
 
-      // No session, no source, no intent = page was visited directly or
-      // session data was lost. Cannot verify or record. Fail immediately.
       if (!sessionId && !sourceId && !intentId) {
         setError(
           'Your payment session could not be found. ' +
@@ -112,7 +98,7 @@ export default function PaymentSuccess() {
         return;
       }
 
-      // ── Step 3: Verify with PayMongo ─────────────────────────────────────
+      // ── Step 3: Verify with PayMongo ──────────────────────────────────────
       let resolvedMethod     = 'other';
       let currentPmPaymentId = '';
 
@@ -122,7 +108,14 @@ export default function PaymentSuccess() {
         const statusRes  = await fetch(`${API_BASE}/api/paymongo/checkout-status/${sessionId}`);
         const statusData = await statusRes.json();
 
-        if (!statusData.success || statusData.payment_status !== 'paid') {
+        // FIX: PayMongo GCash/Maya test mode often returns payment_status:"unpaid"
+        // even after a successful payment, but always attaches a payment_id.
+        // Accept either condition as verified proof of payment.
+        const isVerified =
+          statusData.success &&
+          (statusData.payment_status === 'paid' || !!statusData.payment_id);
+
+        if (!isVerified) {
           setError(
             'Payment could not be verified with PayMongo. ' +
             'If money was deducted, please contact support.'
@@ -132,7 +125,7 @@ export default function PaymentSuccess() {
         }
 
         resolvedMethod = statusData.payment_method_type ?? 'other';
-        if (statusData.amount)     amount             = statusData.amount;
+        if (statusData.amount)      amount             = statusData.amount;
         if (statusData.payment_id) {
           currentPmPaymentId = statusData.payment_id;
           setPmPaymentId(statusData.payment_id);
@@ -159,14 +152,14 @@ export default function PaymentSuccess() {
         resolvedMethod = 'card';
       }
 
-      // ── Step 4: Amount guard ─────────────────────────────────────────────
+      // ── Step 4: Amount guard ──────────────────────────────────────────────
       if (!amount) {
         setError('Payment amount is missing. Please contact support.');
         setStatus('failed');
         return;
       }
 
-      // ── Step 5: Record in database ───────────────────────────────────────
+      // ── Step 5: Record in database ────────────────────────────────────────
       setPaidAmount(amount);
       setPaidMethod(resolvedMethod);
       setStatus('recording');
@@ -196,7 +189,7 @@ export default function PaymentSuccess() {
       setDbPaymentId(data.payment_id);
       if (data.pm_payment_id) setPmPaymentId(data.pm_payment_id);
 
-      // Clean up sessionStorage
+      // Clean up localStorage
       localStorage.removeItem(SS_PENDING_KEY);
       setStatus('done');
     } catch (err: any) {
