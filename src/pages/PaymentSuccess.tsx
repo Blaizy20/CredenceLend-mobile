@@ -23,21 +23,40 @@ export default function PaymentSuccess() {
 
   async function handleSuccess() {
     try {
-      const method      = searchParams.get('method')             ?? 'wallet';
-      const sourceId    = searchParams.get('id')                 ?? '';
-      const intentId    = searchParams.get('payment_intent_id')  ?? '';
-      const amountParam = searchParams.get('amount')             ?? '0';
-      const amount      = Number(amountParam) || 0;
+      // FIX: Read session_id from URL (PayMongo replaces {CHECKOUT_SESSION_ID} automatically)
+      const sessionId   = searchParams.get('session_id')        ?? '';
+      const sourceId    = searchParams.get('id')                ?? '';
+      const intentId    = searchParams.get('payment_intent_id') ?? '';
+      const amountParam = searchParams.get('amount')            ?? '0';
+      let   amount      = Number(amountParam) || 0;
 
-      // ── Guard: must have loan id and amount ───────────────────────────
-      if (!id || !amount) {
+      if (!id) {
         setError('Payment details are missing. Please go back and try again.');
         setStatus('failed');
         return;
       }
 
-      // ── 1. Verify wallet payments via PayMongo source poll ────────────
-      if (method === 'wallet' && sourceId) {
+      let resolvedMethod = 'other';
+
+      // ── Checkout Session flow (PayMongo hosted page — card/gcash/qrph/etc.) ──
+      if (sessionId) {
+        setStatus('verifying');
+        const statusRes  = await fetch(`/api/paymongo/checkout-status/${sessionId}`);
+        const statusData = await statusRes.json();
+
+        if (!statusData.success || statusData.payment_status !== 'paid') {
+          setError('Payment could not be verified. If money was deducted, please contact support.');
+          setStatus('failed');
+          return;
+        }
+
+        // FIX: Use the REAL PayMongo method (e.g. "gcash", "card", "qrph", "grab_pay")
+        resolvedMethod = statusData.payment_method_type ?? 'other';
+        if (statusData.amount) amount = statusData.amount;
+      }
+
+      // ── Source flow (in-app GCash QR from PaymentGateway.tsx) ─────────────
+      else if (sourceId) {
         setStatus('verifying');
         const verified = await pollSourceStatus(sourceId);
         if (!verified) {
@@ -45,20 +64,34 @@ export default function PaymentSuccess() {
           setStatus('failed');
           return;
         }
+        resolvedMethod = 'gcash';
       }
 
-      // ── 2. Record in database ─────────────────────────────────────────
+      // ── Card Payment Intent flow (3DS redirect) ────────────────────────────
+      else if (intentId) {
+        resolvedMethod = 'card';
+      }
+
+      if (!amount) {
+        setError('Payment amount is missing. Please contact support.');
+        setStatus('failed');
+        return;
+      }
+
+      // ── Record in database ─────────────────────────────────────────────────
       setStatus('recording');
 
-      const res  = await fetch('/api/paymongo/record-payment', {
+      const res = await fetch('/api/paymongo/record-payment', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          loan_id:            Number(id),
+          loan_id:               Number(id),
           amount,
-          method,
-          paymongo_source_id: sourceId || undefined,
-          paymongo_intent_id: intentId || undefined,
+          method:                resolvedMethod,         // real PayMongo type
+          paymongo_method_type:  resolvedMethod,         // server normalizes → GCASH/CARD/etc.
+          paymongo_source_id:    sourceId  || undefined,
+          paymongo_intent_id:    intentId  || undefined,
+          paymongo_session_id:   sessionId || undefined, // used for dedup guard
         }),
       });
 
@@ -81,9 +114,9 @@ export default function PaymentSuccess() {
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise(r => setTimeout(r, 1500));
       try {
-        const res    = await fetch(`/api/paymongo/source/${sourceId}`);
-        const data   = await res.json();
-        const st     = data.source?.attributes?.status ?? '';
+        const res  = await fetch(`/api/paymongo/source/${sourceId}`);
+        const data = await res.json();
+        const st   = data.source?.attributes?.status ?? '';
         if (st === 'chargeable' || st === 'consumed') return true;
         if (st === 'failed'     || st === 'cancelled') return false;
       } catch { /* keep polling */ }
@@ -174,13 +207,47 @@ export default function PaymentSuccess() {
   }
 
   // ── Success screen ────────────────────────────────────────────────────────
-  const method      = searchParams.get('method') ?? 'wallet';
-  const amount      = Number(searchParams.get('amount') ?? 0);
+  const resolvedMethodDisplay = searchParams.get('session_id')
+    ? 'online'  // will be overridden by methodLabel below using stored data
+    : (searchParams.get('method') ?? 'other');
+  const amount = Number(searchParams.get('amount') ?? 0);
+
+  // FIX: Expanded methodLabel to cover all PayMongo payment_method_type values
   const methodLabel: Record<string, string> = {
-    wallet: 'GCash / Maya',
-    card:   'Card Payment',
-    bank:   'Online Banking',
-    walkin: 'Walk-in',
+    // Raw PayMongo types returned by checkout-status
+    gcash:             'GCash',
+    card:              'Credit / Debit Card',
+    paymaya:           'Maya',
+    maya:              'Maya',
+    qrph:              'QR Ph',
+    grab_pay:          'GrabPay',
+    grabpay:           'GrabPay',
+    dob:               'BPI Online Banking',
+    dob_ubp:           'UnionBank Online',
+    bpi_online:        'BPI Online Banking',
+    unionbank_online:  'UnionBank Online',
+    brankas_bdo:       'BDO (Brankas)',
+    brankas_landbank:  'Landbank (Brankas)',
+    brankas_metrobank: 'Metrobank (Brankas)',
+    billease:          'BillEase',
+    // Normalized DB values (fallback)
+    GCASH:             'GCash',
+    CARD:              'Credit / Debit Card',
+    MAYA:              'Maya',
+    QRPH:              'QR Ph',
+    GRAB_PAY:          'GrabPay',
+    BPI:               'BPI Online Banking',
+    UNIONBANK:         'UnionBank Online',
+    BRANKAS_BDO:       'BDO',
+    BANK:              'Bank Transfer',
+    // Legacy / offline
+    wallet:            'E-Wallet',
+    online:            'Online Payment',
+    walkin:            'Walk-in',
+    cash:              'Cash',
+    cheque:            'Cheque',
+    bank:              'Bank Transfer',
+    other:             'Online Payment',
   };
 
   return (
@@ -225,7 +292,9 @@ export default function PaymentSuccess() {
         )}
         <div className="flex justify-between items-center">
           <span className="text-xs text-on-surface-variant uppercase tracking-wider font-semibold">Method</span>
-          <span className="text-on-surface text-sm font-medium">{methodLabel[method] ?? method}</span>
+          <span className="text-on-surface text-sm font-medium">
+            {methodLabel[resolvedMethodDisplay] ?? resolvedMethodDisplay}
+          </span>
         </div>
         {paymentId && (
           <div className="flex justify-between items-center">

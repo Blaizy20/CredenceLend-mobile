@@ -174,24 +174,29 @@ export default function PaymentGateway() {
     }, 5000);
   };
 
+  // FIX: Pass paymongo_method_type so server normalizes correctly (GCASH/CARD/etc.)
   const recordPayment = async (sourceId: string | null, intentId: string | null) => {
     try {
+      // Determine the raw method type for this payment
+      const rawMethod = tab === 'ewallet' ? selectedWallet : 'card';
+
       const res  = await fetch(`${API}/api/paymongo/record-payment`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          loan_id:            id,
-          amount:             dueAmount,
-          method:             tab === 'ewallet' ? selectedWallet : 'card',
-          paymongo_source_id: sourceId,
-          paymongo_intent_id: intentId,
+          loan_id:               id,
+          amount:                dueAmount,
+          method:                rawMethod,
+          paymongo_method_type:  rawMethod,   // FIX: explicitly pass so server normalizes correctly
+          paymongo_source_id:    sourceId,
+          paymongo_intent_id:    intentId,
         }),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.message);
       setEStep('success');
       setTimeout(
-        () => navigate(`/loan/${id}/pay/success?method=${tab === 'ewallet' ? selectedWallet : 'card'}&amount=${dueAmount}`),
+        () => navigate(`/loan/${id}/pay/success?method=${rawMethod}&amount=${dueAmount}`),
         1500
       );
     } catch (err: any) {

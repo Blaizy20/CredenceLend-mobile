@@ -152,7 +152,9 @@ export default function Payment() {
           amount,
           description:   `Loan payment – ${loan?.reference_no}`,
           reference_no:  loan?.reference_no,
-          success_url:   `${origin}/loan/${id}/pay/success?method=online&amount=${amount}`,
+          // FIX: Use {CHECKOUT_SESSION_ID} template — PayMongo replaces it automatically
+          // Removed hardcoded method=online so the real method is fetched on return
+          success_url:   `${origin}/loan/${id}/pay/success?session_id={CHECKOUT_SESSION_ID}&amount=${amount}`,
           cancel_url:    `${origin}/loan/${id}/pay?amount=${amount}&type=${paymentType}`,
           billing_name:  billing.name,
           billing_email: billing.email,
