@@ -44,7 +44,6 @@ type CustomerRow = RowDataPacket & {
 };
 
 // ── Payment method normalization ──────────────────────────────────────────────
-// Maps every PayMongo payment_method_type + offline methods → ENUM in payments.method
 const METHOD_MAP: Record<string, string> = {
   // Offline
   walkin:            "CASH",
@@ -158,8 +157,8 @@ async function startServer() {
     process.exit(1);
   }
 
-  const PAYMONGO_SECRET = process.env.PAYMONGO_SECRET_KEY!;
-  const PAYMONGO_AUTH   = Buffer.from(`${PAYMONGO_SECRET}:`).toString("base64");
+  const PAYMONGO_SECRET  = process.env.PAYMONGO_SECRET_KEY!;
+  const PAYMONGO_AUTH    = Buffer.from(`${PAYMONGO_SECRET}:`).toString("base64");
   const PAYMONGO_HEADERS = {
     Authorization: `Basic ${PAYMONGO_AUTH}`,
     "Content-Type": "application/json",
@@ -258,7 +257,7 @@ async function startServer() {
   // ── Auth: Reset Password ──────────────────────────────────────────────────
   app.post("/api/auth/reset-password", async (req, res) => {
     try {
-      const email = String(req.body.email ?? "").trim().toLowerCase();
+      const email       = String(req.body.email       ?? "").trim().toLowerCase();
       const newPassword = String(req.body.newPassword ?? "");
       if (!email || !newPassword)
         return res.status(400).json({ success: false, message: "Email and new password are required." });
@@ -442,9 +441,9 @@ async function startServer() {
       };
 
       for (const loan of rows) {
-        const newStatus = String(loan.status ?? "").toLowerCase();
-        const tenantId  = loan.tenant_id ?? DEFAULT_TENANT_ID;
-        const [cached]  = await pool.query<RowDataPacket[]>(`SELECT last_status FROM loan_status_cache WHERE loan_id = ? LIMIT 1`, [loan.loan_id]);
+        const newStatus  = String(loan.status ?? "").toLowerCase();
+        const tenantId   = loan.tenant_id ?? DEFAULT_TENANT_ID;
+        const [cached]   = await pool.query<RowDataPacket[]>(`SELECT last_status FROM loan_status_cache WHERE loan_id = ? LIMIT 1`, [loan.loan_id]);
         const lastStatus = cached[0] ? String(cached[0].last_status).toLowerCase() : null;
         if (!lastStatus) {
           await pool.query(`INSERT INTO loan_status_cache (loan_id, last_status) VALUES (?, ?) ON DUPLICATE KEY UPDATE last_status = VALUES(last_status)`, [loan.loan_id, loan.status]);
@@ -476,7 +475,7 @@ async function startServer() {
     } catch { res.status(500).json({ success: false, message: "Unable to retrieve loan details." }); }
   });
 
-  // ── Payments: List by Loan (latest first) ─────────────────────────────────
+  // ── Payments: List by Loan ────────────────────────────────────────────────
   app.get("/api/payments/:loanId", async (req, res) => {
     try {
       const [rows] = await pool.query<RowDataPacket[]>(
@@ -490,7 +489,7 @@ async function startServer() {
     } catch { res.status(500).json({ success: false, message: "Unable to retrieve payment records." }); }
   });
 
-  // ── Payments: All by Customer (for Transactions screen) ───────────────────
+  // ── Payments: All by Customer ─────────────────────────────────────────────
   app.get("/api/payments/customer/:customerId", async (req, res) => {
     try {
       const [rows] = await pool.query<RowDataPacket[]>(
@@ -550,6 +549,10 @@ async function startServer() {
         return res.status(400).json({ success: false, message: "amount, success_url and cancel_url are required." });
 
       const desc = description || "Loan Payment";
+
+      // FIX: Pass success_url exactly as received from the frontend.
+      // The frontend sends it with the literal string {CHECKOUT_SESSION_ID} which
+      // PayMongo replaces server-side. Do NOT encode or transform this URL.
       const response = await fetch("https://api.paymongo.com/v1/checkout_sessions", {
         method: "POST",
         headers: PAYMONGO_HEADERS,
@@ -559,12 +562,23 @@ async function startServer() {
               send_email_receipt: false,
               show_description:   true,
               show_line_items:    true,
-              line_items: [{ currency: "PHP", amount: Math.round(Number(amount) * 100), name: desc, description: desc, quantity: 1 }],
-              payment_method_types: ["card", "gcash", "paymaya", "qrph", "grab_pay", "dob", "dob_ubp", "brankas_bdo", "brankas_landbank", "brankas_metrobank"],
-              description: desc,
+              line_items: [{
+                currency:    "PHP",
+                amount:      Math.round(Number(amount) * 100),
+                name:        desc,
+                description: desc,
+                quantity:    1,
+              }],
+              payment_method_types: [
+                "card", "gcash", "paymaya", "qrph",
+                "grab_pay", "dob", "dob_ubp",
+                "brankas_bdo", "brankas_landbank", "brankas_metrobank",
+              ],
+              description:      desc,
               reference_number: reference_no || "",
-              success_url,
-              cancel_url,
+              // Pass verbatim — PayMongo replaces {CHECKOUT_SESSION_ID} itself
+              success_url:      success_url,
+              cancel_url:       cancel_url,
               ...(billing_name || billing_email || billing_phone
                 ? { billing: { name: billing_name || "", email: billing_email || "", phone: billing_phone || "" } }
                 : {}),
@@ -572,10 +586,16 @@ async function startServer() {
           },
         }),
       });
+
       const data = await response.json();
       if (!response.ok)
         return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to create checkout session." });
-      res.json({ success: true, checkout_url: data.data.attributes.checkout_url, session_id: data.data.id });
+
+      res.json({
+        success:      true,
+        checkout_url: data.data.attributes.checkout_url,
+        session_id:   data.data.id,
+      });
     } catch (err: any) {
       console.error("PayMongo checkout error:", err.message);
       res.status(500).json({ success: false, message: "Payment service unavailable. Please try again." });
@@ -583,7 +603,9 @@ async function startServer() {
   });
 
   // ── PayMongo: Get Checkout Session Status ─────────────────────────────────
-  // Called by success page to get the real payment method before recording.
+  // FIX: Use attrs.payment_status (session-level) as the primary success check,
+  // NOT payment.status (payment-object level) which can still be "pending" right
+  // after redirect even though the session is fully paid.
   app.get("/api/paymongo/checkout-status/:sessionId", async (req, res) => {
     try {
       const response = await fetch(
@@ -594,19 +616,38 @@ async function startServer() {
       if (!response.ok)
         return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to retrieve session." });
 
-      const attrs   = data.data.attributes;
-      const payment = attrs.payments?.[0];
-      const rawMethod        = payment?.payment_method_type ?? "other";
+      const attrs = data.data.attributes;
+
+      // session-level payment_status: "unpaid" | "paid" | "processing"
+      const sessionPaymentStatus = attrs.payment_status ?? "unpaid";
+
+      // Grab the first payment object for method + amount details
+      const payment   = attrs.payments?.[0];
+      const rawMethod = payment?.attributes?.payment_method_type
+        ?? payment?.payment_method_type
+        ?? "other";
       const normalizedMethod = normalizeMethod(rawMethod);
+
+      // Amount: prefer session line_items total, fall back to payment object
+      const lineItemsTotal = Array.isArray(attrs.line_items)
+        ? attrs.line_items.reduce((sum: number, item: any) => sum + (item.amount ?? 0), 0) / 100
+        : null;
+      const paymentAmount = payment?.attributes?.amount
+        ? payment.attributes.amount / 100
+        : payment?.amount
+          ? payment.amount / 100
+          : null;
+      const resolvedAmount = lineItemsTotal ?? paymentAmount;
 
       res.json({
         success:             true,
-        status:              attrs.status,
-        payment_status:      payment?.status ?? null,
+        // FIX: return session-level payment_status — this is what PaymentSuccess checks
+        payment_status:      sessionPaymentStatus,
+        session_status:      attrs.status,
         payment_method_type: rawMethod,
         method:              normalizedMethod,
         payment_id:          payment?.id ?? null,
-        amount:              payment ? payment.amount / 100 : null,
+        amount:              resolvedAmount,
       });
     } catch (err: any) {
       console.error("Checkout status error:", err.message);
@@ -614,15 +655,177 @@ async function startServer() {
     }
   });
 
-  // ── PayMongo: Record Payment After Checkout Success ───────────────────────
-  // paymongo_method_type is folded directly into `method` — no extra column needed.
+  // ── PayMongo: Create Source (GCash QR in-app) ─────────────────────────────
+  app.post("/api/paymongo/source", async (req, res) => {
+    try {
+      const { amount, type, reference_no, billing_name, billing_email, billing_phone, redirect_success, redirect_failed } = req.body;
+      if (!amount || !type)
+        return res.status(400).json({ success: false, message: "amount and type are required." });
+
+      const response = await fetch("https://api.paymongo.com/v1/sources", {
+        method: "POST",
+        headers: PAYMONGO_HEADERS,
+        body: JSON.stringify({
+          data: {
+            attributes: {
+              amount:   Math.round(Number(amount) * 100),
+              currency: "PHP",
+              type,
+              redirect: {
+                success: redirect_success || "https://credencelend-mobile.up.railway.app/payment-success",
+                failed:  redirect_failed  || "https://credencelend-mobile.up.railway.app/payment-failed",
+              },
+              billing: {
+                name:  billing_name  || "",
+                email: billing_email || "",
+                phone: billing_phone || "",
+              },
+            },
+          },
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok)
+        return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to create source." });
+
+      res.json({ success: true, source: data.data });
+    } catch (err: any) {
+      console.error("PayMongo source error:", err.message);
+      res.status(500).json({ success: false, message: "Payment service unavailable." });
+    }
+  });
+
+  // ── PayMongo: Get Source Status (polling) ─────────────────────────────────
+  app.get("/api/paymongo/source/:sourceId", async (req, res) => {
+    try {
+      const response = await fetch(
+        `https://api.paymongo.com/v1/sources/${req.params.sourceId}`,
+        { headers: PAYMONGO_HEADERS }
+      );
+      const data = await response.json();
+      if (!response.ok)
+        return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to retrieve source." });
+      res.json({ success: true, source: data.data });
+    } catch (err: any) {
+      console.error("PayMongo source status error:", err.message);
+      res.status(500).json({ success: false, message: "Payment service unavailable." });
+    }
+  });
+
+  // ── PayMongo: Create Payment Intent (Card) ────────────────────────────────
+  app.post("/api/paymongo/intent", async (req, res) => {
+    try {
+      const { amount, description } = req.body;
+      if (!amount)
+        return res.status(400).json({ success: false, message: "amount is required." });
+
+      const response = await fetch("https://api.paymongo.com/v1/payment_intents", {
+        method: "POST",
+        headers: PAYMONGO_HEADERS,
+        body: JSON.stringify({
+          data: {
+            attributes: {
+              amount:               Math.round(Number(amount) * 100),
+              currency:             "PHP",
+              payment_method_allowed: ["card"],
+              description:          description || "Loan Payment",
+              capture_type:         "automatic",
+            },
+          },
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok)
+        return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to create payment intent." });
+
+      res.json({ success: true, intent: data.data });
+    } catch (err: any) {
+      console.error("PayMongo intent error:", err.message);
+      res.status(500).json({ success: false, message: "Payment service unavailable." });
+    }
+  });
+
+  // ── PayMongo: Create Payment Method (Card) ────────────────────────────────
+  app.post("/api/paymongo/payment-method", async (req, res) => {
+    try {
+      const { card_number, exp_month, exp_year, cvc, name } = req.body;
+      if (!card_number || !exp_month || !exp_year || !cvc)
+        return res.status(400).json({ success: false, message: "Card details are required." });
+
+      const response = await fetch("https://api.paymongo.com/v1/payment_methods", {
+        method: "POST",
+        headers: PAYMONGO_HEADERS,
+        body: JSON.stringify({
+          data: {
+            attributes: {
+              type: "card",
+              details: {
+                card_number: String(card_number).replace(/\s/g, ""),
+                exp_month:   Number(exp_month),
+                exp_year:    Number(exp_year),
+                cvc:         String(cvc),
+              },
+              billing: { name: name || "" },
+            },
+          },
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok)
+        return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to create payment method." });
+
+      res.json({ success: true, payment_method: data.data });
+    } catch (err: any) {
+      console.error("PayMongo payment method error:", err.message);
+      res.status(500).json({ success: false, message: "Payment service unavailable." });
+    }
+  });
+
+  // ── PayMongo: Attach Payment Method to Intent (Card 3DS) ─────────────────
+  app.post("/api/paymongo/attach", async (req, res) => {
+    try {
+      const { intent_id, payment_method_id, client_key, return_url } = req.body;
+      if (!intent_id || !payment_method_id)
+        return res.status(400).json({ success: false, message: "intent_id and payment_method_id are required." });
+
+      const response = await fetch(
+        `https://api.paymongo.com/v1/payment_intents/${intent_id}/attach`,
+        {
+          method: "POST",
+          headers: PAYMONGO_HEADERS,
+          body: JSON.stringify({
+            data: {
+              attributes: {
+                payment_method: payment_method_id,
+                client_key:     client_key || "",
+                return_url:     return_url || "https://credencelend-mobile.up.railway.app/payment-success",
+              },
+            },
+          }),
+        }
+      );
+
+      const data = await response.json();
+      if (!response.ok)
+        return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to attach payment method." });
+
+      res.json({ success: true, intent: data.data });
+    } catch (err: any) {
+      console.error("PayMongo attach error:", err.message);
+      res.status(500).json({ success: false, message: "Payment service unavailable." });
+    }
+  });
+
+  // ── PayMongo: Record Payment ──────────────────────────────────────────────
   app.post("/api/paymongo/record-payment", async (req, res) => {
     try {
       const { loan_id, amount, method, paymongo_source_id, paymongo_intent_id, paymongo_session_id, paymongo_method_type } = req.body;
       if (!loan_id || !amount || !method)
         return res.status(400).json({ success: false, message: "Missing required fields." });
 
-      // Use the raw PayMongo type if available, otherwise the frontend-sent method string
       const rawType          = paymongo_method_type ?? method;
       const normalizedMethod = normalizeMethod(String(rawType));
 
@@ -645,9 +848,9 @@ async function startServer() {
       );
       if (loanRows.length === 0) return res.status(404).json({ success: false, message: "Loan not found." });
 
-      const loan        = loanRows[0];
-      const payAmount   = Number(amount);
-      const newBalance  = Math.max(0, Number(loan.remaining_balance) - payAmount);
+      const loan       = loanRows[0];
+      const payAmount  = Number(amount);
+      const newBalance = Math.max(0, Number(loan.remaining_balance) - payAmount);
       const isFullyPaid = newBalance <= 0;
 
       const notes = [
@@ -657,7 +860,6 @@ async function startServer() {
         paymongo_method_type ? `PM Type: ${paymongo_method_type}`    : null,
       ].filter(Boolean).join(", ") || "PayMongo payment";
 
-      // INSERT uses only existing columns — no paymongo_method_type column needed
       const [payResult] = await pool.query<ResultSetHeader>(
         `INSERT INTO payments (loan_id, amount, payment_date, method, notes, tenant_id, or_no)
          VALUES (?, ?, CURDATE(), ?, ?, ?, ?)`,
@@ -678,7 +880,15 @@ async function startServer() {
         "payment"
       );
 
-      res.json({ success: true, payment_id: payResult.insertId, new_balance: newBalance, fully_paid: isFullyPaid, method: normalizedMethod, or_no, message: isFullyPaid ? "Loan fully paid!" : "Payment recorded successfully." });
+      res.json({
+        success:    true,
+        payment_id: payResult.insertId,
+        new_balance: newBalance,
+        fully_paid: isFullyPaid,
+        method:     normalizedMethod,
+        or_no,
+        message:    isFullyPaid ? "Loan fully paid!" : "Payment recorded successfully.",
+      });
     } catch (err: any) {
       console.error("Record payment error:", err.message);
       res.status(500).json({ success: false, message: "Failed to record payment. Please contact support." });
