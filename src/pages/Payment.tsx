@@ -35,6 +35,7 @@ function getCustomerBilling() {
 }
 
 // ── constants ─────────────────────────────────────────────────────────────
+// KEY: must match PaymentSuccess.tsx
 const SS_PENDING_KEY = 'paymongo_pending';
 
 // ── payment mode ──────────────────────────────────────────────────────────
@@ -158,11 +159,12 @@ export default function Payment() {
           amount,
           description:   `Loan payment – ${loan.reference_no}`,
           reference_no:  loan.reference_no,
-          // SUCCESS URL: no {CHECKOUT_SESSION_ID} in the URL.
-          // session_id is stored in sessionStorage below so PaymentSuccess.tsx
-          // can always retrieve it — even if PayMongo fails to replace the
-          // placeholder (common in Capacitor WebView / test mode).
-          success_url:   `${origin}/loan/${id}/pay/success?amount=${amount}`,
+          // FIX: Embed {CHECKOUT_SESSION_ID} directly in the URL.
+          // PayMongo replaces this placeholder server-side before redirecting
+          // the user — so the actual URL the user lands on contains the real
+          // session ID. This is the most reliable method for Capacitor WebView
+          // because sessionStorage is wiped when navigating to an external domain.
+          success_url:   `${origin}/loan/${id}/pay/success?session_id={CHECKOUT_SESSION_ID}&amount=${amount}`,
           cancel_url:    `${origin}/loan/${id}/pay?amount=${amount}&type=${paymentType}`,
           billing_name:  billing.name,
           billing_email: billing.email,
@@ -178,17 +180,17 @@ export default function Payment() {
         return;
       }
 
-      // ── Persist session metadata before redirect ─────────────────────
-      // PaymentSuccess.tsx reads SS_PENDING_KEY on load to get session_id,
-      // loan_id, amount, etc. This is the reliable path — URL params can be
-      // lost or unreplaced in Capacitor WebView redirects.
-      sessionStorage.setItem(SS_PENDING_KEY, JSON.stringify({
-        session_id:   data.session_id   ?? '',
-        loan_id:      id,
-        amount,
-        payment_type: paymentType,
-        reference_no: loan.reference_no ?? '',
-      }));
+      // SECONDARY: also store in sessionStorage as a fallback for browsers
+      // that do preserve it across same-origin redirects.
+      try {
+        sessionStorage.setItem(SS_PENDING_KEY, JSON.stringify({
+          session_id:   data.session_id   ?? '',
+          loan_id:      id,
+          amount,
+          payment_type: paymentType,
+          reference_no: loan.reference_no ?? '',
+        }));
+      } catch { /* sessionStorage unavailable — URL param is the primary path */ }
 
       // Redirect to PayMongo hosted checkout
       window.location.href = data.checkout_url;
@@ -203,7 +205,6 @@ export default function Payment() {
     if (payMode === 'online') {
       await handleCheckoutPay();
     } else {
-      // Manual: show recording screen then done
       setPayStatus('loading');
       setTimeout(() => setPayStatus('done'), 2000);
     }
@@ -364,7 +365,6 @@ export default function Payment() {
   const isFullPay  = newBalance <= 0;
   const progressNow   = total > 0 ? Math.min((paidSoFar / total) * 100, 100) : 0;
   const progressAfter = total > 0 ? Math.min(((paidSoFar + dueAmount) / total) * 100, 100) : 0;
-  const instructions  = MANUAL_INSTRUCTIONS[manualType];
 
   return (
     <div className="min-h-screen bg-background flex flex-col items-center">
@@ -377,7 +377,6 @@ export default function Payment() {
           initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
           className="bg-surface-container-highest rounded-2xl overflow-hidden shadow-lg border border-outline-variant/10"
         >
-          {/* Header */}
           <div className="px-5 pt-5 pb-4 border-b border-outline-variant/10">
             <div className="flex justify-between items-start">
               <div>
@@ -393,16 +392,13 @@ export default function Payment() {
                 <div className="flex items-center gap-1.5 justify-end">
                   <p className="font-mono text-xs font-bold text-on-surface">{loan.reference_no}</p>
                   <button onClick={handleCopy} className="text-on-surface-variant active:text-primary transition-colors">
-                    {copied
-                      ? <CheckCircle size={14} className="text-green-500" />
-                      : <Copy size={14} />}
+                    {copied ? <CheckCircle size={14} className="text-green-500" /> : <Copy size={14} />}
                   </button>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Breakdown rows */}
           <div className="px-5 py-4 space-y-2.5">
             {[
               { label: 'Principal Amount',    value: `₱${fmt(Number(loan.principal_amount))}` },
@@ -418,10 +414,8 @@ export default function Payment() {
             ))}
           </div>
 
-          {/* Dashed divider */}
           <div className="mx-5 border-t border-dashed border-outline-variant/20" />
 
-          {/* After-payment preview */}
           <div className="px-5 py-4 space-y-2">
             <div className="flex justify-between items-center">
               <p className="text-xs font-bold text-on-surface">You will pay</p>
@@ -435,7 +429,6 @@ export default function Payment() {
             </div>
           </div>
 
-          {/* Progress */}
           <div className="px-5 pb-5">
             <div className="h-1.5 rounded-full bg-surface-container-low overflow-hidden">
               <motion.div
@@ -457,7 +450,6 @@ export default function Payment() {
           <h3 className="font-headline font-bold text-on-surface-variant uppercase text-[10px] tracking-widest px-1">
             How to Pay
           </h3>
-
           {PAY_MODES.map((mode, i) => {
             const isSelected = payMode === mode.id;
             return (
@@ -499,7 +491,7 @@ export default function Payment() {
           })}
         </section>
 
-        {/* ── Online: PayMongo accepted methods chips ── */}
+        {/* ── Online: accepted methods ── */}
         <AnimatePresence>
           {payMode === 'online' && (
             <motion.div
@@ -537,7 +529,6 @@ export default function Payment() {
               exit={{ opacity: 0, height: 0 }}
               className="space-y-3 overflow-hidden"
             >
-              {/* Toggle: Walk-in vs Bank Transfer */}
               <div className="flex gap-2 p-1 bg-surface-container-high rounded-xl border border-outline-variant/10">
                 {(Object.keys(MANUAL_INSTRUCTIONS) as ManualType[]).map(type => (
                   <button
@@ -554,8 +545,6 @@ export default function Payment() {
                   </button>
                 ))}
               </div>
-
-              {/* Instructions */}
               <AnimatePresence mode="wait">
                 <motion.div
                   key={manualType}
@@ -619,15 +608,12 @@ export default function Payment() {
               transition={{ type: 'spring', stiffness: 300, damping: 30 }}
               className="fixed bottom-0 left-0 right-0 z-50 p-6 bg-surface-container-low rounded-t-[2rem] shadow-2xl border-t border-white/5 max-w-md mx-auto"
             >
-              {/* Handle bar */}
               <div className="w-10 h-1 rounded-full bg-outline-variant/30 mx-auto mb-5" />
-
               <div className="flex justify-center mb-4">
                 <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center">
                   <ShieldCheck className="text-primary" size={28} />
                 </div>
               </div>
-
               <div className="text-center mb-5">
                 <h3 className="font-headline font-bold text-xl text-on-surface mb-1">Confirm Payment</h3>
                 <p className="text-on-surface-variant text-sm">
@@ -636,8 +622,6 @@ export default function Payment() {
                     : `Confirm your ${MANUAL_INSTRUCTIONS[manualType].label.toLowerCase()} payment. The cooperative will verify your payment.`}
                 </p>
               </div>
-
-              {/* Summary */}
               <div className="bg-surface-container-high rounded-xl p-4 space-y-2.5 mb-5">
                 {[
                   { label: 'Amount',        value: `₱${fmt(dueAmount)}`,                                                              accent: true  },
@@ -651,7 +635,6 @@ export default function Payment() {
                   </div>
                 ))}
               </div>
-
               <div className="flex flex-col gap-3">
                 <Button onClick={handleConfirmed}>
                   {payMode === 'online'

@@ -65,47 +65,68 @@ export default function PaymentSuccess() {
 
   async function handleSuccess() {
     try {
-      // ── Resolve session_id: prefer sessionStorage (survives redirect reliably)
-      // then fall back to URL param (PayMongo replaces {CHECKOUT_SESSION_ID}).
-      let sessionId  = '';
-      let sourceId   = searchParams.get('id')                ?? '';
-      let intentId   = searchParams.get('payment_intent_id') ?? '';
-      let amount     = Number(searchParams.get('amount') ?? 0);
+      // ── Step 1: Resolve identifiers ───────────────────────────────────────
+      // Priority order:
+      //   1. session_id from URL  ← most reliable (PayMongo replaces {CHECKOUT_SESSION_ID})
+      //   2. session_id from sessionStorage ← fallback (may be wiped in Capacitor WebView)
+      //   3. source id / intent id from URL ← other payment flows
 
-      const storedRaw = sessionStorage.getItem(SS_PENDING_KEY);
-      if (storedRaw) {
+      let sessionId = '';
+      let sourceId  = searchParams.get('id')                ?? '';
+      let intentId  = searchParams.get('payment_intent_id') ?? '';
+      let amount    = Number(searchParams.get('amount') ?? 0);
+
+      // PRIMARY: session_id in URL (PayMongo replaced {CHECKOUT_SESSION_ID})
+      const urlSessionId = searchParams.get('session_id') ?? '';
+      if (urlSessionId && urlSessionId !== '{CHECKOUT_SESSION_ID}') {
+        sessionId = urlSessionId;
+      }
+
+      // FALLBACK: sessionStorage (may be empty after Capacitor WebView external redirect)
+      if (!sessionId) {
         try {
-          const stored = JSON.parse(storedRaw);
-          sessionId = stored.session_id ?? '';
-          if (!amount && stored.amount) amount = Number(stored.amount);
+          const storedRaw = sessionStorage.getItem(SS_PENDING_KEY);
+          if (storedRaw) {
+            const stored = JSON.parse(storedRaw);
+            if (stored.session_id) sessionId = stored.session_id;
+            if (!amount && stored.amount) amount = Number(stored.amount);
+          }
         } catch { /* ignore malformed storage */ }
       }
 
-      // URL fallback — only use if it's a real ID (PayMongo replaced the placeholder)
-      if (!sessionId) {
-        const urlSessionId = searchParams.get('session_id') ?? '';
-        if (urlSessionId && urlSessionId !== '{CHECKOUT_SESSION_ID}') {
-          sessionId = urlSessionId;
-        }
-      }
-
+      // ── Step 2: Guard — must have at least one verifiable identifier ──────
       if (!id) {
-        setError('Payment details are missing. Please go back and try again.');
+        setError('Loan details are missing. Please go back and try again.');
         setStatus('failed');
         return;
       }
 
-      let resolvedMethod      = 'other';
-      let currentPmPaymentId  = '';
+      // No session, no source, no intent = page was visited directly or
+      // session data was lost. Cannot verify or record. Fail immediately.
+      if (!sessionId && !sourceId && !intentId) {
+        setError(
+          'Your payment session could not be found. ' +
+          'If money was deducted from your account, please contact support with your reference number.'
+        );
+        setStatus('failed');
+        return;
+      }
 
-      // ── Checkout Session flow ─────────────────────────────────────────────
+      // ── Step 3: Verify with PayMongo ─────────────────────────────────────
+      let resolvedMethod     = 'other';
+      let currentPmPaymentId = '';
+
+      // Checkout Session flow
       if (sessionId) {
         setStatus('verifying');
         const statusRes  = await fetch(`/api/paymongo/checkout-status/${sessionId}`);
         const statusData = await statusRes.json();
 
         if (!statusData.success || statusData.payment_status !== 'paid') {
-          setError('Payment could not be verified. If money was deducted, please contact support.');
+          setError(
+            'Payment could not be verified with PayMongo. ' +
+            'If money was deducted, please contact support.'
+          );
           setStatus('failed');
           return;
         }
@@ -118,30 +139,34 @@ export default function PaymentSuccess() {
         }
       }
 
-      // ── Source flow (in-app GCash QR) ─────────────────────────────────────
+      // Source flow (in-app GCash QR)
       else if (sourceId) {
         setStatus('verifying');
         const verified = await pollSourceStatus(sourceId);
         if (!verified) {
-          setError('Payment could not be verified with the provider. If money was deducted, please contact support.');
+          setError(
+            'GCash payment could not be verified. ' +
+            'If money was deducted, please contact support.'
+          );
           setStatus('failed');
           return;
         }
         resolvedMethod = 'gcash';
       }
 
-      // ── Card Payment Intent flow (3DS redirect) ───────────────────────────
+      // Card Payment Intent flow (3DS redirect)
       else if (intentId) {
         resolvedMethod = 'card';
       }
 
+      // ── Step 4: Amount guard ─────────────────────────────────────────────
       if (!amount) {
         setError('Payment amount is missing. Please contact support.');
         setStatus('failed');
         return;
       }
 
-      // ── Record in database ────────────────────────────────────────────────
+      // ── Step 5: Record in database ───────────────────────────────────────
       setPaidAmount(amount);
       setPaidMethod(resolvedMethod);
       setStatus('recording');
@@ -150,14 +175,14 @@ export default function PaymentSuccess() {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          loan_id:               Number(id),
+          loan_id:              Number(id),
           amount,
-          method:                resolvedMethod,
-          paymongo_method_type:  resolvedMethod,
-          paymongo_source_id:    sourceId              || undefined,
-          paymongo_intent_id:    intentId              || undefined,
-          paymongo_session_id:   sessionId             || undefined,
-          paymongo_payment_id:   currentPmPaymentId    || undefined,
+          method:               resolvedMethod,
+          paymongo_method_type: resolvedMethod,
+          paymongo_source_id:   sourceId           || undefined,
+          paymongo_intent_id:   intentId           || undefined,
+          paymongo_session_id:  sessionId          || undefined,
+          paymongo_payment_id:  currentPmPaymentId || undefined,
         }),
       });
 
@@ -171,7 +196,7 @@ export default function PaymentSuccess() {
       setDbPaymentId(data.payment_id);
       if (data.pm_payment_id) setPmPaymentId(data.pm_payment_id);
 
-      // Clean up stored pending session
+      // Clean up sessionStorage
       sessionStorage.removeItem(SS_PENDING_KEY);
       setStatus('done');
     } catch (err: any) {
