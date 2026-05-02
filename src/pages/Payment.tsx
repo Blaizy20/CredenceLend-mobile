@@ -137,24 +137,25 @@ export default function Payment() {
   };
 
   // ── PayMongo Checkout ──────────────────────────────────────────────────
-  const handleCheckoutPay = async () => {
-    setPayStatus('redirecting');
+  async function handleCheckoutPay() {
+    if (!loan || !id) return;
+
+    setPayStatus('loading');
     setPayError('');
+
     try {
-      const amount  = safeAmount(dueAmount);
-      const origin  = window.location.origin;
-      const billing = getCustomerBilling();
+      const origin = window.location.origin;
 
       const res = await fetch('/api/paymongo/checkout', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           amount,
-          description:   `Loan payment – ${loan?.reference_no}`,
-          reference_no:  loan?.reference_no,
-          // FIX: Use {CHECKOUT_SESSION_ID} template — PayMongo replaces it automatically
-          // Removed hardcoded method=online so the real method is fetched on return
-          success_url:   `${origin}/loan/${id}/pay/success?session_id={CHECKOUT_SESSION_ID}&amount=${amount}`,
+          description:   `Loan payment – ${loan.reference_no}`,
+          reference_no:  loan.reference_no,
+          // Do NOT append ?session_id= here — PayMongo replaces {CHECKOUT_SESSION_ID} itself.
+          // We store session_id in sessionStorage instead (see below).
+          success_url:   `${origin}/loan/${id}/pay/success?amount=${amount}`,
           cancel_url:    `${origin}/loan/${id}/pay?amount=${amount}&type=${paymentType}`,
           billing_name:  billing.name,
           billing_email: billing.email,
@@ -163,28 +164,32 @@ export default function Payment() {
       });
 
       const data = await res.json();
+
       if (!data.success || !data.checkout_url) {
         setPayStatus('failed');
         setPayError(data.message || 'Failed to create checkout session. Please try again.');
         return;
       }
+
+      // ── Store pending session in sessionStorage ──────────────────────────
+      // PaymentSuccess.tsx reads this on redirect-back so it can always find
+      // the session_id, even when {CHECKOUT_SESSION_ID} is not replaced in the URL.
+      sessionStorage.setItem('paymongo_pending', JSON.stringify({
+        session_id:   data.session_id,
+        loan_id:      id,
+        amount,
+        payment_type: paymentType,
+        reference_no: loan.reference_no ?? '',
+      }));
+
+      // Redirect to PayMongo hosted checkout page
       window.location.href = data.checkout_url;
     } catch (err: any) {
       setPayStatus('failed');
-      setPayError(err.message || 'Unable to connect to payment service. Please try again.');
+      setPayError(err.message || 'An unexpected error occurred. Please try again.');
     }
-  };
+  }
 
-  const handleConfirmed = async () => {
-    setShowConfirm(false);
-    if (payMode === 'online') {
-      await handleCheckoutPay();
-    } else {
-      // Manual: just record intent and show done screen
-      setPayStatus('loading');
-      setTimeout(() => setPayStatus('done'), 2000);
-    }
-  };
 
   // ── loading guard ──────────────────────────────────────────────────────
   if (loading) {

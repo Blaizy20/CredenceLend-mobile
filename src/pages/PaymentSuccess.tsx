@@ -6,14 +6,56 @@ import { Button } from '../components/Button';
 
 type Status = 'verifying' | 'recording' | 'done' | 'failed';
 
+const SS_PENDING_KEY = 'paymongo_pending';
+
+const methodLabel: Record<string, string> = {
+  // Raw PayMongo types
+  gcash:             'GCash',
+  card:              'Credit / Debit Card',
+  paymaya:           'Maya',
+  maya:              'Maya',
+  qrph:              'QR Ph',
+  grab_pay:          'GrabPay',
+  grabpay:           'GrabPay',
+  dob:               'BPI Online Banking',
+  dob_ubp:           'UnionBank Online',
+  bpi_online:        'BPI Online Banking',
+  unionbank_online:  'UnionBank Online',
+  brankas_bdo:       'BDO (Brankas)',
+  brankas_landbank:  'Landbank (Brankas)',
+  brankas_metrobank: 'Metrobank (Brankas)',
+  billease:          'BillEase',
+  // Normalized DB values
+  GCASH:             'GCash',
+  CARD:              'Credit / Debit Card',
+  MAYA:              'Maya',
+  QRPH:              'QR Ph',
+  GRAB_PAY:          'GrabPay',
+  BPI:               'BPI Online Banking',
+  UNIONBANK:         'UnionBank Online',
+  BRANKAS_BDO:       'BDO',
+  BANK:              'Bank Transfer',
+  // Legacy / offline
+  wallet:            'E-Wallet',
+  online:            'Online Payment',
+  walkin:            'Walk-in',
+  cash:              'Cash',
+  cheque:            'Cheque',
+  bank:              'Bank Transfer',
+  other:             'Online Payment',
+};
+
 export default function PaymentSuccess() {
-  const navigate                  = useNavigate();
-  const { id }                    = useParams();
-  const [searchParams]            = useSearchParams();
-  const [status, setStatus]       = useState<Status>('verifying');
-  const [error, setError]         = useState('');
-  const [paymentId, setPaymentId] = useState<number | null>(null);
-  const hasRun                    = useRef(false);
+  const navigate               = useNavigate();
+  const { id }                 = useParams();
+  const [searchParams]         = useSearchParams();
+  const [status, setStatus]    = useState<Status>('verifying');
+  const [error, setError]      = useState('');
+  const [dbPaymentId, setDbPaymentId] = useState<number | null>(null);
+  const [pmPaymentId, setPmPaymentId] = useState<string>('');
+  const [paidAmount, setPaidAmount]   = useState<number>(0);
+  const [paidMethod, setPaidMethod]   = useState<string>('');
+  const hasRun                 = useRef(false);
 
   useEffect(() => {
     if (hasRun.current) return;
@@ -23,12 +65,29 @@ export default function PaymentSuccess() {
 
   async function handleSuccess() {
     try {
-      // FIX: Read session_id from URL (PayMongo replaces {CHECKOUT_SESSION_ID} automatically)
-      const sessionId   = searchParams.get('session_id')        ?? '';
-      const sourceId    = searchParams.get('id')                ?? '';
-      const intentId    = searchParams.get('payment_intent_id') ?? '';
-      const amountParam = searchParams.get('amount')            ?? '0';
-      let   amount      = Number(amountParam) || 0;
+      // ── Resolve session_id: prefer sessionStorage (survives redirect reliably)
+      // then fall back to URL param (PayMongo replaces {CHECKOUT_SESSION_ID}).
+      let sessionId  = '';
+      let sourceId   = searchParams.get('id')                ?? '';
+      let intentId   = searchParams.get('payment_intent_id') ?? '';
+      let amount     = Number(searchParams.get('amount') ?? 0);
+
+      const storedRaw = sessionStorage.getItem(SS_PENDING_KEY);
+      if (storedRaw) {
+        try {
+          const stored = JSON.parse(storedRaw);
+          sessionId = stored.session_id ?? '';
+          if (!amount && stored.amount) amount = Number(stored.amount);
+        } catch { /* ignore malformed storage */ }
+      }
+
+      // URL fallback — only use if it's a real ID (PayMongo replaced the placeholder)
+      if (!sessionId) {
+        const urlSessionId = searchParams.get('session_id') ?? '';
+        if (urlSessionId && urlSessionId !== '{CHECKOUT_SESSION_ID}') {
+          sessionId = urlSessionId;
+        }
+      }
 
       if (!id) {
         setError('Payment details are missing. Please go back and try again.');
@@ -36,9 +95,10 @@ export default function PaymentSuccess() {
         return;
       }
 
-      let resolvedMethod = 'other';
+      let resolvedMethod      = 'other';
+      let currentPmPaymentId  = '';
 
-      // ── Checkout Session flow (PayMongo hosted page — card/gcash/qrph/etc.) ──
+      // ── Checkout Session flow ─────────────────────────────────────────────
       if (sessionId) {
         setStatus('verifying');
         const statusRes  = await fetch(`/api/paymongo/checkout-status/${sessionId}`);
@@ -50,12 +110,15 @@ export default function PaymentSuccess() {
           return;
         }
 
-        // FIX: Use the REAL PayMongo method (e.g. "gcash", "card", "qrph", "grab_pay")
         resolvedMethod = statusData.payment_method_type ?? 'other';
-        if (statusData.amount) amount = statusData.amount;
+        if (statusData.amount)     amount             = statusData.amount;
+        if (statusData.payment_id) {
+          currentPmPaymentId = statusData.payment_id;
+          setPmPaymentId(statusData.payment_id);
+        }
       }
 
-      // ── Source flow (in-app GCash QR from PaymentGateway.tsx) ─────────────
+      // ── Source flow (in-app GCash QR) ─────────────────────────────────────
       else if (sourceId) {
         setStatus('verifying');
         const verified = await pollSourceStatus(sourceId);
@@ -67,7 +130,7 @@ export default function PaymentSuccess() {
         resolvedMethod = 'gcash';
       }
 
-      // ── Card Payment Intent flow (3DS redirect) ────────────────────────────
+      // ── Card Payment Intent flow (3DS redirect) ───────────────────────────
       else if (intentId) {
         resolvedMethod = 'card';
       }
@@ -78,7 +141,9 @@ export default function PaymentSuccess() {
         return;
       }
 
-      // ── Record in database ─────────────────────────────────────────────────
+      // ── Record in database ────────────────────────────────────────────────
+      setPaidAmount(amount);
+      setPaidMethod(resolvedMethod);
       setStatus('recording');
 
       const res = await fetch('/api/paymongo/record-payment', {
@@ -87,11 +152,12 @@ export default function PaymentSuccess() {
         body: JSON.stringify({
           loan_id:               Number(id),
           amount,
-          method:                resolvedMethod,         // real PayMongo type
-          paymongo_method_type:  resolvedMethod,         // server normalizes → GCASH/CARD/etc.
-          paymongo_source_id:    sourceId  || undefined,
-          paymongo_intent_id:    intentId  || undefined,
-          paymongo_session_id:   sessionId || undefined, // used for dedup guard
+          method:                resolvedMethod,
+          paymongo_method_type:  resolvedMethod,
+          paymongo_source_id:    sourceId              || undefined,
+          paymongo_intent_id:    intentId              || undefined,
+          paymongo_session_id:   sessionId             || undefined,
+          paymongo_payment_id:   currentPmPaymentId    || undefined,
         }),
       });
 
@@ -102,7 +168,11 @@ export default function PaymentSuccess() {
         return;
       }
 
-      setPaymentId(data.payment_id);
+      setDbPaymentId(data.payment_id);
+      if (data.pm_payment_id) setPmPaymentId(data.pm_payment_id);
+
+      // Clean up stored pending session
+      sessionStorage.removeItem(SS_PENDING_KEY);
       setStatus('done');
     } catch (err: any) {
       setError(err.message || 'An unexpected error occurred.');
@@ -207,49 +277,6 @@ export default function PaymentSuccess() {
   }
 
   // ── Success screen ────────────────────────────────────────────────────────
-  const resolvedMethodDisplay = searchParams.get('session_id')
-    ? 'online'  // will be overridden by methodLabel below using stored data
-    : (searchParams.get('method') ?? 'other');
-  const amount = Number(searchParams.get('amount') ?? 0);
-
-  // FIX: Expanded methodLabel to cover all PayMongo payment_method_type values
-  const methodLabel: Record<string, string> = {
-    // Raw PayMongo types returned by checkout-status
-    gcash:             'GCash',
-    card:              'Credit / Debit Card',
-    paymaya:           'Maya',
-    maya:              'Maya',
-    qrph:              'QR Ph',
-    grab_pay:          'GrabPay',
-    grabpay:           'GrabPay',
-    dob:               'BPI Online Banking',
-    dob_ubp:           'UnionBank Online',
-    bpi_online:        'BPI Online Banking',
-    unionbank_online:  'UnionBank Online',
-    brankas_bdo:       'BDO (Brankas)',
-    brankas_landbank:  'Landbank (Brankas)',
-    brankas_metrobank: 'Metrobank (Brankas)',
-    billease:          'BillEase',
-    // Normalized DB values (fallback)
-    GCASH:             'GCash',
-    CARD:              'Credit / Debit Card',
-    MAYA:              'Maya',
-    QRPH:              'QR Ph',
-    GRAB_PAY:          'GrabPay',
-    BPI:               'BPI Online Banking',
-    UNIONBANK:         'UnionBank Online',
-    BRANKAS_BDO:       'BDO',
-    BANK:              'Bank Transfer',
-    // Legacy / offline
-    wallet:            'E-Wallet',
-    online:            'Online Payment',
-    walkin:            'Walk-in',
-    cash:              'Cash',
-    cheque:            'Cheque',
-    bank:              'Bank Transfer',
-    other:             'Online Payment',
-  };
-
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -282,24 +309,30 @@ export default function PaymentSuccess() {
         transition={{ delay: 0.38 }}
         className="w-full max-w-xs bg-surface-container-high border border-outline-variant/10 rounded-2xl p-5 mb-8 text-left space-y-3"
       >
-        {amount > 0 && (
+        {paidAmount > 0 && (
           <div className="flex justify-between items-center">
             <span className="text-xs text-on-surface-variant uppercase tracking-wider font-semibold">Amount Paid</span>
             <span className="font-mono font-bold text-on-surface text-sm">
-              ₱{amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ₱{paidAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
             </span>
           </div>
         )}
         <div className="flex justify-between items-center">
           <span className="text-xs text-on-surface-variant uppercase tracking-wider font-semibold">Method</span>
           <span className="text-on-surface text-sm font-medium">
-            {methodLabel[resolvedMethodDisplay] ?? resolvedMethodDisplay}
+            {methodLabel[paidMethod] ?? paidMethod ?? 'Online Payment'}
           </span>
         </div>
-        {paymentId && (
+        {pmPaymentId && (
+          <div className="flex justify-between items-center gap-4">
+            <span className="text-xs text-on-surface-variant uppercase tracking-wider font-semibold shrink-0">PM Ref</span>
+            <span className="font-mono text-on-surface text-[10px] text-right break-all">{pmPaymentId}</span>
+          </div>
+        )}
+        {dbPaymentId && (
           <div className="flex justify-between items-center">
-            <span className="text-xs text-on-surface-variant uppercase tracking-wider font-semibold">Payment ID</span>
-            <span className="font-mono text-on-surface text-xs">#{paymentId}</span>
+            <span className="text-xs text-on-surface-variant uppercase tracking-wider font-semibold">Receipt #</span>
+            <span className="font-mono text-on-surface text-xs">#{dbPaymentId}</span>
           </div>
         )}
         <div className="flex justify-between items-center">

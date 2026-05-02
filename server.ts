@@ -340,7 +340,6 @@ async function startServer() {
       const password        = String(req.body.password ?? "");
       if (!usernameOrEmail || !password)
         return res.status(400).json({ success: false, message: "Please enter your username and password." });
-
       const [rows] = await pool.query<CustomerRow[]>(
         `SELECT customer_id, tenant_id, user_id, username, password, customer_no, first_name, last_name, contact_no, email, province, city, barangay, street, created_at, is_active
          FROM customers WHERE (username = ? OR email = ?) AND is_active = 1 LIMIT 1`,
@@ -549,10 +548,7 @@ async function startServer() {
         return res.status(400).json({ success: false, message: "amount, success_url and cancel_url are required." });
 
       const desc = description || "Loan Payment";
-
-      // FIX: Pass success_url exactly as received from the frontend.
-      // The frontend sends it with the literal string {CHECKOUT_SESSION_ID} which
-      // PayMongo replaces server-side. Do NOT encode or transform this URL.
+      // Pass success_url verbatim — PayMongo replaces {CHECKOUT_SESSION_ID} itself.
       const response = await fetch("https://api.paymongo.com/v1/checkout_sessions", {
         method: "POST",
         headers: PAYMONGO_HEADERS,
@@ -576,7 +572,6 @@ async function startServer() {
               ],
               description:      desc,
               reference_number: reference_no || "",
-              // Pass verbatim — PayMongo replaces {CHECKOUT_SESSION_ID} itself
               success_url:      success_url,
               cancel_url:       cancel_url,
               ...(billing_name || billing_email || billing_phone
@@ -603,9 +598,6 @@ async function startServer() {
   });
 
   // ── PayMongo: Get Checkout Session Status ─────────────────────────────────
-  // FIX: Use attrs.payment_status (session-level) as the primary success check,
-  // NOT payment.status (payment-object level) which can still be "pending" right
-  // after redirect even though the session is fully paid.
   app.get("/api/paymongo/checkout-status/:sessionId", async (req, res) => {
     try {
       const response = await fetch(
@@ -617,18 +609,16 @@ async function startServer() {
         return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to retrieve session." });
 
       const attrs = data.data.attributes;
-
-      // session-level payment_status: "unpaid" | "paid" | "processing"
       const sessionPaymentStatus = attrs.payment_status ?? "unpaid";
 
-      // Grab the first payment object for method + amount details
       const payment   = attrs.payments?.[0];
       const rawMethod = payment?.attributes?.payment_method_type
+        ?? payment?.attributes?.source?.type
         ?? payment?.payment_method_type
+        ?? attrs.payment_method_type
         ?? "other";
       const normalizedMethod = normalizeMethod(rawMethod);
 
-      // Amount: prefer session line_items total, fall back to payment object
       const lineItemsTotal = Array.isArray(attrs.line_items)
         ? attrs.line_items.reduce((sum: number, item: any) => sum + (item.amount ?? 0), 0) / 100
         : null;
@@ -641,7 +631,6 @@ async function startServer() {
 
       res.json({
         success:             true,
-        // FIX: return session-level payment_status — this is what PaymentSuccess checks
         payment_status:      sessionPaymentStatus,
         session_status:      attrs.status,
         payment_method_type: rawMethod,
@@ -726,11 +715,11 @@ async function startServer() {
         body: JSON.stringify({
           data: {
             attributes: {
-              amount:               Math.round(Number(amount) * 100),
-              currency:             "PHP",
+              amount:                 Math.round(Number(amount) * 100),
+              currency:               "PHP",
               payment_method_allowed: ["card"],
-              description:          description || "Loan Payment",
-              capture_type:         "automatic",
+              description:            description || "Loan Payment",
+              capture_type:           "automatic",
             },
           },
         }),
@@ -822,7 +811,18 @@ async function startServer() {
   // ── PayMongo: Record Payment ──────────────────────────────────────────────
   app.post("/api/paymongo/record-payment", async (req, res) => {
     try {
-      const { loan_id, amount, method, paymongo_source_id, paymongo_intent_id, paymongo_session_id, paymongo_method_type } = req.body;
+      // PATCHED: added paymongo_payment_id
+      const {
+        loan_id,
+        amount,
+        method,
+        paymongo_source_id,
+        paymongo_intent_id,
+        paymongo_session_id,
+        paymongo_method_type,
+        paymongo_payment_id,
+      } = req.body;
+
       if (!loan_id || !amount || !method)
         return res.status(400).json({ success: false, message: "Missing required fields." });
 
@@ -832,8 +832,8 @@ async function startServer() {
       const pmId  = paymongo_session_id ?? paymongo_source_id ?? paymongo_intent_id;
       const or_no = pmId ? `OR-PM-${String(pmId).slice(-8).toUpperCase()}` : `OR-${Date.now()}`;
 
-      // Deduplication guard
-      for (const pmRef of [paymongo_session_id, paymongo_source_id, paymongo_intent_id].filter(Boolean)) {
+      // Deduplication guard — PATCHED: also checks paymongo_payment_id
+      for (const pmRef of [paymongo_session_id, paymongo_source_id, paymongo_intent_id, paymongo_payment_id].filter(Boolean)) {
         const [existing] = await pool.query<RowDataPacket[]>(
           `SELECT payment_id FROM payments WHERE notes LIKE ? LIMIT 1`, [`%${pmRef}%`]
         );
@@ -853,11 +853,13 @@ async function startServer() {
       const newBalance = Math.max(0, Number(loan.remaining_balance) - payAmount);
       const isFullyPaid = newBalance <= 0;
 
+      // PATCHED: added PM Payment ID line to notes
       const notes = [
-        paymongo_session_id  ? `Session ID: ${paymongo_session_id}`  : null,
-        paymongo_source_id   ? `Source ID: ${paymongo_source_id}`    : null,
-        paymongo_intent_id   ? `Intent ID: ${paymongo_intent_id}`    : null,
-        paymongo_method_type ? `PM Type: ${paymongo_method_type}`    : null,
+        paymongo_session_id  ? `Session ID: ${paymongo_session_id}`          : null,
+        paymongo_source_id   ? `Source ID: ${paymongo_source_id}`            : null,
+        paymongo_intent_id   ? `Intent ID: ${paymongo_intent_id}`            : null,
+        paymongo_payment_id  ? `PM Payment ID: ${paymongo_payment_id}`       : null,
+        paymongo_method_type ? `PM Type: ${paymongo_method_type}`            : null,
       ].filter(Boolean).join(", ") || "PayMongo payment";
 
       const [payResult] = await pool.query<ResultSetHeader>(
@@ -880,14 +882,16 @@ async function startServer() {
         "payment"
       );
 
+      // PATCHED: added pm_payment_id to response
       res.json({
-        success:    true,
-        payment_id: payResult.insertId,
-        new_balance: newBalance,
-        fully_paid: isFullyPaid,
-        method:     normalizedMethod,
+        success:         true,
+        payment_id:      payResult.insertId,
+        pm_payment_id:   paymongo_payment_id ?? null,
+        new_balance:     newBalance,
+        fully_paid:      isFullyPaid,
+        method:          normalizedMethod,
         or_no,
-        message:    isFullyPaid ? "Loan fully paid!" : "Payment recorded successfully.",
+        message:         isFullyPaid ? "Loan fully paid!" : "Payment recorded successfully.",
       });
     } catch (err: any) {
       console.error("Record payment error:", err.message);
