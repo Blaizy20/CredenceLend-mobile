@@ -61,6 +61,8 @@ export default function PaymentSuccess() {
   useEffect(() => {
     if (hasRun.current) return;
     hasRun.current = true;
+    console.log('[PaymentSuccess] localStorage:', localStorage.getItem('paymongo_pending'));
+    console.log('[PaymentSuccess] URL params:', window.location.search);
     handleSuccess();
   }, []);
 
