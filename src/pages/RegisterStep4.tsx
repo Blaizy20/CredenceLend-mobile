@@ -5,6 +5,7 @@ import { TopBar } from '../components/TopBar';
 import { Button } from '../components/Button';
 import { Modal } from '../components/Modal';
 import { motion, AnimatePresence } from 'motion/react';
+import { API_BASE } from '../lib/api';
 
 export default function RegisterStep4() {
   const navigate = useNavigate();
@@ -57,7 +58,7 @@ export default function RegisterStep4() {
     setError('');
 
     try {
-      const response = await fetch('/api/auth/register', {
+      const response = await fetch(`${API_BASE}/api/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
