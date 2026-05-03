@@ -8,7 +8,6 @@ import {
 import { TopBar }   from '../components/TopBar';
 import { Button }   from '../components/Button';
 import { Input }    from '../components/Input';
-import { loansAPI } from '../lib/api';
 import { motion, AnimatePresence } from 'motion/react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -30,13 +29,11 @@ interface UploadDoc {
   file:  File;
 }
 
-// Co-maker docs collected in Step 2
 const COMAKER_DOCS = [
   { code: 'COMAKER_INFO', label: 'Co-maker Info Sheet', hint: 'Signed info / application form' },
-  { code: 'COMAKER_ID',   label: 'Co-maker Valid ID',   hint: 'Clear photo of co-maker\'s ID'  },
+  { code: 'COMAKER_ID',   label: 'Co-maker Valid ID',   hint: "Clear photo of co-maker's ID"  },
 ];
 
-// Friendly label for payment_term API value
 const TERM_LABELS: Record<string, string> = {
   daily:        'Daily',
   weekly:       'Weekly',
@@ -56,7 +53,7 @@ export default function ApplyLoanStep2() {
     if (!step1) navigate('/apply', { replace: true });
   }, [step1]);
 
-  const [formData, setFormData]         = useState<CoMakerForm>({
+  const [formData, setFormData] = useState<CoMakerForm>({
     first_name: '', last_name: '', contact_no: '',
     email: '', province: '', city: '', barangay: '', street: '',
   });
@@ -66,21 +63,18 @@ export default function ApplyLoanStep2() {
     COMAKER_ID:   null,
   });
 
-  const [errors, setErrors]           = useState<Record<string, string>>({});
-  const [submitting, setSubmitting]   = useState(false);
-  const [submitError, setSubmitError] = useState('');
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState('');
+  const [errors, setErrors]                   = useState<Record<string, string>>({});
+  const [submitting, setSubmitting]           = useState(false);
+  const [submitError, setSubmitError]         = useState('');
+  const [showConfirm, setShowConfirm]         = useState(false);
+  const [uploadProgress, setUploadProgress]   = useState('');
+  const [successStep, setSuccessStep]         = useState<'idle' | 'loading' | 'done'>('idle');
 
-  // success state — holds API response data
-  const [successData, setSuccessData]   = useState<{
-    reference_no:         string;
+  const [successData, setSuccessData] = useState<{
     instant_reason:       string;
     missing_requirements: string[];
     ci_required:          boolean;
   } | null>(null);
-
-  const [successStep, setSuccessStep] = useState<'idle' | 'loading' | 'done'>('idle');
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -101,7 +95,6 @@ export default function ApplyLoanStep2() {
     setComakerFiles(prev => ({ ...prev, [code]: file }));
   };
 
-  // Correct add-on monthly payment for summary display
   const perMonthPayment = step1
     ? (() => {
         const { principal_amount, interest_rate, term_months } = step1;
@@ -137,10 +130,10 @@ export default function ApplyLoanStep2() {
 
   const uploadFile = async (loanId: number, code: string, file: File): Promise<boolean> => {
     try {
-      const formData = new FormData();
-      formData.append('loan_id',          String(loanId));
-      formData.append('requirement_code', code);
-      formData.append('file',             file);
+      const fd = new FormData();
+      fd.append('loan_id',          String(loanId));
+      fd.append('requirement_code', code);
+      fd.append('file',             file);
 
       let token = '';
       try { token = JSON.parse(localStorage.getItem('user') || 'null')?.token ?? ''; } catch {}
@@ -148,7 +141,7 @@ export default function ApplyLoanStep2() {
       const res = await fetch('/api/loans/upload', {
         method:  'POST',
         headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body:    formData,
+        body:    fd,
       });
       return res.ok;
     } catch {
@@ -175,7 +168,6 @@ export default function ApplyLoanStep2() {
     setUploadProgress('Submitting loan application…');
 
     try {
-      // ── 1. Submit loan ──────────────────────────────────────────────────────
       const result = await loansAPI.applyLoan({
         customer_id:      user.customer_id,
         tenant_id:        user.tenant_id ?? 1,
@@ -205,7 +197,6 @@ export default function ApplyLoanStep2() {
 
       const loanId = result.data?.loan_id;
 
-      // ── 2. Upload documents (Step 1 docs + co-maker docs) ──────────────────
       const allDocs: { code: string; file: File }[] = [
         ...uploadDocs.map(d => ({ code: d.code, file: d.file })),
         ...COMAKER_DOCS
@@ -215,18 +206,15 @@ export default function ApplyLoanStep2() {
 
       if (loanId && allDocs.length > 0) {
         for (let i = 0; i < allDocs.length; i++) {
-          const doc = allDocs[i];
           setUploadProgress(`Uploading documents ${i + 1} of ${allDocs.length}…`);
-          await uploadFile(loanId, doc.code, doc.file);
+          await uploadFile(loanId, allDocs[i].code, allDocs[i].file);
         }
       }
 
-      // ── 3. Show success ─────────────────────────────────────────────────────
       setSuccessData({
-        reference_no:         result.data?.reference_no   ?? '—',
         instant_reason:       result.data?.instant_reason ?? '',
         missing_requirements: result.data?.missing_requirements ?? [],
-        ci_required:          result.data?.ci_required    ?? false,
+        ci_required:          result.data?.ci_required ?? false,
       });
       setUploadProgress('');
       setTimeout(() => setSuccessStep('done'), 600);
@@ -241,10 +229,9 @@ export default function ApplyLoanStep2() {
 
   if (!step1) return null;
 
-  // Friendly instant_reason message
   const reasonMessages: Record<string, string> = {
-    AUTO_PASSED_AWAITING_REQUIREMENTS:  'Your application passed initial checks. Please complete your document uploads for manager review.',
-    AUTO_PASSED_MANAGER_REVIEW_REQUIRED:'Your application is now pending manager review.',
+    AUTO_PASSED_AWAITING_REQUIREMENTS:   'Your application passed initial checks. Please complete your document uploads for manager review.',
+    AUTO_PASSED_MANAGER_REVIEW_REQUIRED: 'Your application is now pending manager review.',
     AMOUNT_EXCEEDS_AFFORDABILITY:        'Your application was denied — the amount exceeds your income threshold.',
     CI_REVIEW_REQUIRED:                  'Your application has been routed to a credit investigator for review.',
   };
@@ -584,15 +571,10 @@ export default function ApplyLoanStep2() {
                 {/* Text */}
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}
                   className="space-y-2 w-full">
-                  <h2 className="font-headline font-extrabold text-2xl text-on-surface">Application Submitted!</h2>
-
-                  {/* Reference number */}
-                  <div className="mt-2 px-4 py-2 bg-primary/8 rounded-xl border border-primary/20 inline-block w-full">
-                    <p className="text-[10px] text-primary uppercase tracking-widest font-bold">Reference No.</p>
-                    <p className="text-base font-mono font-bold text-on-surface">{successData.reference_no}</p>
-                  </div>
-
-                  {/* instant_reason message */}
+                  <h2 className="font-headline font-extrabold text-2xl text-on-surface">
+                    Application Submitted!
+                  </h2>
+                  {/* ✅ reference_no removed — instant_reason shown instead */}
                   {successData.instant_reason && (
                     <p className="text-on-surface-variant text-sm leading-relaxed mt-1">
                       {reasonMessages[successData.instant_reason] ?? successData.instant_reason}
