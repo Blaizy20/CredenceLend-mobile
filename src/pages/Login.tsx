@@ -18,10 +18,11 @@ function getGreeting() {
   return 'Working late';
 }
 
+// ✅ sessionStorage first — most recent selection always wins
 function getStoredTenant() {
   try {
-    return JSON.parse(localStorage.getItem('tenant')   || 'null')
-        ?? JSON.parse(sessionStorage.getItem('tenant') || 'null');
+    return JSON.parse(sessionStorage.getItem('tenant') || 'null')
+        ?? JSON.parse(localStorage.getItem('tenant')   || 'null');
   } catch { return null; }
 }
 
@@ -130,6 +131,10 @@ export default function Login() {
 
       const tenantPayload = JSON.stringify(tenantData);
 
+      // ✅ Always clear both storages first so stale tenant never bleeds through
+      localStorage.removeItem('tenant');
+      sessionStorage.removeItem('tenant');
+
       if (rememberTenant) {
         localStorage.setItem('tenant', tenantPayload);
       } else {
@@ -156,7 +161,6 @@ export default function Login() {
   const [usernameError, setUsernameError] = React.useState('');
   const [greeting, setGreeting]           = React.useState<{ name: string } | null>(null);
 
-  // Friendly display label for the subdomain
   const branchLabel = tenant?.subdomain
     ? tenant.subdomain.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
     : 'Main Branch';
@@ -175,7 +179,24 @@ export default function Login() {
     setLoading(true);
 
     try {
-      const result = await authAPI.login(trimmedUsername, trimmedPassword);
+      // ✅ Read tenant fresh at login time — sessionStorage first
+      let tenant_id = 0;
+      try {
+        const t = JSON.parse(sessionStorage.getItem('tenant') || 'null')
+               ?? JSON.parse(localStorage.getItem('tenant')   || 'null');
+        tenant_id = t?.tenant_id ?? 0;
+      } catch {}
+
+      const res = await fetch(`${API_BASE}/api/auth/login`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          username: trimmedUsername,
+          password: trimmedPassword,
+          tenant_id,
+        }),
+      });
+      const result = await res.json();
 
       if (result.success && result.customer) {
         localStorage.setItem('user', JSON.stringify(result.customer));
@@ -420,20 +441,15 @@ export default function Login() {
                     transition={{ duration: 0.4 }}
                     className="flex flex-col items-center"
                   >
-                    {/* Cooperative name — main identity */}
                     <h1 className="font-headline font-extrabold text-3xl tracking-tighter text-on-surface">
                       {tenant.tenant_name}
                     </h1>
-
-                    {/* Branch / subdomain — always shown, "Main Branch" as fallback */}
                     <div className="inline-flex items-center gap-1.5 mt-2.5 px-3 py-1 rounded-full bg-primary/10 border border-primary/20">
                       <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
                       <span className="text-primary text-xs font-semibold tracking-wide">
                         {branchLabel}
                       </span>
                     </div>
-
-                    {/* CredenceLend credit */}
                     <p className="text-on-surface-variant text-xs mt-2.5 font-medium">
                       powered by{' '}
                       <span className="text-primary font-semibold">CredenceLend</span>
@@ -524,6 +540,22 @@ export default function Login() {
                   </p>
                 </div>
               </div>
+
+              {/* ✅ Switch cooperative button */}
+              <button
+                onClick={() => {
+                  localStorage.removeItem('tenant');
+                  sessionStorage.removeItem('tenant');
+                  setTenant(null);
+                  setScreen('tenant');
+                  setCode(Array(CODE_LENGTH).fill(''));
+                  setCodeSuccess(false);
+                }}
+                className="mt-6 text-xs text-on-surface-variant hover:text-primary transition-colors font-medium"
+              >
+                Switch cooperative
+              </button>
+
             </div>
           </motion.div>
         )}
