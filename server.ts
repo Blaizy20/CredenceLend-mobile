@@ -463,6 +463,22 @@ async function startServer() {
 
   // ── Loans: Apply ──────────────────────────────────────────────────────────
   app.post("/api/loans/apply", async (req, res) => {
+    
+    const [activeLoans] = await pool.query<RowDataPacket[]>(
+      `SELECT loan_id FROM loans
+       WHERE customer_id = ? AND tenant_id = ?
+       AND status NOT IN ('Paid', 'Closed', 'Denied')
+       AND is_active = 1`,
+      [customer_id, tenant_id]
+    );
+
+    if (activeLoans.length > 0) {
+      return res.status(409).json({
+        success: false,
+        message: 'You already have an active loan. Please settle your current loan before applying for a new one.'
+      });
+    }
+
     try {
       const { customer_id, tenant_id, principal_amount, payment_term, interest_rate, term_months, id_type, collateral_type, co_maker } = req.body;
       if (!customer_id || !principal_amount || !payment_term || !collateral_type)
@@ -936,9 +952,9 @@ async function startServer() {
       );
       if (loanRows.length === 0) return res.status(404).json({ success: false, message: "Loan not found." });
 
-      const loan       = loanRows[0];
-      const payAmount  = Number(amount);
-      const newBalance = Math.max(0, Number(loan.remaining_balance) - payAmount);
+      const loan        = loanRows[0];
+      const payAmount   = Number(amount);
+      const newBalance  = Math.max(0, Number(loan.remaining_balance) - payAmount);
       const isFullyPaid = newBalance <= 0;
 
       const isGcashMethod      = normalizedMethod === "GCASH";
@@ -948,8 +964,8 @@ async function startServer() {
       const notes              = `Online Payment via PayMongo (${normalizedMethod})`;
 
       const [payResult] = await pool.query<ResultSetHeader>(
-        `INSERT INTO payments (loan_id, amount, payment_date, method, notes, tenant_id, or_no, gcash_reference_no, bank_reference_no)
-         VALUES (?, ?, CURDATE(), ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO payments (loan_id, amount, payment_date, method, status, notes, tenant_id, or_no, gcash_reference_no, bank_reference_no)
+         VALUES (?, ?, CURDATE(), ?, 'Paid', ?, ?, ?, ?, ?)`,
         [loan_id, payAmount, normalizedMethod, notes, loan.tenant_id, or_no, gcash_reference_no, bank_reference_no]
       );
 
