@@ -171,7 +171,8 @@ async function startServer() {
   app.use(cors({
     origin: [
       "https://credencelend-mobile.up.railway.app",
-      "capacitor://localhost",   // Android/iOS Capacitor WebView
+      "capacitor://localhost",   // Android/iOS Capacitor WebView (old)
+      "https://localhost",       // Android Capacitor WebView (Capacitor 3+)
       "http://localhost",
       "http://localhost:3000",
       "http://localhost:5173",   // Vite dev server
