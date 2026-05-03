@@ -33,7 +33,7 @@ export default function Transactions() {
       navigate('/login', { replace: true });
       return;
     }
-    if (!tenant?.tenant_id) {
+    if (!tenant?.DEFAULT_TENANT_ID) {
       navigate('/enter-code', { replace: true });
       return;
     }
