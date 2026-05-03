@@ -4,14 +4,17 @@ import { TopBar } from '../components/TopBar';
 import { BottomNav } from '../components/BottomNav';
 import { ReceiptText, ArrowUpRight, ArrowDownLeft, Calendar, FileDown, Loader2 } from 'lucide-react';
 import { motion } from 'motion/react';
+import { API_BASE } from '../lib/api';
 
 interface Transaction {
-  id:      number;
-  loan_id: number;
-  type:    string;
-  amount:  number | string;
-  date:    string;
-  status:  string;
+  payment_id:   number;
+  loan_id:      number;
+  reference_no: string;
+  amount:       number | string;
+  method:       string;
+  or_no:        string | null;
+  notes:        string | null;
+  created_at:   string;
 }
 
 export default function Transactions() {
@@ -22,17 +25,24 @@ export default function Transactions() {
 
   React.useEffect(() => {
     let user: any = null;
-    try { user = JSON.parse(localStorage.getItem('user') || 'null'); } catch {}
+    let tenant: any = null;
+    try { user   = JSON.parse(localStorage.getItem('user')   || 'null'); } catch {}
+    try { tenant = JSON.parse(localStorage.getItem('tenant') || 'null'); } catch {}
+
     if (!user?.customer_id) {
       navigate('/login', { replace: true });
       return;
     }
-    fetchTransactions(user.customer_id);
+    if (!tenant?.tenant_id) {
+      navigate('/enter-code', { replace: true });
+      return;
+    }
+    fetchTransactions(user.customer_id, tenant.tenant_id);
   }, [navigate]);
 
-  const fetchTransactions = async (customerId: number) => {
+  const fetchTransactions = async (customerId: number, tenantId: number) => {
     try {
-      const res  = await fetch(`/api/transactions/${customerId}`);
+      const res  = await fetch(`${API_BASE}/api/payments/customer/${customerId}?tenant_id=${tenantId}`);
       const data = await res.json();
       if (!res.ok) {
         setError(data?.message || 'Failed to load transactions.');
@@ -47,24 +57,29 @@ export default function Transactions() {
   };
 
   const formatTime = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    return new Date(dateString).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
   };
 
   const handleRequestHistory = () => {
     alert('Your full transaction history request has been received. A PDF report will be sent to your registered email address within 24 hours.');
   };
 
-  const groupTransactionsByDate = (txs: Transaction[]) => {
+  const groupByDate = (txs: Transaction[]) => {
     const groups: { [key: string]: Transaction[] } = {};
     txs.forEach(tx => {
-      const dateKey = new Date(tx.date).toLocaleDateString('en-US', {
+      const dateKey = new Date(tx.created_at).toLocaleDateString('en-US', {
         month: 'long', day: 'numeric', year: 'numeric',
       });
       if (!groups[dateKey]) groups[dateKey] = [];
       groups[dateKey].push(tx);
     });
     return groups;
+  };
+
+  const METHOD_LABELS: Record<string, string> = {
+    CASH: 'Cash', GCASH: 'GCash', MAYA: 'Maya', CARD: 'Card',
+    BANK: 'Bank Transfer', CHEQUE: 'Cheque', QRPH: 'QR Ph',
+    GRAB_PAY: 'GrabPay', BPI: 'BPI', UNIONBANK: 'UnionBank', OTHER: 'Other',
   };
 
   if (loading) {
@@ -98,7 +113,7 @@ export default function Transactions() {
   }
 
   const displayedTransactions = transactions.slice(0, 20);
-  const groupedTransactions   = groupTransactionsByDate(displayedTransactions);
+  const groupedTransactions   = groupByDate(displayedTransactions);
   const hasMore               = transactions.length > 20;
 
   return (
@@ -132,7 +147,7 @@ export default function Transactions() {
             </div>
             <h2 className="text-xl font-headline font-bold text-on-surface">No transactions</h2>
             <p className="text-on-surface-variant text-sm mt-2">
-              Your transaction history will appear here.
+              Your payment history will appear here once your loan is active.
             </p>
           </div>
         ) : (
@@ -143,50 +158,48 @@ export default function Transactions() {
                   <h3 className="text-[11px] font-bold text-primary uppercase tracking-[0.2em]">{date}</h3>
                 </div>
                 <div className="space-y-3">
-                  {txs.map((transaction, index) => {
-                    const isCredit = transaction.type === 'Loan Received';
-                    return (
-                      <motion.div
-                        key={transaction.id}
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: (groupIndex * 0.1) + (index * 0.05) }}
-                        className="bg-surface-container-low rounded-2xl p-4 flex items-center justify-between border border-outline-variant/20 shadow-sm"
-                      >
-                        <div className="flex items-center gap-4">
-                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                            isCredit ? 'bg-green-500/10 text-green-600' : 'bg-blue-500/10 text-blue-600'
-                          }`}>
-                            {isCredit ? <ArrowDownLeft size={20} /> : <ArrowUpRight size={20} />}
-                          </div>
-                          <div>
-                            <h4 className="font-bold text-sm text-on-surface">{transaction.type}</h4>
-                            <div className="flex items-center gap-2 text-on-surface-variant text-[10px] mt-0.5">
-                              <span className="flex items-center gap-1">
-                                <Calendar size={10} className="text-outline/40" />
-                                {formatTime(transaction.date)}
-                              </span>
-                              <span className="text-outline/20">|</span>
-                              <span className="font-mono bg-surface-container-high px-1.5 rounded text-outline">
-                                #{String(transaction.id).slice(-5)}
-                              </span>
-                            </div>
-                          </div>
+                  {txs.map((tx, index) => (
+                    <motion.div
+                      key={tx.payment_id}
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: (groupIndex * 0.1) + (index * 0.05) }}
+                      className="bg-surface-container-low rounded-2xl p-4 flex items-center justify-between border border-outline-variant/20 shadow-sm"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-blue-500/10 text-blue-600">
+                          <ArrowUpRight size={20} />
                         </div>
-                        <div className="text-right">
-                          <p className={`font-bold text-sm ${isCredit ? 'text-green-600' : 'text-on-surface'}`}>
-                            {isCredit ? '+' : '-'} ₱{Number(transaction.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                          </p>
-                          <div className="flex items-center justify-end gap-1 mt-1">
-                            <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                            <span className="text-[9px] text-green-700 font-bold uppercase tracking-wider">
-                              {transaction.status}
+                        <div>
+                          <h4 className="font-bold text-sm text-on-surface">
+                            {METHOD_LABELS[tx.method] ?? tx.method} Payment
+                          </h4>
+                          <div className="flex items-center gap-2 text-on-surface-variant text-[10px] mt-0.5">
+                            <span className="flex items-center gap-1">
+                              <Calendar size={10} className="text-outline/40" />
+                              {formatTime(tx.created_at)}
+                            </span>
+                            <span className="text-outline/20">|</span>
+                            <span className="font-mono bg-surface-container-high px-1.5 rounded text-outline">
+                              {tx.reference_no}
                             </span>
                           </div>
+                          {tx.or_no && (
+                            <p className="text-[9px] text-on-surface-variant mt-0.5">OR #{tx.or_no}</p>
+                          )}
                         </div>
-                      </motion.div>
-                    );
-                  })}
+                      </div>
+                      <div className="text-right">
+                        <p className="font-bold text-sm text-on-surface">
+                          − ₱{Number(tx.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </p>
+                        <div className="flex items-center justify-end gap-1 mt-1">
+                          <div className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                          <span className="text-[9px] text-green-700 font-bold uppercase tracking-wider">Paid</span>
+                        </div>
+                      </div>
+                    </motion.div>
+                  ))}
                 </div>
               </div>
             ))}
@@ -199,7 +212,7 @@ export default function Transactions() {
                   </div>
                   <h4 className="font-bold text-on-surface mb-2">Need more history?</h4>
                   <p className="text-xs text-on-surface-variant mb-6 leading-relaxed">
-                    We only show your 20 most recent activities here. You can request a full PDF statement of your account.
+                    We only show your 20 most recent payments here. Request a full PDF statement of your account.
                   </p>
                   <button
                     onClick={handleRequestHistory}

@@ -581,16 +581,20 @@ async function startServer() {
   // ── Payments: All by Customer ─────────────────────────────────────────────
   app.get("/api/payments/customer/:customerId", async (req, res) => {
     try {
+      const tenant_id = Number(req.query.tenant_id || 0);
+      if (!tenant_id) return res.status(400).json({ success: false, message: "Cooperative is required." });
+
       const [rows] = await pool.query<RowDataPacket[]>(
         `SELECT p.payment_id, p.loan_id, p.amount, p.method, p.or_no,
                 p.notes, l.reference_no,
                 COALESCE(p.created_at, p.payment_date) AS created_at
          FROM payments p
          JOIN loans l ON l.loan_id = p.loan_id
-         WHERE l.customer_id = ?
+         JOIN customers c ON c.customer_id = l.customer_id
+         WHERE l.customer_id = ? AND c.tenant_id = ?
          ORDER BY COALESCE(p.created_at, p.payment_date) DESC, p.payment_id DESC
          LIMIT 50`,
-        [req.params.customerId]
+        [req.params.customerId, tenant_id]
       );
       res.json(rows);
     } catch (err: any) {
