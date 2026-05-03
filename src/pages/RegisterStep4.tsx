@@ -7,6 +7,17 @@ import { Modal } from '../components/Modal';
 import { motion, AnimatePresence } from 'motion/react';
 import { API_BASE } from '../lib/api';
 
+// ✅ sessionStorage first — most recent tenant always wins
+function getStoredTenantId(): number {
+  try {
+    const t = JSON.parse(sessionStorage.getItem('tenant') || 'null')
+           ?? JSON.parse(localStorage.getItem('tenant')   || 'null');
+    return Number(t?.tenant_id ?? 0);
+  } catch {
+    return 0;
+  }
+}
+
 export default function RegisterStep4() {
   const navigate = useNavigate();
   const [data, setData]               = useState<any>(null);
@@ -17,7 +28,6 @@ export default function RegisterStep4() {
   const [error, setError]             = useState('');
   const [showConfirm, setShowConfirm] = useState(false);
 
-  // 'idle' | 'loading' | 'done'
   const [successStep, setSuccessStep] = useState<'idle' | 'loading' | 'done'>('idle');
 
   useEffect(() => {
@@ -58,6 +68,15 @@ export default function RegisterStep4() {
     setError('');
 
     try {
+      // ✅ Read tenant_id fresh at submit time
+      const tenant_id = getStoredTenantId();
+
+      if (!tenant_id) {
+        setError('Cooperative verification is missing. Please go back to login and enter your cooperative code.');
+        setLoading(false);
+        return;
+      }
+
       const response = await fetch(`${API_BASE}/api/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -72,6 +91,7 @@ export default function RegisterStep4() {
           city:       data.city,
           barangay:   data.barangay,
           street:     data.street,
+          tenant_id,  // ✅ now included
         }),
       });
 
@@ -85,7 +105,6 @@ export default function RegisterStep4() {
 
       localStorage.removeItem('registerData');
 
-      // ── Show loading → then success screen ──
       setSuccessStep('loading');
       setTimeout(() => setSuccessStep('done'), 2200);
 
@@ -363,7 +382,6 @@ export default function RegisterStep4() {
                 exit={{ opacity: 0, scale: 0.85 }}
                 className="flex flex-col items-center gap-6"
               >
-                {/* Pulsing ring spinner */}
                 <div className="relative w-24 h-24 flex items-center justify-center">
                   <motion.div
                     animate={{ scale: [1, 1.3, 1], opacity: [0.4, 0, 0.4] }}
@@ -384,7 +402,6 @@ export default function RegisterStep4() {
                   <p className="font-headline font-bold text-xl text-on-surface">Creating Your Account</p>
                   <p className="text-on-surface-variant text-sm">Please wait a moment…</p>
                 </div>
-                {/* Animated dots */}
                 <div className="flex gap-2">
                   {[0, 1, 2].map(i => (
                     <motion.div key={i} className="w-2 h-2 rounded-full bg-primary"
@@ -403,7 +420,6 @@ export default function RegisterStep4() {
                 transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
                 className="flex flex-col items-center gap-6 text-center max-w-xs"
               >
-                {/* Checkmark */}
                 <motion.div
                   initial={{ scale: 0 }}
                   animate={{ scale: 1 }}
@@ -419,7 +435,6 @@ export default function RegisterStep4() {
                   </motion.div>
                 </motion.div>
 
-                {/* Text */}
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -434,7 +449,6 @@ export default function RegisterStep4() {
                   </p>
                 </motion.div>
 
-                {/* Buttons */}
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
