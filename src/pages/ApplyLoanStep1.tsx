@@ -1,51 +1,108 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { X, ArrowRight, Camera, Paperclip, FileText } from 'lucide-react';
+import { X, ArrowRight, Camera } from 'lucide-react';
 import { TopBar } from '../components/TopBar';
 import { Button } from '../components/Button';
 import { Input } from '../components/Input';
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
 const TERM_OPTIONS = [
-  { label: 'Daily',        rate: 2.75, months: 30 },
-  { label: 'Weekly',       rate: 3.0,  months: 12 },
-  { label: 'Semi-monthly', rate: 3.5,  months: 24 },
-  { label: 'Monthly',      rate: 4.0,  months: 12 },
+  { label: 'Daily',        apiValue: 'daily',       rate: 2.75, periodsPerMonth: 30    },
+  { label: 'Weekly',       apiValue: 'weekly',      rate: 3.0,  periodsPerMonth: 4.33  },
+  { label: 'Semi-monthly', apiValue: 'semi_monthly', rate: 3.5,  periodsPerMonth: 2    },
+  { label: 'Monthly',      apiValue: 'monthly',     rate: 4.0,  periodsPerMonth: 1     },
 ];
 
-const ID_TYPES = ["Driver's License", "Passport", "National ID"];
+const COLLATERAL_TYPES = [
+  'ORCR (Vehicle)',
+  'Real Estate',
+  'Jewelry',
+  'Savings Deposit',
+  'Equipment',
+  'Other',
+];
+
+const ID_TYPES = [
+  "Driver's License",
+  'Passport',
+  'National ID',
+  'Postal ID',
+  'PhilSys ID',
+];
+
+// Docs collected in Step 1 — mapped to backend requirement_code
+const STEP1_DOCS = [
+  { code: 'VALID_ID',         label: 'Valid ID — Front',    hint: 'Clear photo of front side',      required: true,  collateralOnly: false },
+  { code: 'VALID_ID',         label: 'Valid ID — Back',     hint: 'Clear photo of back side',       required: true,  collateralOnly: false },
+  { code: 'PROOF_OF_BILLING', label: 'Proof of Billing',    hint: 'Utility bill or bank statement', required: true,  collateralOnly: false },
+  { code: 'PROOF_OF_INCOME',  label: 'Proof of Income',     hint: 'Payslip, ITR, or certificate',   required: true,  collateralOnly: false },
+  { code: 'COLLATERAL_PROOF', label: 'Collateral Proof',    hint: 'Photo or document of collateral', required: false, collateralOnly: true },
+  { code: 'COLLATERAL_TYPE',  label: 'Collateral Type Doc', hint: 'e.g. OR/CR, title, appraisal',   required: false, collateralOnly: true },
+];
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface DocSlot {
+  code:     string;
+  label:    string;
+  file:     File | null;
+  required: boolean;
+}
 
 interface Step1Data {
-  amount: string;
-  term: string;
-  id_type: string;
-  collateral_type: string;
-  idFront: string;
-  idBack: string;
-  collateralProof: string;
-  otherDocs: string[];
+  amount:           string;
+  term:             string;
+  term_months:      string;
+  id_type:          string;
+  collateral_type:  string;
+  collateral_notes: string;
+  docs:             DocSlot[];
 }
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export default function ApplyLoanStep1() {
   const navigate = useNavigate();
 
   const [formData, setFormData] = useState<Step1Data>({
-    amount: '',
-    term: 'Semi-monthly',
-    id_type: "Driver's License",
-    collateral_type: '',
-    idFront: '',
-    idBack: '',
-    collateralProof: '',
-    otherDocs: ['', '', ''],
+    amount:           '',
+    term:             'Monthly',
+    term_months:      '12',
+    id_type:          "Driver's License",
+    collateral_type:  '',
+    collateral_notes: '',
+    docs: STEP1_DOCS.map(d => ({ code: d.code, label: d.label, file: null, required: d.required })),
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
-  const handleFileChange = (
-    e: React.ChangeEvent<HTMLInputElement>,
-    field: string,
-    idx?: number
-  ) => {
+  // ── Live Breakdown ──────────────────────────────────────────────────────────
+
+  const breakdown = useMemo(() => {
+    const principal  = Number(formData.amount);
+    const months     = parseInt(formData.term_months, 10);
+    const termOption = TERM_OPTIONS.find(t => t.label === formData.term) ?? TERM_OPTIONS[3];
+
+    if (!principal || principal <= 0 || !months || months <= 0) return null;
+
+    // Add-on interest: rate is per MONTH applied each month of the loan
+    const totalInterest = principal * (termOption.rate / 100) * months;
+    const totalPayable  = principal + totalInterest;
+    const totalPeriods  = Math.round(months * termOption.periodsPerMonth);
+    const perPayment    = totalPeriods > 0 ? totalPayable / totalPeriods : 0;
+
+    const periodLabel =
+      formData.term === 'Daily'        ? 'day' :
+      formData.term === 'Weekly'       ? 'week' :
+      formData.term === 'Semi-monthly' ? '15-day period' : 'month';
+
+    return { rate: termOption.rate, totalInterest, totalPayable, totalPeriods, perPayment, periodLabel };
+  }, [formData.amount, formData.term, formData.term_months]);
+
+  // ── File Handling ───────────────────────────────────────────────────────────
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, idx: number) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) {
@@ -53,24 +110,19 @@ export default function ApplyLoanStep1() {
       e.target.value = '';
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const result = ev.target?.result as string;
-      setFormData(f => {
-        if (field === 'otherDocs' && idx !== undefined) {
-          const updated = [...f.otherDocs];
-          updated[idx] = result;
-          return { ...f, otherDocs: updated };
-        }
-        return { ...f, [field]: result };
-      });
-    };
-    reader.readAsDataURL(file);
+    setFormData(f => {
+      const docs = [...f.docs];
+      docs[idx]  = { ...docs[idx], file };
+      return { ...f, docs };
+    });
   };
+
+  // ── Validation ──────────────────────────────────────────────────────────────
 
   const validate = () => {
     const newErrors: Record<string, string> = {};
-    const amt = Number(formData.amount);
+    const amt    = Number(formData.amount);
+    const months = parseInt(formData.term_months, 10);
 
     if (!formData.amount || isNaN(amt) || amt <= 0)
       newErrors.amount = 'Please enter a valid loan amount.';
@@ -79,29 +131,61 @@ export default function ApplyLoanStep1() {
     else if (amt > 500000)
       newErrors.amount = 'Maximum loan amount is ₱500,000.';
 
-    if (!formData.collateral_type.trim())
-      newErrors.collateral_type = 'Please specify a collateral type.';
+    if (!formData.term_months || isNaN(months) || months < 1)
+      newErrors.term_months = 'Please enter a valid number of months.';
+    else if (months > 180)
+      newErrors.term_months = 'Maximum term is 180 months (15 years).';
+
+    if (!formData.collateral_type)
+      newErrors.collateral_type = 'Please select a collateral type.';
+
+    // Enforce required docs (only non-collateral docs checked when no collateral selected)
+    const missingDocs = formData.docs.filter((d, idx) => {
+      const def = STEP1_DOCS[idx];
+      if (def.collateralOnly && !formData.collateral_type) return false;
+      return d.required && !d.file;
+    }).map(d => d.label);
+
+    if (missingDocs.length > 0)
+      newErrors.docs = `Missing required documents: ${missingDocs.join(', ')}`;
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
+  // ── Navigation ──────────────────────────────────────────────────────────────
+
   const handleNext = () => {
     if (!validate()) return;
-    const selectedTerm = TERM_OPTIONS.find(t => t.label === formData.term) ?? TERM_OPTIONS[2];
+
+    const termOption = TERM_OPTIONS.find(t => t.label === formData.term) ?? TERM_OPTIONS[3];
+    const months     = parseInt(formData.term_months, 10);
+
     navigate('/apply/step2', {
       state: {
         step1: {
-          principal_amount: Number(formData.amount),
-          payment_term:     selectedTerm.label,
-          interest_rate:    selectedTerm.rate,
-          term_months:      selectedTerm.months,
-          id_type:          formData.id_type,
-          collateral_type:  formData.collateral_type.trim(),
+          principal_amount:  Number(formData.amount),
+          payment_term:      termOption.apiValue,
+          payment_term_label: formData.term,
+          interest_rate:     termOption.rate,
+          term_months:       months,
+          id_type:           formData.id_type,
+          collateral_type:   formData.collateral_type,
+          collateral_notes:  formData.collateral_notes.trim(),
         },
+        // Raw File objects — uploaded AFTER loan_id is returned in Step 2
+        uploadDocs: formData.docs
+          .filter((d, idx) => {
+            const def = STEP1_DOCS[idx];
+            if (def.collateralOnly && !formData.collateral_type) return false;
+            return d.file !== null;
+          })
+          .map(d => ({ code: d.code, label: d.label, file: d.file! })),
       },
     });
   };
+
+  // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen bg-background pb-32">
@@ -116,6 +200,7 @@ export default function ApplyLoanStep1() {
       />
 
       <main className="pt-24 px-6 max-w-md mx-auto">
+
         {/* Progress */}
         <div className="mb-8">
           <div className="flex items-center gap-2 mb-2">
@@ -128,7 +213,7 @@ export default function ApplyLoanStep1() {
         </div>
 
         {/* Loan Amount & Term */}
-        <section className="space-y-6 mb-10">
+        <section className="space-y-5 mb-10">
           <Input
             label="REQUESTED AMOUNT"
             placeholder="0.00"
@@ -139,10 +224,11 @@ export default function ApplyLoanStep1() {
             onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
             error={errors.amount}
           />
-          <p className="text-xs text-on-surface-variant -mt-4 ml-1">
+          <p className="text-xs text-on-surface-variant -mt-3 ml-1">
             Minimum: ₱1,000 · Maximum: ₱500,000
           </p>
 
+          {/* Payment Term — clean labels only */}
           <div className="space-y-2">
             <label className="block text-[10px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">
               PAYMENT TERM
@@ -153,20 +239,73 @@ export default function ApplyLoanStep1() {
               className="w-full bg-surface-container-highest border-none focus:ring-2 focus:ring-primary/50 rounded-xl py-4 px-4 text-on-surface font-medium transition-all appearance-none"
             >
               {TERM_OPTIONS.map(t => (
-                <option key={t.label} value={t.label}>
-                  {t.label} ({t.rate}% interest rate)
-                </option>
+                <option key={t.label} value={t.label}>{t.label}</option>
               ))}
             </select>
           </div>
+
+          {/* Loan Duration */}
+          <Input
+            label="LOAN DURATION (MONTHS)"
+            placeholder="e.g. 12"
+            type="number"
+            value={formData.term_months}
+            onChange={(e) => setFormData({ ...formData, term_months: e.target.value })}
+            error={errors.term_months}
+          />
+          <p className="text-xs text-on-surface-variant -mt-3 ml-1">
+            1 month minimum · 180 months (15 years) maximum
+          </p>
+
+          {/* Live Breakdown Card */}
+          {breakdown ? (
+            <div className="rounded-2xl bg-primary/8 border border-primary/20 p-5 space-y-3">
+              <p className="text-[10px] font-bold tracking-widest text-primary uppercase">Loan Breakdown</p>
+              <div className="grid grid-cols-2 gap-y-3">
+                <div>
+                  <p className="text-[10px] text-on-surface-variant uppercase tracking-wider">Interest Rate</p>
+                  <p className="text-sm font-semibold text-on-surface">{breakdown.rate}% / month</p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-on-surface-variant uppercase tracking-wider">Total Periods</p>
+                  <p className="text-sm font-semibold text-on-surface">
+                    {breakdown.totalPeriods} {breakdown.periodLabel}{breakdown.totalPeriods !== 1 ? 's' : ''}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-on-surface-variant uppercase tracking-wider">Per Payment</p>
+                  <p className="text-sm font-bold text-primary">
+                    ₱{breakdown.perPayment.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-on-surface-variant uppercase tracking-wider">Total Interest</p>
+                  <p className="text-sm font-semibold text-on-surface">
+                    ₱{breakdown.totalInterest.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                </div>
+              </div>
+              <div className="border-t border-primary/20 pt-3 flex justify-between items-center">
+                <p className="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Total Payable</p>
+                <p className="text-base font-extrabold text-on-surface">
+                  ₱{breakdown.totalPayable.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-2xl bg-surface-container-low border border-outline-variant/20 p-5">
+              <p className="text-xs text-on-surface-variant text-center">
+                Enter an amount and duration to see your loan breakdown.
+              </p>
+            </div>
+          )}
         </section>
 
         {/* Applicant ID Information */}
-        <section className="space-y-6 mb-10">
+        <section className="space-y-5 mb-10">
           <h3 className="text-sm font-bold tracking-wider text-primary/80 uppercase">
             Applicant ID Information
           </h3>
-
           <div className="space-y-2">
             <label className="block text-[10px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">
               ID TYPE
@@ -181,133 +320,110 @@ export default function ApplyLoanStep1() {
               ))}
             </select>
           </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            {/* ID Front */}
-            <div className="space-y-3">
-              <label className="block text-[10px] font-bold tracking-widest text-on-surface-variant uppercase">
-                VALID ID (FRONT)
-                <span className="ml-1 text-outline normal-case tracking-normal font-normal">— optional</span>
-              </label>
-              <div className="aspect-[3/2] bg-surface-container-low rounded-xl border-2 border-dashed border-outline-variant/30 flex flex-col items-center justify-center p-4 text-center group hover:border-primary/50 transition-colors">
-                <Camera className="text-outline group-hover:text-primary transition-colors mb-2" size={24} />
-                <input
-                  type="file"
-                  accept="image/*,application/pdf"
-                  style={{ display: 'none' }}
-                  id="idFrontUpload"
-                  onChange={e => handleFileChange(e, 'idFront')}
-                />
-                <label htmlFor="idFrontUpload" className="bg-primary/10 text-primary text-[10px] font-bold px-3 py-1.5 rounded-full uppercase tracking-tighter cursor-pointer">
-                  CHOOSE FILE
-                </label>
-                {formData.idFront
-                  ? <span className="text-xs text-green-600 mt-1">Attached ✓</span>
-                  : <span className="text-xs text-outline mt-1">No file selected</span>
-                }
-              </div>
-            </div>
-
-            {/* ID Back */}
-            <div className="space-y-3">
-              <label className="block text-[10px] font-bold tracking-widest text-on-surface-variant uppercase">
-                VALID ID (BACK)
-                <span className="ml-1 text-outline normal-case tracking-normal font-normal">— optional</span>
-              </label>
-              <div className="aspect-[3/2] bg-surface-container-low rounded-xl border-2 border-dashed border-outline-variant/30 flex flex-col items-center justify-center p-4 text-center group hover:border-primary/50 transition-colors">
-                <Camera className="text-outline group-hover:text-primary transition-colors mb-2" size={24} />
-                <input
-                  type="file"
-                  accept="image/*,application/pdf"
-                  style={{ display: 'none' }}
-                  id="idBackUpload"
-                  onChange={e => handleFileChange(e, 'idBack')}
-                />
-                <label htmlFor="idBackUpload" className="bg-primary/10 text-primary text-[10px] font-bold px-3 py-1.5 rounded-full uppercase tracking-tighter cursor-pointer">
-                  CHOOSE FILE
-                </label>
-                {formData.idBack
-                  ? <span className="text-xs text-green-600 mt-1">Attached ✓</span>
-                  : <span className="text-xs text-outline mt-1">No file selected</span>
-                }
-              </div>
-            </div>
-          </div>
         </section>
 
         {/* Collateral Information */}
-        <section className="space-y-6 mb-10">
+        <section className="space-y-5 mb-10">
           <h3 className="text-sm font-bold tracking-wider text-primary/80 uppercase">
             Collateral Information
           </h3>
-          <Input
-            label="COLLATERAL TYPE"
-            placeholder="e.g. Real Estate, Vehicle, Jewelry"
-            value={formData.collateral_type}
-            onChange={(e) => setFormData({ ...formData, collateral_type: e.target.value })}
-            error={errors.collateral_type}
-          />
-
-          <div className="flex items-center justify-between p-4 bg-surface-container-low rounded-xl border border-white/5">
-            <div className="flex items-center gap-3">
-              <Paperclip className="text-primary" size={20} />
-              <div>
-                <p className="text-sm font-medium">Collateral Proof</p>
-                <p className="text-xs text-on-surface-variant">Optional</p>
-              </div>
-            </div>
-            <div className="flex flex-col items-end gap-1">
-              <input
-                type="file"
-                accept="image/*,application/pdf"
-                style={{ display: 'none' }}
-                id="collateralProofUpload"
-                onChange={e => handleFileChange(e, 'collateralProof')}
-              />
-              <label htmlFor="collateralProofUpload" className="bg-primary text-on-primary-container text-[10px] font-bold px-4 py-2 rounded-lg uppercase tracking-wider shadow-lg shadow-primary/20 cursor-pointer">
-                CHOOSE FILE
-              </label>
-              {formData.collateralProof
-                ? <span className="text-xs text-green-600">Attached ✓</span>
-                : <span className="text-xs text-outline">No file selected</span>
-              }
-            </div>
+          <div className="space-y-2">
+            <label className="block text-[10px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">
+              COLLATERAL TYPE <span className="text-error">*</span>
+            </label>
+            <select
+              value={formData.collateral_type}
+              onChange={(e) => setFormData({ ...formData, collateral_type: e.target.value })}
+              className={`w-full bg-surface-container-highest border-none focus:ring-2 focus:ring-primary/50 rounded-xl py-4 px-4 text-on-surface font-medium transition-all appearance-none ${
+                errors.collateral_type ? 'ring-2 ring-error/50' : ''
+              }`}
+            >
+              <option value="">Select collateral type…</option>
+              {COLLATERAL_TYPES.map(ct => (
+                <option key={ct} value={ct}>{ct}</option>
+              ))}
+            </select>
+            {errors.collateral_type && (
+              <p className="text-xs text-error ml-1">{errors.collateral_type}</p>
+            )}
           </div>
+          <Input
+            label="COLLATERAL NOTES"
+            placeholder="e.g. Honda Click 125, 2022 model"
+            value={formData.collateral_notes}
+            onChange={(e) => setFormData({ ...formData, collateral_notes: e.target.value })}
+          />
+          <p className="text-xs text-on-surface-variant -mt-3 ml-1">
+            Describe the collateral (brand, model, address, etc.)
+          </p>
         </section>
 
-        {/* Other Documents */}
-        <section className="space-y-6 mb-10">
-          <h3 className="text-sm font-bold tracking-wider text-primary/80 uppercase">
-            Other Documents
-            <span className="ml-1 text-outline normal-case font-normal text-xs tracking-normal">— optional</span>
-          </h3>
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="flex items-center justify-between p-4 bg-surface-container-low rounded-xl border border-white/5">
-              <div className="flex items-center gap-3">
-                <FileText className="text-primary" size={20} />
-                <div>
-                  <p className="text-sm font-medium">Document {i}</p>
-                  <p className="text-xs text-on-surface-variant">Optional</p>
+        {/* Required Documents */}
+        <section className="space-y-4 mb-10">
+          <div className="flex items-baseline justify-between">
+            <h3 className="text-sm font-bold tracking-wider text-primary/80 uppercase">
+              Required Documents
+            </h3>
+            <span className="text-[10px] text-on-surface-variant">* = required</span>
+          </div>
+
+          {errors.docs && (
+            <div className="rounded-xl bg-error/10 border border-error/30 px-4 py-3">
+              <p className="text-xs text-error font-medium">{errors.docs}</p>
+            </div>
+          )}
+
+          {STEP1_DOCS.map((docDef, idx) => {
+            // Hide collateral docs until a collateral type is chosen
+            if (docDef.collateralOnly && !formData.collateral_type) return null;
+            const doc = formData.docs[idx];
+
+            return (
+              <div
+                key={`${docDef.code}-${idx}`}
+                className={`flex items-center justify-between p-4 rounded-xl border transition-colors ${
+                  doc.file
+                    ? 'bg-primary/5 border-primary/25'
+                    : docDef.required
+                    ? 'bg-surface-container-low border-error/20'
+                    : 'bg-surface-container-low border-white/5'
+                }`}
+              >
+                <div className="flex items-center gap-3 flex-1 min-w-0 mr-3">
+                  <Camera
+                    className={doc.file ? 'text-primary' : docDef.required ? 'text-error/60' : 'text-outline'}
+                    size={20}
+                  />
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">
+                      {docDef.label}
+                      {docDef.required && <span className="text-error ml-1">*</span>}
+                    </p>
+                    <p className="text-xs text-on-surface-variant truncate">{docDef.hint}</p>
+                  </div>
+                </div>
+                <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                  <input
+                    type="file"
+                    accept="image/*,application/pdf"
+                    style={{ display: 'none' }}
+                    id={`docUpload_${idx}`}
+                    onChange={e => handleFileChange(e, idx)}
+                  />
+                  <label
+                    htmlFor={`docUpload_${idx}`}
+                    className="bg-primary text-on-primary-container text-[10px] font-bold px-3 py-2 rounded-lg uppercase tracking-wider cursor-pointer whitespace-nowrap"
+                  >
+                    {doc.file ? 'REPLACE' : 'CHOOSE FILE'}
+                  </label>
+                  {doc.file
+                    ? <span className="text-[10px] text-green-600 max-w-[80px] truncate">✓ {doc.file.name}</span>
+                    : <span className="text-[10px] text-outline">No file</span>
+                  }
                 </div>
               </div>
-              <div className="flex flex-col items-end gap-1">
-                <input
-                  type="file"
-                  accept="image/*,application/pdf"
-                  style={{ display: 'none' }}
-                  id={`otherDocUpload${i}`}
-                  onChange={e => handleFileChange(e, 'otherDocs', i - 1)}
-                />
-                <label htmlFor={`otherDocUpload${i}`} className="bg-primary text-on-primary-container text-[10px] font-bold px-4 py-2 rounded-lg uppercase tracking-wider shadow-lg shadow-primary/20 cursor-pointer">
-                  CHOOSE FILE
-                </label>
-                {formData.otherDocs[i - 1]
-                  ? <span className="text-xs text-green-600">Attached ✓</span>
-                  : <span className="text-xs text-outline">No file selected</span>
-                }
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </section>
 
         {/* Next Button */}
@@ -318,6 +434,7 @@ export default function ApplyLoanStep1() {
             </Button>
           </div>
         </div>
+
       </main>
     </div>
   );

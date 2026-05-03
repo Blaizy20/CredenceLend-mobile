@@ -2,22 +2,74 @@ import { Capacitor } from '@capacitor/core';
 
 const RAILWAY_URL = 'https://credencelend-mobile.up.railway.app';
 
-// Web (browser/Railway) → relative URLs (empty string, same origin)
-// Android/iOS native   → absolute Railway URL (no origin exists on device)
 const BASE = Capacitor.isNativePlatform()
   ? RAILWAY_URL
   : (import.meta.env.VITE_API_URL ?? '');
 
-// Export so Inbox.tsx, Transactions.tsx, and any other direct-fetch files
-// can use the same base URL without duplicating the logic
 export { BASE as API_BASE };
+
+// ─── Auth token helper ────────────────────────────────────────────────────────
+// Reads Bearer token from the stored user object once and returns headers.
+// Every protected endpoint uses this instead of duplicating token logic.
+function authHeaders(): Record<string, string> {
+  try {
+    const user = JSON.parse(localStorage.getItem('user') || 'null');
+    if (user?.token) return { Authorization: `Bearer ${user.token}` };
+  } catch {}
+  return {};
+}
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export interface ComakerPayload {
+  full_name:    string;
+  phone_number: string;
+  relationship: string;
+  email?:       string;
+  address?:     string;
+  notes?:       string;
+}
+
+export interface LoanApplyPayload {
+  customer_id:       number;
+  tenant_id:         number;
+  principal_amount:  number;
+  payment_term:      string;   // 'daily' | 'weekly' | 'semi_monthly' | 'monthly'
+  interest_rate:     number;
+  term_months:       number;
+  id_type:           string;
+  collateral_type:   string;
+  collateral_notes?: string;
+  comakers?:         ComakerPayload[];
+  notes?:            string;
+}
+
+export interface LoanApplyResponse {
+  success:   boolean;
+  message?:  string;
+  error_code?: string;
+  data?: {
+    loan_id:              number;
+    reference_no:         string;
+    status:               string;
+    next_queue:           string;
+    ci_required:          boolean;
+    requires_collateral:  boolean;
+    missing_requirements: string[];
+    instant_mode:         string;
+    instant_reason:       string;
+    message:              string;
+  };
+}
+
+// ─── Auth API ─────────────────────────────────────────────────────────────────
 
 export const authAPI = {
   login: async (username: string, password: string) => {
     const res = await fetch(`${BASE}/api/auth/login`, {
-      method: 'POST',
+      method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
+      body:    JSON.stringify({ username, password }),
     });
     const data = await res.json();
     if (!data.success) throw new Error(data.message || 'Invalid username or password.');
@@ -26,15 +78,17 @@ export const authAPI = {
 
   register: async (data: Record<string, string>) => {
     const res = await fetch(`${BASE}/api/auth/register`, {
-      method: 'POST',
+      method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
+      body:    JSON.stringify(data),
     });
     return res.json();
   },
 
   getProfile: async (customerId: number) => {
-    const res = await fetch(`${BASE}/api/profile/${customerId}`);
+    const res = await fetch(`${BASE}/api/profile/${customerId}`, {
+      headers: authHeaders(),
+    });
     return res.json();
   },
 
@@ -49,27 +103,27 @@ export const authAPI = {
 
   sendOtp: async (email: string) => {
     const res = await fetch(`${BASE}/api/auth/send-otp`, {
-      method: 'POST',
+      method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
+      body:    JSON.stringify({ email }),
     });
     return res.json();
   },
 
   verifyOtp: async (email: string, otp: string) => {
     const res = await fetch(`${BASE}/api/auth/verify-otp`, {
-      method: 'POST',
+      method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, otp }),
+      body:    JSON.stringify({ email, otp }),
     });
     return res.json();
   },
 
   resetPassword: async (email: string, newPassword: string) => {
     const res = await fetch(`${BASE}/api/auth/reset-password`, {
-      method: 'POST',
+      method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, newPassword }),
+      body:    JSON.stringify({ email, newPassword }),
     });
     let result: any = {};
     try { result = await res.json(); } catch {
@@ -79,69 +133,114 @@ export const authAPI = {
   },
 };
 
+// ─── Loans API ────────────────────────────────────────────────────────────────
+
 export const loansAPI = {
   getLoans: async (customerId: number) => {
-    const res = await fetch(`${BASE}/api/loans/${customerId}`);
+    const res = await fetch(`${BASE}/api/loans/${customerId}`, {
+      headers: authHeaders(),
+    });
     return res.json();
   },
 
   getLoan: async (loanId: number) => {
-    const res = await fetch(`${BASE}/api/loan/${loanId}`);
+    const res = await fetch(`${BASE}/api/loan/${loanId}`, {
+      headers: authHeaders(),
+    });
     return res.json();
   },
 
   getPayments: async (loanId: number) => {
-    const res = await fetch(`${BASE}/api/payments/${loanId}`);
+    const res = await fetch(`${BASE}/api/payments/${loanId}`, {
+      headers: authHeaders(),
+    });
     return res.json();
   },
 
   getTransactions: async (customerId: number) => {
-    const res = await fetch(`${BASE}/api/transactions/${customerId}`);
+    const res = await fetch(`${BASE}/api/transactions/${customerId}`, {
+      headers: authHeaders(),
+    });
     return res.json();
   },
 
-  applyLoan: async (data: {
-    customer_id:      number;
-    tenant_id:        number;
-    principal_amount: number;
-    payment_term:     string;
-    interest_rate:    number;
-    term_months:      number;
-    id_type:          string;
-    collateral_type:  string;
-    co_maker: {
-      first_name: string;
-      last_name:  string;
-      contact_no: string;
-      email:      string;
-      province:   string;
-      city:       string;
-      barangay:   string;
-      street:     string;
-    };
-  }) => {
+  applyLoan: async (data: LoanApplyPayload): Promise<LoanApplyResponse> => {
     const res = await fetch(`${BASE}/api/loans/apply`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method:  'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...authHeaders(),
+      },
       body: JSON.stringify(data),
     });
     let result: any = {};
-    try { result = await res.json(); } catch {
-      throw new Error(`Server error (${res.status}). Please try again.`);
+    try {
+      const contentType = res.headers.get('content-type') ?? '';
+      if (contentType.includes('application/json')) {
+        result = await res.json();
+      } else {
+        throw new Error(`Server error (${res.status}). Please try again.`);
+      }
+    } catch (e: any) {
+      throw new Error(e.message || `Server error (${res.status}). Please try again.`);
     }
+
+    // Map known backend error codes to friendly messages
+    if (!result.success) {
+      const friendlyMessages: Record<string, string> = {
+        UNPAID_LOANS_EXIST:   'You have an existing active loan. Please settle it before applying for a new one.',
+        INVALID_AMOUNT:       'The loan amount entered is invalid.',
+        INVALID_TERM:         'The loan term entered is invalid.',
+        CUSTOMER_NOT_FOUND:   'Your account could not be found. Please log in again.',
+        TENANT_REQUIRED:      'Cooperative configuration error. Please contact support.',
+        AUTH_INVALID:         'Your session has expired. Please log in again.',
+        TOKEN_MISSING:        'Authentication required. Please log in again.',
+      };
+      const code    = result.error_code ?? '';
+      result.message = friendlyMessages[code] || result.message || 'Submission failed. Please try again.';
+    }
+
     return result;
+  },
+
+  // ── Upload a single requirement document ──────────────────────────────────
+  // Called once per file AFTER applyLoan() returns a loan_id.
+  // ⚠️  Confirm the exact route path with your web dev — search their repo
+  //     for where 'uploads/requirements' is referenced in a POST route.
+  uploadDocument: async (loanId: number, requirementCode: string, file: File): Promise<boolean> => {
+    try {
+      const form = new FormData();
+      form.append('loan_id',          String(loanId));
+      form.append('requirement_code', requirementCode);
+      form.append('file',             file);           // ← confirm field name with web dev
+
+      const res = await fetch(`${BASE}/api/loans/requirements/upload`, {  // ← confirm path
+        method:  'POST',
+        headers: authHeaders(),  // NOTE: do NOT set Content-Type — browser sets multipart boundary automatically
+        body:    form,
+      });
+
+      return res.ok;
+    } catch {
+      return false;
+    }
   },
 };
 
+// ─── Notifications API ────────────────────────────────────────────────────────
+
 export const notificationsAPI = {
   getAll: async (customerId: number) => {
-    const res = await fetch(`${BASE}/api/notifications/${customerId}`);
+    const res = await fetch(`${BASE}/api/notifications/${customerId}`, {
+      headers: authHeaders(),
+    });
     return res.json();
   },
 
   markAllRead: async (customerId: number) => {
     const res = await fetch(`${BASE}/api/notifications/${customerId}/read-all`, {
-      method: 'PATCH',
+      method:  'PATCH',
+      headers: authHeaders(),
     });
     return res.json();
   },
