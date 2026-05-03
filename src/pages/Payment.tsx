@@ -10,6 +10,8 @@ import { Button }   from '../components/Button';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn }       from '@/src/lib/utils';
 import { loansAPI, API_BASE } from '../lib/api';
+import { Browser } from '@capacitor/browser';
+import { App } from '@capacitor/app';
 
 // ── helpers ───────────────────────────────────────────────────────────────
 function fmt(n: number) {
@@ -149,7 +151,6 @@ export default function Payment() {
 
     try {
       const amount  = safeAmount(dueAmount);
-      // PayMongo redirects must use a real HTTPS URL — never capacitor://localhost
       const origin  = 'https://credencelend-mobile.up.railway.app';
       const billing = getCustomerBilling();
 
@@ -160,7 +161,6 @@ export default function Payment() {
           amount,
           description:   `Loan payment – ${loan.reference_no}`,
           reference_no:  loan.reference_no,
-          // success_url uses plain URL — session_id is stored in localStorage before redirect.
           success_url:   `${origin}/loan/${id}/pay/success?amount=${amount}`,
           cancel_url:    `${origin}/loan/${id}/pay?amount=${amount}&type=${paymentType}`,
           billing_name:  billing.name,
@@ -177,8 +177,7 @@ export default function Payment() {
         return;
       }
 
-      // SECONDARY: also store in sessionStorage as a fallback for browsers
-      // that do preserve it across same-origin redirects.
+      // Save payment details to localStorage — survives in-app browser redirect
       try {
         localStorage.setItem(SS_PENDING_KEY, JSON.stringify({
           session_id:   data.session_id   ?? '',
@@ -187,10 +186,27 @@ export default function Payment() {
           payment_type: paymentType,
           reference_no: loan.reference_no ?? '',
         }));
-      } catch { /* sessionStorage unavailable — URL param is the primary path */ }
+      } catch { /* ignore */ }
 
-      // Redirect to PayMongo hosted checkout
-      window.location.href = data.checkout_url;
+      // Detect if running inside Capacitor (Android/iOS)
+      const isCapacitor = !!(window as any).Capacitor?.isNativePlatform?.();
+
+      if (isCapacitor) {
+        // Listen for the success_url redirect back into the app
+        const listener = await App.addListener('appUrlOpen', async (event) => {
+          await listener.remove();
+          await Browser.close();
+          // Navigate to success page inside the app
+          const successPath = `/loan/${id}/pay/success?amount=${amount}`;
+          window.location.href = successPath;
+        });
+
+        // Open PayMongo in Capacitor in-app browser (not external browser)
+        await Browser.open({ url: data.checkout_url, presentationStyle: 'fullscreen' });
+      } else {
+        // Browser fallback — standard redirect
+        window.location.href = data.checkout_url;
+      }
     } catch (err: any) {
       setPayStatus('failed');
       setPayError(err.message || 'Unable to connect to payment service. Please try again.');
@@ -243,11 +259,11 @@ export default function Payment() {
           <ExternalLink className="text-primary" size={44} />
         </motion.div>
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-          <h2 className="font-headline font-bold text-2xl text-on-surface mb-2">Redirecting…</h2>
+          <h2 className="font-headline font-bold text-2xl text-on-surface mb-2">Opening PayMongo…</h2>
           <p className="text-on-surface-variant text-sm">
-            You're being sent to{' '}
+            Complete your payment in the{' '}
             <span className="text-primary font-semibold">PayMongo Checkout</span>{' '}
-            to complete your payment.
+            window. This page will update automatically when done.
           </p>
         </motion.div>
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }} className="flex gap-2 mt-12">
