@@ -1,17 +1,17 @@
 import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { X, ArrowRight, Camera } from 'lucide-react';
-import { TopBar }  from '../components/TopBar';
-import { Button }  from '../components/Button';
-import { Input }   from '../components/Input';
+import { TopBar } from '../components/TopBar';
+import { Button } from '../components/Button';
+import { Input }  from '../components/Input';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const TERM_OPTIONS = [
-  { label: 'Daily',        apiValue: 'daily',        periodsPerMonth: 30   },
-  { label: 'Weekly',       apiValue: 'weekly',        periodsPerMonth: 4.33 },
-  { label: 'Semi-monthly', apiValue: 'semi_monthly',  periodsPerMonth: 2    },
-  { label: 'Monthly',      apiValue: 'monthly',       periodsPerMonth: 1    },
+  { label: 'Daily',        apiValue: 'daily',        rate: 2.75, periodsPerMonth: 30   },
+  { label: 'Weekly',       apiValue: 'weekly',        rate: 3.0,  periodsPerMonth: 4.33 },
+  { label: 'Semi-monthly', apiValue: 'semi_monthly',  rate: 3.5,  periodsPerMonth: 2    },
+  { label: 'Monthly',      apiValue: 'monthly',       rate: 4.0,  periodsPerMonth: 1    },
 ];
 
 const COLLATERAL_TYPES = [
@@ -53,7 +53,6 @@ interface Step1Data {
   amount:           string;
   term:             string;
   term_months:      string;
-  interest_rate:    string;   // ← now user-inputtable
   id_type:          string;
   collateral_type:  string;
   collateral_notes: string;
@@ -69,7 +68,6 @@ export default function ApplyLoanStep1() {
     amount:           '',
     term:             'Monthly',
     term_months:      '12',
-    interest_rate:    '',
     id_type:          "Driver's License",
     collateral_type:  '',
     collateral_notes: '',
@@ -86,25 +84,24 @@ export default function ApplyLoanStep1() {
   const breakdown = useMemo(() => {
     const principal  = Number(formData.amount);
     const months     = parseInt(formData.term_months, 10);
-    const rate       = parseFloat(formData.interest_rate);
     const termOption = TERM_OPTIONS.find(t => t.label === formData.term) ?? TERM_OPTIONS[3];
 
-    if (!principal || principal <= 0 || !months || months <= 0 || !rate || rate <= 0) return null;
+    if (!principal || principal <= 0 || !months || months <= 0) return null;
 
-    // Add-on interest: rate % per month × number of months × principal
-    // e.g. ₱3,000 × 4% × 12 months = ₱1,440 total interest → ₱4,440 total payable
-    const totalInterest = principal * (rate / 100) * months;
+    // Add-on interest: rate % per month × months × principal
+    // e.g. ₱3,000 × 4% × 12 = ₱1,440 interest → ₱4,440 total payable → ₱370/month
+    const totalInterest = principal * (termOption.rate / 100) * months;
     const totalPayable  = principal + totalInterest;
     const totalPeriods  = Math.round(months * termOption.periodsPerMonth);
     const perPayment    = totalPeriods > 0 ? totalPayable / totalPeriods : 0;
 
     const periodLabel =
-      formData.term === 'Daily'        ? 'day'         :
-      formData.term === 'Weekly'       ? 'week'        :
+      formData.term === 'Daily'        ? 'day'           :
+      formData.term === 'Weekly'       ? 'week'          :
       formData.term === 'Semi-monthly' ? '15-day period' : 'month';
 
-    return { rate, totalInterest, totalPayable, totalPeriods, perPayment, periodLabel };
-  }, [formData.amount, formData.term, formData.term_months, formData.interest_rate]);
+    return { rate: termOption.rate, totalInterest, totalPayable, totalPeriods, perPayment, periodLabel };
+  }, [formData.amount, formData.term, formData.term_months]);
 
   // ── File Handling ───────────────────────────────────────────────────────────
 
@@ -129,7 +126,6 @@ export default function ApplyLoanStep1() {
     const newErrors: Record<string, string> = {};
     const amt    = Number(formData.amount);
     const months = parseInt(formData.term_months, 10);
-    const rate   = parseFloat(formData.interest_rate);
 
     if (!formData.amount || isNaN(amt) || amt <= 0)
       newErrors.amount = 'Please enter a valid loan amount.';
@@ -142,11 +138,6 @@ export default function ApplyLoanStep1() {
       newErrors.term_months = 'Please enter a valid number of months.';
     else if (months > 180)
       newErrors.term_months = 'Maximum term is 180 months (15 years).';
-
-    if (!formData.interest_rate || isNaN(rate) || rate <= 0)
-      newErrors.interest_rate = 'Please enter the interest rate given by the cooperative.';
-    else if (rate > 100)
-      newErrors.interest_rate = 'Interest rate cannot exceed 100%.';
 
     if (!formData.collateral_type)
       newErrors.collateral_type = 'Please select a collateral type.';
@@ -171,7 +162,6 @@ export default function ApplyLoanStep1() {
 
     const termOption = TERM_OPTIONS.find(t => t.label === formData.term) ?? TERM_OPTIONS[3];
     const months     = parseInt(formData.term_months, 10);
-    const rate       = parseFloat(formData.interest_rate);
 
     navigate('/apply/step2', {
       state: {
@@ -179,7 +169,7 @@ export default function ApplyLoanStep1() {
           principal_amount:   Number(formData.amount),
           payment_term:       termOption.apiValue,
           payment_term_label: formData.term,
-          interest_rate:      rate,
+          interest_rate:      termOption.rate,       // ← hardcoded from TERM_OPTIONS
           term_months:        months,
           id_type:            formData.id_type,
           collateral_type:    formData.collateral_type,
@@ -195,6 +185,9 @@ export default function ApplyLoanStep1() {
       },
     });
   };
+
+  const fmt = (n: number) =>
+    n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -268,20 +261,6 @@ export default function ApplyLoanStep1() {
             1 month minimum · 180 months (15 years) maximum
           </p>
 
-          {/* Interest Rate — user-inputtable, given by cooperative */}
-          <Input
-            label="INTEREST RATE (% PER MONTH)"
-            placeholder="e.g. 4"
-            type="number"
-            icon={<span className="font-bold text-sm">%</span>}
-            value={formData.interest_rate}
-            onChange={(e) => set('interest_rate', e.target.value)}
-            error={errors.interest_rate}
-          />
-          <p className="text-xs text-on-surface-variant -mt-3 ml-1">
-            Enter the monthly interest rate provided by the cooperative.
-          </p>
-
           {/* Live Breakdown Card */}
           {breakdown ? (
             <div className="rounded-2xl bg-primary/8 border border-primary/20 p-5 space-y-3">
@@ -299,28 +278,22 @@ export default function ApplyLoanStep1() {
                 </div>
                 <div>
                   <p className="text-[10px] text-on-surface-variant uppercase tracking-wider">Per Payment</p>
-                  <p className="text-sm font-bold text-primary">
-                    ₱{breakdown.perPayment.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </p>
+                  <p className="text-sm font-bold text-primary">₱{fmt(breakdown.perPayment)}</p>
                 </div>
                 <div>
                   <p className="text-[10px] text-on-surface-variant uppercase tracking-wider">Total Interest</p>
-                  <p className="text-sm font-semibold text-on-surface">
-                    ₱{breakdown.totalInterest.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </p>
+                  <p className="text-sm font-semibold text-on-surface">₱{fmt(breakdown.totalInterest)}</p>
                 </div>
               </div>
               <div className="border-t border-primary/20 pt-3 flex justify-between items-center">
                 <p className="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Total Payable</p>
-                <p className="text-base font-extrabold text-on-surface">
-                  ₱{breakdown.totalPayable.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </p>
+                <p className="text-base font-extrabold text-on-surface">₱{fmt(breakdown.totalPayable)}</p>
               </div>
             </div>
           ) : (
             <div className="rounded-2xl bg-surface-container-low border border-outline-variant/20 p-5">
               <p className="text-xs text-on-surface-variant text-center">
-                Enter amount, duration, and interest rate to see your loan breakdown.
+                Enter an amount and duration to see your loan breakdown.
               </p>
             </div>
           )}

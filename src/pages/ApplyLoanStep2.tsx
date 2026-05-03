@@ -1,4 +1,4 @@
-import { loansAPI, LoanApplyPayload } from '../lib/api';
+import { loansAPI } from '../lib/api';
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
@@ -92,12 +92,13 @@ export default function ApplyLoanStep2() {
     ci_required:          boolean;
   } | null>(null);
 
-  // ── Payment breakdown (respects payment term frequency) ─────────────────────
+  // ── Payment breakdown ────────────────────────────────────────────────────────
 
   const paymentBreakdown = step1
     ? (() => {
         const { principal_amount, interest_rate, term_months, payment_term } = step1;
         const termInfo      = TERM_PERIODS[payment_term] ?? TERM_PERIODS['monthly'];
+        // Add-on: rate % per month × months × principal
         const totalInterest = principal_amount * (interest_rate / 100) * term_months;
         const totalPayable  = principal_amount + totalInterest;
         const totalPeriods  = Math.round(term_months * termInfo.periodsPerMonth);
@@ -105,6 +106,9 @@ export default function ApplyLoanStep2() {
         return { totalPayable, totalInterest, totalPeriods, perPayment, label: termInfo.label };
       })()
     : null;
+
+  const fmt = (n: number) =>
+    n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -249,8 +253,6 @@ export default function ApplyLoanStep2() {
   };
 
   if (!step1) return null;
-
-  const fmt = (n: number) => n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
     <div className="min-h-screen bg-background pb-12">
@@ -580,7 +582,6 @@ export default function ApplyLoanStep2() {
                 transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
                 className="flex flex-col items-center gap-6 text-center max-w-xs w-full"
               >
-                {/* Checkmark */}
                 <motion.div
                   initial={{ scale: 0 }} animate={{ scale: 1 }}
                   transition={{ type: 'spring', stiffness: 300, damping: 20, delay: 0.1 }}
@@ -592,7 +593,6 @@ export default function ApplyLoanStep2() {
                   </motion.div>
                 </motion.div>
 
-                {/* Text */}
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }}
                   className="space-y-2 w-full">
                   <h2 className="font-headline font-extrabold text-2xl text-on-surface">
@@ -605,7 +605,6 @@ export default function ApplyLoanStep2() {
                   )}
                 </motion.div>
 
-                {/* Missing requirements checklist */}
                 {successData.missing_requirements.length > 0 && (
                   <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.45 }}
                     className="w-full p-4 bg-surface-container-high rounded-2xl text-left">
@@ -624,7 +623,6 @@ export default function ApplyLoanStep2() {
                   </motion.div>
                 )}
 
-                {/* Buttons */}
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}
                   className="w-full flex flex-col gap-3 pt-2">
                   <button
