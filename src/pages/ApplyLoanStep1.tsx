@@ -7,11 +7,7 @@ import { Input }   from '../components/Input';
 
 // ── API-contract enums ────────────────────────────────────────────────────────
 const TERM_OPTIONS: {
-  label:    string;
-  sublabel: string;
-  value:    string;
-  rate:     number;
-  period:   string;
+  label: string; sublabel: string; value: string; rate: number; period: string;
 }[] = [
   { label: 'Daily',        sublabel: '2.75% flat interest rate per day',   value: 'daily',        rate: 2.75, period: 'Day'   },
   { label: 'Weekly',       sublabel: '3% flat interest rate per week',      value: 'weekly',       rate: 3.0,  period: 'Week'  },
@@ -20,17 +16,18 @@ const TERM_OPTIONS: {
 ];
 
 const PAYOUT_METHODS = ['GCASH', 'BANK', 'CASH'];
+const MAX_TERM_MONTHS = 60; // 5 years max — reasonable for cooperative lending
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 export interface Step1Payload {
-  principal_amount:  number;
-  payment_term:      string;
-  term_months:       number;
-  interest_rate:     number;
-  release_channel:   'ONLINE' | 'WALK_IN';
-  payout_method:     string;
-  collateral_type:   string;
-  collateral_notes:  string;
+  principal_amount: number;
+  payment_term:     string;
+  term_months:      number;
+  interest_rate:    number;
+  release_channel:  'ONLINE' | 'WALK_IN';
+  payout_method:    string;
+  collateral_type:  string;
+  collateral_notes: string;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -53,21 +50,17 @@ export default function ApplyLoanStep1() {
 
   const selectedTerm = TERM_OPTIONS.find(t => t.value === termValue) ?? TERM_OPTIONS[2];
 
-  // ── Interest calculation: Simple Interest
-  // Formula: total = principal × (1 + (rate/100) × term_months)
-  // This is standard in PH cooperative/microfinance lending.
-  // The interest rate is a flat periodic rate, applied per period count.
-  const amt    = Number(formData.amount)      || 0;
-  const months = Number(formData.term_months) || 0;
-  const estTotal   = months > 0 && amt > 0
-    ? amt * (1 + (selectedTerm.rate / 100) * months)
-    : 0;
+  // Simple interest: total = principal × (1 + rate/100 × months)
+  const amt        = Number(formData.amount)      || 0;
+  const months     = Number(formData.term_months) || 0;
+  const estTotal   = months > 0 && amt > 0 ? amt * (1 + (selectedTerm.rate / 100) * months) : 0;
   const estPayment = months > 0 ? estTotal / months : 0;
   const estInterest = estTotal - amt;
 
   const validate = () => {
     const newErrors: Record<string, string> = {};
-    const a = Number(formData.amount);
+    const a  = Number(formData.amount);
+    const mo = Number(formData.term_months);
 
     if (!formData.amount || isNaN(a) || a <= 0)
       newErrors.amount = 'Please enter a valid loan amount.';
@@ -76,11 +69,10 @@ export default function ApplyLoanStep1() {
     else if (a > 500000)
       newErrors.amount = 'Maximum loan amount is ₱500,000.';
 
-    const mo = Number(formData.term_months);
     if (!formData.term_months || isNaN(mo) || mo < 1)
       newErrors.term_months = 'Please enter the number of months (minimum 1).';
-    else if (mo > 360)
-      newErrors.term_months = 'Maximum term is 360 months.';
+    else if (mo > MAX_TERM_MONTHS)
+      newErrors.term_months = `Maximum loan term is ${MAX_TERM_MONTHS} months (5 years).`;
 
     if (!formData.collateral_type.trim())
       newErrors.collateral_type = 'Please specify a collateral type.';
@@ -105,7 +97,10 @@ export default function ApplyLoanStep1() {
   };
 
   return (
-    <div className="min-h-screen bg-background pb-36" onClick={() => termOpen && setTermOpen(false)}>
+    <div
+      className="min-h-screen bg-background pb-36"
+      onClick={() => termOpen && setTermOpen(false)}
+    >
       <TopBar
         title=""
         showBack={false}
@@ -156,65 +151,63 @@ export default function ApplyLoanStep1() {
             Minimum: ₱1,000 · Maximum: ₱500,000
           </p>
 
-          {/* ── Custom Payment Term Dropdown ──────────────────────────────── */}
+          {/* ── Custom Payment Term Dropdown ─────────────────────────────── */}
           <div className="space-y-2">
             <label className="block text-[10px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">
               PAYMENT TERM
             </label>
 
-            {/* Trigger button */}
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); setTermOpen(o => !o); }}
-              className="w-full flex items-center justify-between bg-surface-container-highest rounded-xl px-4 py-3.5 focus:ring-2 focus:ring-primary/50 transition-all"
-            >
-              <div className="text-left">
-                <p className="font-bold text-on-surface text-sm">{selectedTerm.label}</p>
-                <p className="text-[11px] text-primary font-semibold mt-0.5">{selectedTerm.sublabel}</p>
-              </div>
-              <ChevronDown
-                size={16}
-                className={`text-on-surface-variant transition-transform duration-200 ${termOpen ? 'rotate-180' : ''}`}
-              />
-            </button>
-
-            {/* Dropdown panel */}
-            {termOpen && (
-              <div
-                className="absolute z-30 left-6 right-6 max-w-md bg-surface-container-low rounded-2xl shadow-2xl border border-outline-variant/10 overflow-hidden"
-                onClick={e => e.stopPropagation()}
+            {/* FIX: relative wrapper so the panel is scoped to THIS element */}
+            <div className="relative" onClick={e => e.stopPropagation()}>
+              {/* Trigger */}
+              <button
+                type="button"
+                onClick={() => setTermOpen(o => !o)}
+                className="w-full flex items-center justify-between bg-surface-container-highest rounded-xl px-4 py-3.5 focus:ring-2 focus:ring-primary/50 transition-all"
               >
-                {TERM_OPTIONS.map((t, i) => (
-                  <button
-                    key={t.value}
-                    type="button"
-                    onClick={() => { setTermValue(t.value); setTermOpen(false); }}
-                    className={[
-                      'w-full flex items-center justify-between px-5 py-4 transition-colors text-left',
-                      i < TERM_OPTIONS.length - 1 ? 'border-b border-outline-variant/10' : '',
-                      t.value === termValue
-                        ? 'bg-primary/8 text-primary'
-                        : 'hover:bg-surface-container-high text-on-surface',
-                    ].join(' ')}
-                  >
-                    <div>
-                      <p className={`text-sm font-bold ${t.value === termValue ? 'text-primary' : 'text-on-surface'}`}>
-                        {t.label}
-                      </p>
-                      <p className={`text-[11px] mt-0.5 font-medium ${t.value === termValue ? 'text-primary/70' : 'text-on-surface-variant'}`}>
-                        {t.sublabel}
-                      </p>
-                    </div>
-                    {t.value === termValue && (
-                      <div className="w-2 h-2 rounded-full bg-primary shrink-0 ml-3" />
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
+                <div className="text-left">
+                  <p className="font-bold text-on-surface text-sm">{selectedTerm.label}</p>
+                  <p className="text-[11px] text-primary font-semibold mt-0.5">{selectedTerm.sublabel}</p>
+                </div>
+                <ChevronDown
+                  size={16}
+                  className={`text-on-surface-variant transition-transform duration-200 shrink-0 ml-2 ${termOpen ? 'rotate-180' : ''}`}
+                />
+              </button>
+
+              {/* Dropdown panel — now correctly anchored below the trigger */}
+              {termOpen && (
+                <div className="absolute top-full left-0 right-0 z-30 mt-1 bg-surface-container-low rounded-2xl shadow-2xl border border-outline-variant/10 overflow-hidden">
+                  {TERM_OPTIONS.map((t, i) => (
+                    <button
+                      key={t.value}
+                      type="button"
+                      onClick={() => { setTermValue(t.value); setTermOpen(false); }}
+                      className={[
+                        'w-full flex items-center justify-between px-5 py-4 transition-colors text-left',
+                        i < TERM_OPTIONS.length - 1 ? 'border-b border-outline-variant/10' : '',
+                        t.value === termValue ? 'bg-primary/[0.08]' : 'hover:bg-surface-container-high',
+                      ].join(' ')}
+                    >
+                      <div>
+                        <p className={`text-sm font-bold ${t.value === termValue ? 'text-primary' : 'text-on-surface'}`}>
+                          {t.label}
+                        </p>
+                        <p className={`text-[11px] mt-0.5 font-medium ${t.value === termValue ? 'text-primary/70' : 'text-on-surface-variant'}`}>
+                          {t.sublabel}
+                        </p>
+                      </div>
+                      {t.value === termValue && (
+                        <div className="w-2 h-2 rounded-full bg-primary shrink-0 ml-3" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Term Months */}
+          {/* Term Months — max 60 */}
           <Input
             label="LOAN DURATION (MONTHS)"
             placeholder="e.g. 12"
@@ -228,10 +221,10 @@ export default function ApplyLoanStep1() {
             error={errors.term_months}
           />
           <p className="text-xs text-on-surface-variant -mt-3 ml-1">
-            Enter number of months (1–360)
+            Maximum: {MAX_TERM_MONTHS} months (5 years)
           </p>
 
-          {/* ── Estimated payment preview ──────────────────────────────────── */}
+          {/* Payment breakdown preview */}
           {estTotal > 0 && (
             <div className="p-4 bg-primary/5 border border-primary/10 rounded-2xl space-y-3">
               <p className="text-[10px] font-bold uppercase tracking-widest text-primary/70">
@@ -315,9 +308,7 @@ export default function ApplyLoanStep1() {
         {/* ── Collateral (Optional) ──────────────────────────────────────────── */}
         <section className="space-y-5 mb-10">
           <div className="flex items-center gap-2">
-            <h3 className="text-xs font-bold tracking-wider text-primary/80 uppercase">
-              Collateral
-            </h3>
+            <h3 className="text-xs font-bold tracking-wider text-primary/80 uppercase">Collateral</h3>
             <span className="text-[10px] text-on-surface-variant font-normal">— optional, for higher loan amount</span>
           </div>
 
@@ -340,16 +331,16 @@ export default function ApplyLoanStep1() {
           />
         </section>
 
-        {/* ── Info note ──────────────────────────────────────────────────────── */}
+        {/* ── Note ──────────────────────────────────────────────────────────── */}
         <div className="mb-10 p-4 bg-surface-container-high rounded-2xl border border-outline-variant/10 flex gap-3">
           <span className="text-primary text-lg leading-none">ℹ</span>
           <p className="text-xs text-on-surface-variant leading-relaxed">
             Required documents (Valid ID, Proof of Billing, Co-maker ID, etc.) will be
-            uploaded <span className="font-semibold text-on-surface">after your application is submitted</span>.
+            uploaded <span className="font-semibold text-on-surface">in the next step</span>.
           </p>
         </div>
 
-        {/* ── Next Button ────────────────────────────────────────────────────── */}
+        {/* ── Next Button ───────────────────────────────────────────────────── */}
         <div className="fixed bottom-0 left-0 w-full p-6 bg-gradient-to-t from-background via-background/95 to-transparent flex justify-center">
           <div className="w-full max-w-md">
             <Button onClick={handleNext}>

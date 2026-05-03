@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
-  BadgeCheck, CreditCard, PenTool,
-  AlertTriangle, CheckCircle2, User, MapPin, FileText, LayoutDashboard,
+  BadgeCheck, CreditCard, PenTool, FileText, AlertTriangle,
+  CheckCircle2, User, MapPin, LayoutDashboard, Receipt, UserCheck,
 } from 'lucide-react';
-import { TopBar }  from '../components/TopBar';
-import { Button }  from '../components/Button';
-import { Input }   from '../components/Input';
+import { TopBar }   from '../components/TopBar';
+import { Button }   from '../components/Button';
+import { Input }    from '../components/Input';
 import { loansAPI } from '../lib/api';
 import { motion, AnimatePresence } from 'motion/react';
 import type { Step1Payload } from './ApplyLoanStep1';
@@ -23,6 +23,69 @@ interface CoMakerForm {
   street:     string;
 }
 
+interface DocFiles {
+  idFront:         string;
+  idBack:          string;
+  proofOfBilling:  string;
+  proofOfIncome:   string;
+  comakerIdFront:  string;
+  signatures:      string;
+  collateralProof: string;
+}
+
+// ── Document definitions ───────────────────────────────────────────────────────
+const REQUIRED_DOCS: { key: keyof DocFiles; label: string; desc: string; icon: React.ReactNode; required: boolean }[] = [
+  {
+    key:      'idFront',
+    label:    'Valid ID — Front',
+    desc:     'Government-issued ID (front side)',
+    icon:     <BadgeCheck size={18} className="text-primary" />,
+    required: true,
+  },
+  {
+    key:      'idBack',
+    label:    'Valid ID — Back',
+    desc:     'Government-issued ID (back side)',
+    icon:     <CreditCard size={18} className="text-primary" />,
+    required: true,
+  },
+  {
+    key:      'proofOfBilling',
+    label:    'Proof of Billing',
+    desc:     'Utility bill within the last 3 months',
+    icon:     <Receipt size={18} className="text-primary" />,
+    required: true,
+  },
+  {
+    key:      'proofOfIncome',
+    label:    'Proof of Income',
+    desc:     'Payslip, ITR, or certificate of employment',
+    icon:     <FileText size={18} className="text-primary" />,
+    required: true,
+  },
+  {
+    key:      'comakerIdFront',
+    label:    'Co-maker Valid ID',
+    desc:     'Government-issued ID of your co-maker',
+    icon:     <UserCheck size={18} className="text-primary" />,
+    required: true,
+  },
+  {
+    key:      'signatures',
+    label:    '3 Specimen Signatures',
+    desc:     'On plain white paper',
+    icon:     <PenTool size={18} className="text-primary" />,
+    required: false,
+  },
+  {
+    key:      'collateralProof',
+    label:    'Collateral Proof',
+    desc:     'Document proving ownership of collateral',
+    icon:     <BadgeCheck size={18} className="text-primary" />,
+    required: false,
+  },
+];
+
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function ApplyLoanStep2() {
   const navigate = useNavigate();
@@ -34,17 +97,15 @@ export default function ApplyLoanStep2() {
   }, [step1]);
 
   const [formData, setFormData] = useState<CoMakerForm>({
-    first_name: '', last_name:  '', contact_no: '', email:      '',
-    province:   '', city:       '', barangay:   '', street:     '',
+    first_name: '', last_name:  '', contact_no: '', email:    '',
+    province:   '', city:       '', barangay:   '', street:   '',
   });
 
-  const [files,       setFiles]       = useState<Record<string, string>>({});
+  const [files,       setFiles]       = useState<Partial<DocFiles>>({});
   const [errors,      setErrors]      = useState<Record<string, string>>({});
   const [submitting,  setSubmitting]  = useState(false);
   const [submitError, setSubmitError] = useState('');
   const [showConfirm, setShowConfirm] = useState(false);
-
-  // 'idle' | 'loading' | 'done'
   const [successStep, setSuccessStep] = useState<'idle' | 'loading' | 'done'>('idle');
 
   const handleChange = (field: keyof CoMakerForm, value: string) => {
@@ -53,11 +114,11 @@ export default function ApplyLoanStep2() {
     if (submitError)   setSubmitError('');
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, field: string) => {
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, field: keyof DocFiles) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) {
-      alert('File size should not exceed 5MB.');
+      alert('File size must not exceed 5MB.');
       e.target.value = '';
       return;
     }
@@ -79,6 +140,15 @@ export default function ApplyLoanStep2() {
     if (!formData.city.trim())     newErrors.city     = 'City is required.';
     if (!formData.barangay.trim()) newErrors.barangay = 'Barangay is required.';
     if (!formData.street.trim())   newErrors.street   = 'Street is required.';
+
+    // Require the 5 essential docs
+    const requiredDocs = REQUIRED_DOCS.filter(d => d.required);
+    for (const doc of requiredDocs) {
+      if (!files[doc.key]) {
+        newErrors[`file_${doc.key}`] = `${doc.label} is required.`;
+      }
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -96,8 +166,6 @@ export default function ApplyLoanStep2() {
     setShowConfirm(false);
 
     try {
-      // Build payload matching API contract.
-      // customer_id & tenant_id are resolved by the backend from the Bearer token.
       const result = await loansAPI.applyLoan({
         principal_amount:  step1.principal_amount,
         payment_term:      step1.payment_term as any,
@@ -110,15 +178,14 @@ export default function ApplyLoanStep2() {
         comakers: [{
           full_name:    `${formData.first_name.trim()} ${formData.last_name.trim()}`,
           phone_number: formData.contact_no.trim(),
-          relationship: '',           // not collected in this form; sent as empty string
-          email:        formData.email.trim()    || undefined,
+          relationship: '',
+          email:        formData.email.trim() || undefined,
           address:      [formData.street, formData.barangay, formData.city, formData.province]
                           .filter(Boolean).join(', ') || undefined,
         }],
       });
 
       if (!result.success) {
-        // Specific error code handling per API contract
         const code = (result as any).error_code ?? '';
         if (code === 'UNPAID_LOANS_EXIST') {
           setSubmitError('You already have an active or pending loan. You cannot apply for a new one at this time.');
@@ -136,11 +203,13 @@ export default function ApplyLoanStep2() {
         return;
       }
 
-      // Show loading animation → then success screen
       setSuccessStep('loading');
       setTimeout(() => setSuccessStep('done'), 2200);
-    } catch {
-      setSubmitError('An unexpected error occurred. Please check your connection and try again.');
+    } catch (err: any) {
+      // Surface the actual error message when available
+      setSubmitError(
+        err?.message ?? 'An unexpected error occurred. Please check your connection and try again.'
+      );
     } finally {
       setSubmitting(false);
     }
@@ -148,23 +217,25 @@ export default function ApplyLoanStep2() {
 
   if (!step1) return null;
 
-  const idFields = [
-    { key: 'idFront',    label: 'Valid ID (Front)',       icon: <BadgeCheck className="text-primary" size={20} /> },
-    { key: 'idBack',     label: 'Valid ID (Back)',        icon: <CreditCard className="text-primary" size={20} /> },
-    { key: 'signatures', label: '3 Specimen Signatures', icon: <PenTool    className="text-primary" size={20} /> },
-  ];
-
-  // Simple interest: total = principal × (1 + rate/100 × months)
-  const estTotal   = step1.principal_amount * (1 + (step1.interest_rate / 100) * step1.term_months);
+  // Simple interest totals for summary
+  const estTotal       = step1.principal_amount * (1 + (step1.interest_rate / 100) * step1.term_months);
   const monthlyPayment = step1.term_months > 0 ? estTotal / step1.term_months : 0;
-  const termLabel  = { daily: 'Day', weekly: 'Week', semi_monthly: 'Cycle', monthly: 'Month' }[step1.payment_term] ?? 'Period';
+  const termLabel      = { daily: 'Day', weekly: 'Week', semi_monthly: 'Cycle', monthly: 'Month' }[step1.payment_term] ?? 'Period';
+
+  const hasCollateral = !!step1.collateral_type;
+
+  // Only show collateral proof row if borrower selected a collateral
+  const visibleDocs = REQUIRED_DOCS.filter(d => d.key !== 'collateralProof' || hasCollateral);
+  const requiredCount  = visibleDocs.filter(d => d.required || (d.key === 'collateralProof' && hasCollateral)).length;
+  const attachedCount  = visibleDocs.filter(d => !!files[d.key]).length;
 
   return (
     <div className="min-h-screen bg-background pb-12">
-      <TopBar title="Co-maker Details" />
+      <TopBar title="Co-maker & Documents" />
 
       <main className="pt-24 px-6 max-w-md mx-auto">
-        {/* Progress */}
+
+        {/* ── Progress ───────────────────────────────────────────────────── */}
         <div className="mb-8">
           <div className="flex justify-between items-end mb-2">
             <span className="font-headline font-extrabold text-2xl tracking-tight text-on-surface">
@@ -177,13 +248,13 @@ export default function ApplyLoanStep2() {
           </div>
         </div>
 
-        {/* Loan Summary */}
+        {/* ── Loan Summary ───────────────────────────────────────────────── */}
         <div className="mb-8 p-4 bg-surface-container-high rounded-xl space-y-2 border border-outline-variant/10">
           <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-2">Loan Summary</p>
           <div className="flex justify-between text-sm">
             <span className="text-on-surface-variant">Amount</span>
             <span className="font-bold text-on-surface">
-              ₱{Number(step1.principal_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              ₱{step1.principal_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
             </span>
           </div>
           <div className="flex justify-between text-sm">
@@ -195,10 +266,6 @@ export default function ApplyLoanStep2() {
           <div className="flex justify-between text-sm">
             <span className="text-on-surface-variant">Interest Rate</span>
             <span className="font-bold text-primary">{step1.interest_rate}% per {termLabel.toLowerCase()}</span>
-          </div>
-          <div className="flex justify-between text-sm">
-            <span className="text-on-surface-variant">Collateral</span>
-            <span className="font-bold text-on-surface">{step1.collateral_type || 'None'}</span>
           </div>
           <div className="border-t border-outline-variant/10 pt-2 flex justify-between text-sm">
             <span className="text-on-surface-variant">Total Payable</span>
@@ -214,11 +281,11 @@ export default function ApplyLoanStep2() {
           </div>
         </div>
 
-        {/* Personal Info */}
+        {/* ── Co-maker Personal Info ─────────────────────────────────────── */}
         <section className="space-y-6 mb-10">
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center gap-2">
             <div className="w-1 h-6 bg-primary rounded-full" />
-            <h2 className="font-headline font-bold text-lg text-on-surface">Personal Info</h2>
+            <h2 className="font-headline font-bold text-lg text-on-surface">Co-maker Info</h2>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <Input label="First Name" placeholder="Juan" value={formData.first_name}
@@ -229,14 +296,14 @@ export default function ApplyLoanStep2() {
           <Input label="Contact No." placeholder="09XXXXXXXXX" value={formData.contact_no}
             onChange={(e) => handleChange('contact_no', e.target.value)} error={errors.contact_no} />
           <Input label="Email Address (Optional)" placeholder="juan@example.com" type="email"
-            value={formData.email} onChange={(e) => handleChange('email', e.target.value)} error={errors.email} />
+            value={formData.email} onChange={(e) => handleChange('email', e.target.value)} />
         </section>
 
-        {/* Address */}
+        {/* ── Co-maker Address ───────────────────────────────────────────── */}
         <section className="space-y-6 mb-10">
-          <div className="flex items-center gap-2 mb-2">
+          <div className="flex items-center gap-2">
             <div className="w-1 h-6 bg-primary rounded-full" />
-            <h2 className="font-headline font-bold text-lg text-on-surface">Address</h2>
+            <h2 className="font-headline font-bold text-lg text-on-surface">Co-maker Address</h2>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <Input label="Province" placeholder="Enter Province" value={formData.province}
@@ -250,35 +317,87 @@ export default function ApplyLoanStep2() {
             onChange={(e) => handleChange('street', e.target.value)} error={errors.street} />
         </section>
 
-        {/* Identification — Optional */}
-        <section className="space-y-6 mb-10">
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-1 h-6 bg-primary rounded-full" />
-            <h2 className="font-headline font-bold text-lg text-on-surface">
-              Identification
-              <span className="ml-2 text-on-surface-variant text-sm font-normal">— optional</span>
-            </h2>
+        {/* ── Required Documents ─────────────────────────────────────────── */}
+        <section className="mb-10">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <div className="w-1 h-6 bg-primary rounded-full" />
+              <h2 className="font-headline font-bold text-lg text-on-surface">Required Documents</h2>
+            </div>
+            <span className="text-xs font-bold text-primary tabular-nums">
+              {attachedCount}/{requiredCount} attached
+            </span>
           </div>
-          <div className="space-y-4">
-            {idFields.map(({ key, label, icon }) => (
-              <div key={key} className="flex items-center justify-between p-4 bg-surface-container-low rounded-xl border border-white/5">
-                <div className="flex items-center gap-3">
-                  {icon}
-                  <span className="text-sm font-medium">{label}</span>
+
+          <p className="text-xs text-on-surface-variant mb-4 leading-relaxed">
+            Upload clear photos or scanned copies. Max 5MB per file. JPG, PNG, or PDF accepted.
+          </p>
+
+          <div className="space-y-3">
+            {visibleDocs.map(({ key, label, desc, icon, required }) => {
+              const isRequired = required || (key === 'collateralProof' && hasCollateral);
+              const attached   = !!files[key];
+              const fieldError = errors[`file_${key}`];
+
+              return (
+                <div
+                  key={key}
+                  className={[
+                    'p-4 rounded-2xl border transition-all',
+                    attached
+                      ? 'bg-primary/5 border-primary/20'
+                      : fieldError
+                        ? 'bg-red-500/5 border-red-500/20'
+                        : 'bg-surface-container-low border-outline-variant/10',
+                  ].join(' ')}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3 min-w-0">
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${attached ? 'bg-primary/10' : 'bg-surface-container-high'}`}>
+                        {icon}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-semibold text-on-surface">{label}</p>
+                          {isRequired
+                            ? <span className="text-[9px] font-bold uppercase tracking-wider text-error bg-error/10 px-1.5 py-0.5 rounded-full">Required</span>
+                            : <span className="text-[9px] font-bold uppercase tracking-wider text-on-surface-variant bg-surface-container-high px-1.5 py-0.5 rounded-full">Optional</span>
+                          }
+                        </div>
+                        <p className="text-[11px] text-on-surface-variant mt-0.5">{desc}</p>
+                        {fieldError && (
+                          <p className="text-[11px] text-red-500 mt-1 font-medium">{fieldError}</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <input
+                        type="file"
+                        accept="image/*,application/pdf"
+                        style={{ display: 'none' }}
+                        id={`${key}Upload`}
+                        onChange={e => handleFileChange(e, key)}
+                      />
+                      <label
+                        htmlFor={`${key}Upload`}
+                        className={[
+                          'text-[10px] font-bold px-3 py-2 rounded-lg uppercase tracking-wider cursor-pointer transition-all',
+                          attached
+                            ? 'bg-primary text-on-primary shadow-md shadow-primary/20'
+                            : 'bg-primary/10 text-primary',
+                        ].join(' ')}
+                      >
+                        {attached ? 'CHANGE' : 'UPLOAD'}
+                      </label>
+                      {attached && (
+                        <span className="text-[10px] text-primary font-semibold">✓ Attached</span>
+                      )}
+                    </div>
+                  </div>
                 </div>
-                <div className="flex flex-col items-end gap-1">
-                  <input type="file" accept="image/*,application/pdf" style={{ display: 'none' }}
-                    id={`${key}Upload`} onChange={e => handleFileChange(e, key)} />
-                  <label htmlFor={`${key}Upload`}
-                    className="bg-primary text-on-primary-container text-[10px] font-bold px-4 py-2 rounded-lg uppercase tracking-wider shadow-lg shadow-primary/20 cursor-pointer">
-                    CHOOSE FILE
-                  </label>
-                  {files[key]
-                    ? <span className="text-xs text-green-600">Attached ✓</span>
-                    : <span className="text-xs text-outline">No file selected</span>}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
 
@@ -302,19 +421,22 @@ export default function ApplyLoanStep2() {
         </footer>
       </main>
 
-      {/* ── Confirmation Bottom Sheet ── */}
+      {/* ── Confirmation Bottom Sheet ──────────────────────────────────────── */}
       <AnimatePresence>
         {showConfirm && (
           <>
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setShowConfirm(false)}
               className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm" />
+
             <motion.div
               initial={{ opacity: 0, y: 80 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 80 }}
               transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-              className="fixed bottom-0 left-0 right-0 z-50 bg-surface-container-low rounded-t-[2rem] shadow-2xl border-t border-white/5 max-w-md mx-auto max-h-[85vh] overflow-y-auto">
+              className="fixed bottom-0 left-0 right-0 z-50 bg-surface-container-low rounded-t-[2rem] shadow-2xl border-t border-white/5 max-w-md mx-auto max-h-[85vh] overflow-y-auto"
+            >
               <div className="p-6">
                 <div className="w-10 h-1 bg-outline/30 rounded-full mx-auto mb-6" />
+
                 <div className="flex items-center gap-3 mb-6">
                   <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
                     <FileText size={24} />
@@ -328,55 +450,25 @@ export default function ApplyLoanStep2() {
                 {/* Loan Details */}
                 <div className="mb-5 p-4 bg-primary/5 border border-primary/10 rounded-2xl space-y-3">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-primary mb-3">Loan Details</p>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-on-surface-variant">Principal Amount</span>
-                    <span className="font-bold text-on-surface text-base">
-                      ₱{Number(step1.principal_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-on-surface-variant">Payment Term</span>
-                    <span className="font-bold text-on-surface capitalize">{step1.payment_term.replace('_', '-')}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-on-surface-variant">Interest Rate</span>
-                    <span className="font-bold text-primary">{step1.interest_rate}% / {termLabel.toLowerCase()}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-on-surface-variant">Duration</span>
-                    <span className="font-bold text-on-surface">{step1.term_months} months</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-on-surface-variant">Collateral</span>
-                    <span className="font-bold text-on-surface">{step1.collateral_type || 'None'}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-on-surface-variant">Payout via</span>
-                    <span className="font-bold text-on-surface">{step1.payout_method}</span>
-                  </div>
-                  <div className="border-t border-primary/10 my-1" />
-                  <div className="flex justify-between text-sm">
-                    <span className="text-on-surface-variant">Total Interest</span>
-                    <span className="font-semibold text-warning">
-                      +₱{(estTotal - step1.principal_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-on-surface-variant">Total Payable</span>
-                    <span className="font-extrabold text-primary text-base">
-                      ₱{estTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-on-surface-variant">Est. per {termLabel}</span>
-                    <span className="font-extrabold text-on-surface">
-                      ₱{monthlyPayment.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                    </span>
-                  </div>
+                  {[
+                    ['Principal Amount', `₱${step1.principal_amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
+                    ['Payment Term',     `${step1.payment_term.replace('_', '-')} · ${step1.term_months} months`],
+                    ['Interest Rate',    `${step1.interest_rate}% / ${termLabel.toLowerCase()}`],
+                    ['Collateral',       step1.collateral_type || 'None'],
+                    ['Payout via',       step1.payout_method],
+                    ['Total Interest',   `+₱${(estTotal - step1.principal_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
+                    ['Total Payable',    `₱${estTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
+                    [`Est. per ${termLabel}`, `₱${monthlyPayment.toLocaleString(undefined, { minimumFractionDigits: 2 })}`],
+                  ].map(([k, v]) => (
+                    <div key={k} className="flex justify-between text-sm">
+                      <span className="text-on-surface-variant">{k}</span>
+                      <span className={`font-bold ${k === 'Total Payable' ? 'text-primary text-base' : k === 'Total Interest' ? 'text-warning' : 'text-on-surface'}`}>{v}</span>
+                    </div>
+                  ))}
                 </div>
 
                 {/* Co-maker */}
-                <div className="mb-5 p-4 bg-surface-container-high rounded-2xl space-y-3">
+                <div className="mb-5 p-4 bg-surface-container-high rounded-2xl space-y-2">
                   <div className="flex items-center gap-2 mb-3">
                     <User size={14} className="text-on-surface-variant" />
                     <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Co-maker</p>
@@ -389,15 +481,10 @@ export default function ApplyLoanStep2() {
                     <span className="text-on-surface-variant">Contact No.</span>
                     <span className="font-bold text-on-surface font-mono">{formData.contact_no}</span>
                   </div>
-                  {formData.email && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-on-surface-variant">Email</span>
-                      <span className="font-bold text-on-surface">{formData.email}</span>
-                    </div>
-                  )}
                 </div>
 
-                <div className="mb-6 p-4 bg-surface-container-high rounded-2xl space-y-3">
+                {/* Co-maker Address */}
+                <div className="mb-5 p-4 bg-surface-container-high rounded-2xl">
                   <div className="flex items-center gap-2 mb-3">
                     <MapPin size={14} className="text-on-surface-variant" />
                     <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Co-maker Address</p>
@@ -405,6 +492,27 @@ export default function ApplyLoanStep2() {
                   <p className="text-sm font-semibold text-on-surface leading-relaxed">
                     {formData.street}, {formData.barangay}, {formData.city}, {formData.province}
                   </p>
+                </div>
+
+                {/* Documents attached summary */}
+                <div className="mb-6 p-4 bg-surface-container-high rounded-2xl">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-3">
+                    Documents ({attachedCount} attached)
+                  </p>
+                  <div className="space-y-1.5">
+                    {visibleDocs.map(d => (
+                      <div key={d.key} className="flex items-center gap-2 text-sm">
+                        <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${files[d.key] ? 'bg-primary' : 'bg-outline/40'}`} />
+                        <span className={files[d.key] ? 'text-on-surface font-medium' : 'text-on-surface-variant'}>
+                          {d.label}
+                        </span>
+                        {files[d.key]
+                          ? <span className="ml-auto text-[10px] text-primary font-semibold">✓</span>
+                          : d.required && <span className="ml-auto text-[10px] text-on-surface-variant">—</span>
+                        }
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
                 <div className="flex gap-3 p-3 bg-orange-500/5 border border-orange-500/10 rounded-xl mb-6">
@@ -435,9 +543,7 @@ export default function ApplyLoanStep2() {
       <AnimatePresence>
         {successStep !== 'idle' && (
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="fixed inset-0 z-[60] bg-background flex flex-col items-center justify-center px-8"
           >
             {successStep === 'loading' && (
@@ -474,9 +580,9 @@ export default function ApplyLoanStep2() {
               <motion.div key="done"
                 initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-                className="flex flex-col items-center gap-6 text-center max-w-xs">
-                <motion.div
-                  initial={{ scale: 0 }} animate={{ scale: 1 }}
+                className="flex flex-col items-center gap-6 text-center max-w-xs"
+              >
+                <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }}
                   transition={{ type: 'spring', stiffness: 300, damping: 20, delay: 0.1 }}
                   className="w-24 h-24 rounded-full bg-primary/10 border-2 border-primary/30 flex items-center justify-center">
                   <motion.div initial={{ scale: 0, rotate: -30 }} animate={{ scale: 1, rotate: 0 }}
