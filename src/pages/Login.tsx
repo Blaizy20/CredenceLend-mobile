@@ -18,6 +18,13 @@ function getGreeting() {
   return 'Working late';
 }
 
+function getStoredTenant() {
+  try {
+    return JSON.parse(localStorage.getItem('tenant')   || 'null')
+        ?? JSON.parse(sessionStorage.getItem('tenant') || 'null');
+  } catch { return null; }
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function Login() {
@@ -32,15 +39,19 @@ export default function Login() {
   }, []);
 
   // ── Tenant gate — skip if already verified ────────────────────────────────
-  const existingTenant = React.useMemo(() => {
-    try {
-      return JSON.parse(localStorage.getItem('tenant')   || 'null')
-          ?? JSON.parse(sessionStorage.getItem('tenant') || 'null');
-    } catch { return null; }
-  }, []);
+  const existingTenant = React.useMemo(() => getStoredTenant(), []);
 
   type Screen = 'tenant' | 'login';
   const [screen, setScreen] = React.useState<Screen>(existingTenant ? 'login' : 'tenant');
+
+  // Reads tenant after transitioning to login screen
+  const [tenant, setTenant] = React.useState<{
+    tenant_id:     number;
+    tenant_name:   string;
+    subdomain?:    string;
+    logo_path?:    string | null;
+    primary_color?: string | null;
+  } | null>(existingTenant);
 
   // ── Tenant gate state ─────────────────────────────────────────────────────
   const [code, setCode]               = React.useState<string[]>(Array(CODE_LENGTH).fill(''));
@@ -109,13 +120,16 @@ export default function Login() {
         return;
       }
 
-      const tenantPayload = JSON.stringify({
+      const tenantData = {
         tenant_id:     data.tenant_id,
         tenant_name:   data.tenant_name   ?? '',
+        subdomain:     data.subdomain     ?? '',
         logo_path:     data.logo_path     ?? null,
         primary_color: data.primary_color ?? null,
         code:          fullCode,
-      });
+      };
+
+      const tenantPayload = JSON.stringify(tenantData);
 
       // Save to localStorage (persists) or sessionStorage (clears on app close)
       if (rememberTenant) {
@@ -124,6 +138,7 @@ export default function Login() {
         sessionStorage.setItem('tenant', tenantPayload);
       }
 
+      setTenant(tenantData);
       setCodeSuccess(true);
       setTimeout(() => setScreen('login'), 1000);
 
@@ -253,7 +268,7 @@ export default function Login() {
                 {greeting.name}<span className="text-primary">.</span>
               </h1>
               <p className="text-on-surface-variant text-sm mt-3">
-                Welcome back to <span className="text-primary font-semibold">CredenceLend</span>
+                Welcome back to <span className="text-primary font-semibold">{tenant?.tenant_name || 'CredenceLend'}</span>
               </p>
             </motion.div>
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }}
@@ -380,17 +395,48 @@ export default function Login() {
             <div className="fixed top-0 right-0 w-64 h-64 bg-primary/5 blur-[120px] rounded-full -z-10" />
 
             <div className="relative z-10 w-full max-w-md flex flex-col items-center">
-              {/* Brand */}
+
+              {/* ── Brand ── */}
               <div className="mb-12 text-center">
                 <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-primary-dim shadow-2xl shadow-primary/20 mb-6">
                   <User className="text-on-primary" size={32} />
                 </div>
-                <h1 className="font-headline font-extrabold text-3xl tracking-tighter text-on-surface">
-                  Credence<span className="text-primary">Lend</span>
-                </h1>
-                <p className="text-on-surface-variant text-sm mt-2 font-medium tracking-wide uppercase">
-                  CUSTOMER PORTAL
-                </p>
+
+                {tenant?.tenant_name ? (
+                  <motion.div
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.4 }}
+                  >
+                    <h1 className="font-headline font-extrabold text-3xl tracking-tighter text-on-surface">
+                      {tenant.tenant_name}
+                    </h1>
+
+                    {/* Subdomain badge — e.g. "east-branch" */}
+                    {tenant.subdomain && (
+                      <div className="inline-flex items-center gap-1.5 mt-2 mb-1 px-2.5 py-0.5 rounded-full bg-primary/10 border border-primary/20">
+                        <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
+                        <span className="text-primary text-xs font-semibold tracking-wide">
+                          {tenant.subdomain.replace(/-/g, ' ')}
+                        </span>
+                      </div>
+                    )}
+
+                    <p className="text-on-surface-variant text-xs mt-2 font-medium">
+                      powered by{' '}
+                      <span className="text-primary font-semibold">CredenceLend</span>
+                    </p>
+                  </motion.div>
+                ) : (
+                  <>
+                    <h1 className="font-headline font-extrabold text-3xl tracking-tighter text-on-surface">
+                      Credence<span className="text-primary">Lend</span>
+                    </h1>
+                    <p className="text-on-surface-variant text-sm mt-2 font-medium tracking-wide uppercase">
+                      CUSTOMER PORTAL
+                    </p>
+                  </>
+                )}
               </div>
 
               {/* Login Card */}
