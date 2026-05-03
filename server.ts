@@ -10,7 +10,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = Number(process.env.PORT || 3000);
-const DEFAULT_TENANT_ID = Number(process.env.DEFAULT_TENANT_ID || 1);
+
+// DEFAULT_TENANT_ID is no longer a static env var.
+// It gets resolved dynamically from the verified tenant code sent by the client.
+// This fallback is only used for legacy/server-side routes that don't receive tenant_id.
+const FALLBACK_TENANT_ID = Number(process.env.DEFAULT_TENANT_ID || 1);
 
 const pool = mysql.createPool({
   host:     process.env.DB_HOST,
@@ -166,16 +170,14 @@ async function startServer() {
   app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
   // ── CORS ──────────────────────────────────────────────────────────────────
-  // FIX: replaced `origin: true` with explicit list so Capacitor WebView
-  // requests (origin: capacitor://localhost) are accepted by the server.
   app.use(cors({
     origin: [
       "https://credencelend-mobile.up.railway.app",
-      "capacitor://localhost",   // Android/iOS Capacitor WebView (old)
-      "https://localhost",       // Android Capacitor WebView (Capacitor 3+)
+      "capacitor://localhost",
+      "https://localhost",
       "http://localhost",
       "http://localhost:3000",
-      "http://localhost:5173",   // Vite dev server
+      "http://localhost:5173",
     ],
     credentials: true,
   }));
@@ -224,6 +226,9 @@ async function startServer() {
     } catch { res.status(500).json({ taken: false, message: "An unexpected error occurred." }); }
   });
 
+  // ── Tenant: Verify Code ───────────────────────────────────────────────────
+  // Returns the tenant_id from the matching row so the frontend can store it
+  // and use it for all subsequent requests (login, register, etc.)
   app.post('/api/tenants/verify-code', async (req: any, res: any) => {
     const { code } = req.body;
 
@@ -250,6 +255,8 @@ async function startServer() {
         });
       }
 
+      // Return the real tenant_id from the DB row — the frontend stores this
+      // and sends it back with every login/register request.
       return res.json({
         success:       true,
         tenant_id:     rows[0].tenant_id,
@@ -329,8 +336,11 @@ async function startServer() {
   });
 
   // ── Auth: Register ────────────────────────────────────────────────────────
+  // Now accepts tenant_id from the request body (set by the frontend after
+  // the user verifies their cooperative code). Falls back to FALLBACK_TENANT_ID.
   app.post("/api/auth/register", async (req, res) => {
     try {
+      const tenant_id  = Number(req.body.tenant_id ?? FALLBACK_TENANT_ID);
       const first_name = String(req.body.first_name ?? req.body.firstName ?? "").trim();
       const last_name  = String(req.body.last_name  ?? req.body.lastName  ?? "").trim();
       const username   = String(req.body.username   ?? "").trim();
@@ -371,12 +381,12 @@ async function startServer() {
       const [result] = await pool.query<ResultSetHeader>(
         `INSERT INTO customers (tenant_id, username, password, customer_no, first_name, last_name, contact_no, email, province, city, barangay, street, is_active)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-        [DEFAULT_TENANT_ID, username, hashedPassword, customer_no, first_name, last_name, contact_no, email, province, city, barangay, street]
+        [tenant_id, username, hashedPassword, customer_no, first_name, last_name, contact_no, email, province, city, barangay, street]
       );
       res.status(201).json({
         success:  true,
         message:  "Your account has been created successfully.",
-        customer: { customer_id: result.insertId, tenant_id: DEFAULT_TENANT_ID, username, customer_no, first_name, last_name, contact_no, email, province, city, barangay, street, is_active: 1 },
+        customer: { customer_id: result.insertId, tenant_id, username, customer_no, first_name, last_name, contact_no, email, province, city, barangay, street, is_active: 1 },
       });
     } catch (err: any) {
       console.error("Register error:", err);
@@ -385,23 +395,39 @@ async function startServer() {
   });
 
   // ── Auth: Login ───────────────────────────────────────────────────────────
+  // Now requires tenant_id in the request body. Login is rejected if the
+  // customer's tenant_id does not match the cooperative they verified.
   app.post("/api/auth/login", async (req, res) => {
     try {
       const usernameOrEmail = String(req.body.username ?? req.body.email ?? "").trim();
       const password        = String(req.body.password ?? "");
+      const tenant_id       = Number(req.body.tenant_id ?? 0);
+
       if (!usernameOrEmail || !password)
         return res.status(400).json({ success: false, message: "Please enter your username and password." });
+
+      if (!tenant_id)
+        return res.status(400).json({ success: false, message: "Cooperative verification is required. Please restart the app and enter your cooperative code." });
+
       const [rows] = await pool.query<CustomerRow[]>(
         `SELECT customer_id, tenant_id, user_id, username, password, customer_no, first_name, last_name, contact_no, email, province, city, barangay, street, created_at, is_active
          FROM customers WHERE (username = ? OR email = ?) AND is_active = 1 LIMIT 1`,
         [usernameOrEmail, usernameOrEmail]
       );
+
       if (rows.length === 0)
         return res.status(401).json({ success: false, message: "Incorrect username or password." });
+
       const customer = rows[0];
       const match    = await bcrypt.compare(password, customer.password);
+
       if (!match)
         return res.status(401).json({ success: false, message: "Incorrect username or password." });
+
+      // Strictly enforce tenant match — prevent cross-cooperative login
+      if (Number(customer.tenant_id) !== tenant_id)
+        return res.status(403).json({ success: false, message: "This account does not belong to the selected cooperative. Please check your cooperative code." });
+
       const { password: _pw, ...safeCustomer } = customer;
       res.json({ success: true, customer: safeCustomer });
     } catch (err: any) {
@@ -441,11 +467,12 @@ async function startServer() {
       const rate          = Number(interest_rate) || 0;
       const months        = Number(term_months) || 1;
       const total_payable = Number((amount + amount * (rate / 100) * months).toFixed(2));
+      const resolvedTenantId = Number(tenant_id ?? FALLBACK_TENANT_ID);
 
       const [loanResult] = await pool.query<ResultSetHeader>(
         `INSERT INTO loans (tenant_id, customer_id, reference_no, principal_amount, interest_rate, payment_term, term_months, total_payable, remaining_balance, id_type, collateral_type, status, is_active)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', 1)`,
-        [tenant_id ?? DEFAULT_TENANT_ID, customer_id, reference_no, amount, rate, payment_term, months, total_payable, total_payable, id_type ?? null, collateral_type]
+        [resolvedTenantId, customer_id, reference_no, amount, rate, payment_term, months, total_payable, total_payable, id_type ?? null, collateral_type]
       );
       const loan_id = loanResult.insertId;
 
@@ -458,7 +485,7 @@ async function startServer() {
         } catch (coMakerErr: any) { console.warn("Co-maker insert skipped:", coMakerErr.message); }
       }
 
-      await insertNotification(customer_id, tenant_id ?? DEFAULT_TENANT_ID, "Loan Application Received",
+      await insertNotification(customer_id, resolvedTenantId, "Loan Application Received",
         `Your application (${reference_no}) for ₱${amount.toLocaleString()} has been submitted and is pending review.`, "general");
 
       try {
@@ -492,7 +519,7 @@ async function startServer() {
 
       for (const loan of rows) {
         const newStatus  = String(loan.status ?? "").toLowerCase();
-        const tenantId   = loan.tenant_id ?? DEFAULT_TENANT_ID;
+        const tenantId   = loan.tenant_id ?? FALLBACK_TENANT_ID;
         const [cached]   = await pool.query<RowDataPacket[]>(`SELECT last_status FROM loan_status_cache WHERE loan_id = ? LIMIT 1`, [loan.loan_id]);
         const lastStatus = cached[0] ? String(cached[0].last_status).toLowerCase() : null;
         if (!lastStatus) {
@@ -600,10 +627,6 @@ async function startServer() {
 
       const desc = description || "Loan Payment";
 
-      // IMPORTANT: success_url is passed verbatim to PayMongo.
-      // The frontend sends: .../success?session_id={CHECKOUT_SESSION_ID}&amount=...
-      // PayMongo replaces {CHECKOUT_SESSION_ID} server-side before redirecting.
-      // Do NOT encode or modify success_url here.
       const response = await fetch("https://api.paymongo.com/v1/checkout_sessions", {
         method: "POST",
         headers: PAYMONGO_HEADERS,
@@ -867,13 +890,9 @@ async function startServer() {
   app.post("/api/paymongo/record-payment", async (req, res) => {
     try {
       const {
-        loan_id,
-        amount,
-        method,
-        paymongo_source_id,
-        paymongo_intent_id,
-        paymongo_session_id,
-        paymongo_method_type,
+        loan_id, amount, method,
+        paymongo_source_id, paymongo_intent_id,
+        paymongo_session_id, paymongo_method_type,
         paymongo_payment_id,
       } = req.body;
 
@@ -886,7 +905,6 @@ async function startServer() {
       const pmId  = paymongo_session_id ?? paymongo_source_id ?? paymongo_intent_id;
       const or_no = pmId ? `OR-PM-${String(pmId).slice(-8).toUpperCase()}` : `OR-${Date.now()}`;
 
-      // Deduplication guard
       for (const pmRef of [paymongo_session_id, paymongo_source_id, paymongo_intent_id, paymongo_payment_id].filter(Boolean)) {
         const [existing] = await pool.query<RowDataPacket[]>(
           `SELECT payment_id FROM payments WHERE notes LIKE ? LIMIT 1`, [`%${pmRef}%`]
@@ -898,7 +916,7 @@ async function startServer() {
       const [loanRows] = await pool.query<RowDataPacket[]>(
         `SELECT l.loan_id, l.customer_id, l.remaining_balance, COALESCE(l.tenant_id, c.tenant_id, ?) AS tenant_id
          FROM loans l JOIN customers c ON c.customer_id = l.customer_id WHERE l.loan_id = ? LIMIT 1`,
-        [DEFAULT_TENANT_ID, loan_id]
+        [FALLBACK_TENANT_ID, loan_id]
       );
       if (loanRows.length === 0) return res.status(404).json({ success: false, message: "Loan not found." });
 
@@ -907,15 +925,11 @@ async function startServer() {
       const newBalance = Math.max(0, Number(loan.remaining_balance) - payAmount);
       const isFullyPaid = newBalance <= 0;
 
-      // Route PayMongo reference ID to the correct column based on method
-      // Check against normalizedMethod (always uppercase) — not rawType which can vary
-      const isGcashMethod = normalizedMethod === "GCASH";
-      const pmRef         = paymongo_payment_id ?? paymongo_session_id ?? paymongo_source_id ?? paymongo_intent_id ?? null;
+      const isGcashMethod      = normalizedMethod === "GCASH";
+      const pmRef              = paymongo_payment_id ?? paymongo_session_id ?? paymongo_source_id ?? paymongo_intent_id ?? null;
       const gcash_reference_no = isGcashMethod ? pmRef : null;
       const bank_reference_no  = isGcashMethod ? null  : pmRef;
-
-      // Clean, formal notes for the payment record
-      const notes = `Online Payment via PayMongo (${normalizedMethod})`;
+      const notes              = `Online Payment via PayMongo (${normalizedMethod})`;
 
       const [payResult] = await pool.query<ResultSetHeader>(
         `INSERT INTO payments (loan_id, amount, payment_date, method, notes, tenant_id, or_no, gcash_reference_no, bank_reference_no)
@@ -929,7 +943,7 @@ async function startServer() {
       );
 
       await insertNotification(
-        loan.customer_id, Number(loan.tenant_id) || DEFAULT_TENANT_ID,
+        loan.customer_id, Number(loan.tenant_id) || FALLBACK_TENANT_ID,
         isFullyPaid ? "Loan Fully Paid 🎉" : "Payment Received",
         isFullyPaid
           ? "Congratulations! Your loan has been fully paid. Thank you!"
