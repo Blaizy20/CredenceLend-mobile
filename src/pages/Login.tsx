@@ -44,12 +44,11 @@ export default function Login() {
   type Screen = 'tenant' | 'login';
   const [screen, setScreen] = React.useState<Screen>(existingTenant ? 'login' : 'tenant');
 
-  // Reads tenant after transitioning to login screen
   const [tenant, setTenant] = React.useState<{
-    tenant_id:     number;
-    tenant_name:   string;
-    subdomain?:    string;
-    logo_path?:    string | null;
+    tenant_id:      number;
+    tenant_name:    string;
+    subdomain?:     string;
+    logo_path?:     string | null;
     primary_color?: string | null;
   } | null>(existingTenant);
 
@@ -59,7 +58,7 @@ export default function Login() {
   const [codeError, setCodeError]     = React.useState('');
   const [codeSuccess, setCodeSuccess] = React.useState(false);
   const [rememberTenant, setRememberTenant] = React.useState(false);
-  const inputRefs                     = useRef<(HTMLInputElement | null)[]>([]);
+  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   React.useEffect(() => {
     if (screen === 'tenant' && !splashVisible) {
@@ -131,7 +130,6 @@ export default function Login() {
 
       const tenantPayload = JSON.stringify(tenantData);
 
-      // Save to localStorage (persists) or sessionStorage (clears on app close)
       if (rememberTenant) {
         localStorage.setItem('tenant', tenantPayload);
       } else {
@@ -157,6 +155,11 @@ export default function Login() {
   const [loading, setLoading]             = React.useState(false);
   const [usernameError, setUsernameError] = React.useState('');
   const [greeting, setGreeting]           = React.useState<{ name: string } | null>(null);
+
+  // Friendly display label for the subdomain
+  const branchLabel = tenant?.subdomain
+    ? tenant.subdomain.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+    : 'Main Branch';
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -268,8 +271,16 @@ export default function Login() {
                 {greeting.name}<span className="text-primary">.</span>
               </h1>
               <p className="text-on-surface-variant text-sm mt-3">
-                Welcome back to <span className="text-primary font-semibold">{tenant?.tenant_name || 'CredenceLend'}</span>
+                Welcome back to{' '}
+                <span className="text-primary font-semibold">
+                  {tenant?.tenant_name || 'CredenceLend'}
+                </span>
               </p>
+              {tenant?.tenant_name && (
+                <p className="text-on-surface-variant/60 text-xs mt-1">
+                  {branchLabel}
+                </p>
+              )}
             </motion.div>
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }}
               className="flex gap-2 mt-12">
@@ -409,18 +420,16 @@ export default function Login() {
                     transition={{ duration: 0.4 }}
                     className="flex flex-col items-center"
                   >
-                    {/* Cooperative name */}
+                    {/* Cooperative name — main identity */}
                     <h1 className="font-headline font-extrabold text-3xl tracking-tighter text-on-surface">
                       {tenant.tenant_name}
                     </h1>
 
-                    {/* Subdomain badge — always rendered, shows "No Branch" as fallback for debugging */}
+                    {/* Branch / subdomain — always shown, "Main Branch" as fallback */}
                     <div className="inline-flex items-center gap-1.5 mt-2.5 px-3 py-1 rounded-full bg-primary/10 border border-primary/20">
                       <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
-                      <span className="text-primary text-xs font-semibold tracking-wide capitalize">
-                        {tenant.subdomain
-                          ? tenant.subdomain.replace(/-/g, ' ')
-                          : 'Main Branch'}
+                      <span className="text-primary text-xs font-semibold tracking-wide">
+                        {branchLabel}
                       </span>
                     </div>
 
@@ -444,8 +453,6 @@ export default function Login() {
 
               {/* ── Login Card ── */}
               <div className="w-full bg-surface-container-low rounded-[2rem] p-8 shadow-2xl shadow-black/60 border-t border-white/5 backdrop-blur-sm">
-
-                {/* Welcome header */}
                 <div className="mb-8">
                   <h2 className="font-headline font-bold text-2xl text-on-surface">Welcome Back</h2>
                   <p className="text-on-surface-variant text-sm mt-1 leading-relaxed">
@@ -453,77 +460,6 @@ export default function Login() {
                       ? `Sign in to access your ${tenant.tenant_name} loan account.`
                       : 'Sign in to your account to continue.'}
                   </p>
-                </div>
-
-                <form className="space-y-6" onSubmit={handleLogin}>
-                  {error && (
-                    <motion.div
-                      initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
-                      className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-500 text-xs font-bold text-center"
-                    >
-                      {error}
-                    </motion.div>
-                  )}
-                  <Input
-                    label="USERNAME"
-                    placeholder="Enter your username"
-                    type="text"
-                    icon={<User size={20} />}
-                    value={username}
-                    onChange={(e) => { setUsername(e.target.value); if (usernameError) setUsernameError(''); }}
-                    error={usernameError}
-                    required
-                  />
-                  <Input
-                    label="PASSWORD"
-                    placeholder="••••••••"
-                    type={showPassword ? 'text' : 'password'}
-                    icon={<Lock size={20} />}
-                    value={password}
-                    onChange={(e) => { setPassword(e.target.value); if (error) setError(''); }}
-                    required
-                  />
-
-                  <div className="flex items-center justify-between px-1">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={showPassword}
-                        onChange={(e) => setShowPassword(e.target.checked)}
-                        className="w-4 h-4 rounded border-outline-variant bg-surface-container text-primary focus:ring-primary/30"
-                      />
-                      <span className="text-sm text-on-surface-variant font-medium">Show Password</span>
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => navigate('/forgot-password')}
-                      className="text-sm font-semibold text-primary hover:underline"
-                    >
-                      Forgot Password?
-                    </button>
-                  </div>
-
-                  <Button type="submit" disabled={loading || !!greeting}>
-                    {loading ? 'Signing in...' : 'Login'} <ArrowRight size={20} />
-                  </Button>
-                </form>
-
-                <div className="mt-8 pt-8 border-t border-outline-variant/10 text-center">
-                  <p className="text-on-surface-variant text-sm">
-                    Don't have an account?
-                    <button onClick={() => navigate('/register')} className="text-primary font-bold ml-1 hover:underline">
-                      Register
-                    </button>
-                  </p>
-                </div>
-              </div>
-            </div>
-
-              {/* Login Card */}
-              <div className="w-full bg-surface-container-low rounded-[2rem] p-8 shadow-2xl shadow-black/60 border-t border-white/5 backdrop-blur-sm">
-                <div className="mb-8">
-                  <h2 className="font-headline font-bold text-2xl text-on-surface">Welcome Back</h2>
-                  <p className="text-on-surface-variant text-sm mt-1">Sign in to your account</p>
                 </div>
 
                 <form className="space-y-6" onSubmit={handleLogin}>
