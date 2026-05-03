@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
 import { BottomNav } from '../components/BottomNav';
-import { ReceiptText, ArrowUpRight, ArrowDownLeft, Calendar, FileDown, Loader2 } from 'lucide-react';
+import { ReceiptText, ArrowUpRight, Calendar, FileDown, Loader2 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { API_BASE } from '../lib/api';
 
@@ -26,14 +26,14 @@ export default function Transactions() {
   React.useEffect(() => {
     let user: any = null;
     let tenant: any = null;
-    try { user   = JSON.parse(localStorage.getItem('user')   || 'null'); } catch {}
-    try { tenant = JSON.parse(localStorage.getItem('tenant') || 'null'); } catch {}
+    try { user   = JSON.parse(localStorage.getItem('user')      || 'null'); } catch {}
+    try { tenant = JSON.parse(sessionStorage.getItem('tenant')  || 'null'); } catch {} // ← fixed
 
     if (!user?.customer_id) {
       navigate('/login', { replace: true });
       return;
     }
-    if (!tenant?.DEFAULT_TENANT_ID) {
+    if (!tenant?.tenant_id) {
       navigate('/enter-code', { replace: true });
       return;
     }
