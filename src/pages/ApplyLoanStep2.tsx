@@ -73,7 +73,7 @@ export default function ApplyLoanStep2() {
     if (!formData.first_name.trim()) newErrors.first_name = 'First name is required.';
     if (!formData.last_name.trim())  newErrors.last_name  = 'Last name is required.';
     if (!formData.contact_no.trim()) newErrors.contact_no = 'Contact number is required.';
-    else if (!/^09\\d{9}$/.test(formData.contact_no))
+    else if (!/^09\d{9}$/.test(formData.contact_no))
       newErrors.contact_no = 'Please enter a valid PH number (09XXXXXXXXX).';
     if (!formData.province.trim()) newErrors.province = 'Province is required.';
     if (!formData.city.trim())     newErrors.city     = 'City is required.';
