@@ -4,7 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button }  from '../components/Button';
 import { Input }   from '../components/Input';
 import { motion, AnimatePresence } from 'motion/react';
-import { authAPI, BASE } from '../lib/api';
+import { authAPI, API_BASE } from '../lib/api';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -95,7 +95,7 @@ export default function Login() {
     setCodeError('');
 
     try {
-      const res  = await fetch(`${BASE}/api/tenants/verify-code`, {
+      const res  = await fetch(`${API_BASE}/api/tenants/verify-code`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ code: fullCode }),
