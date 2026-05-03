@@ -397,8 +397,8 @@ export default function Login() {
             <div className="relative z-10 w-full max-w-md flex flex-col items-center">
 
               {/* ── Brand ── */}
-              <div className="mb-12 text-center">
-                <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-primary-dim shadow-2xl shadow-primary/20 mb-6">
+              <div className="mb-10 text-center">
+                <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-primary-dim shadow-2xl shadow-primary/20 mb-5">
                   <User className="text-on-primary" size={32} />
                 </div>
 
@@ -407,22 +407,25 @@ export default function Login() {
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.4 }}
+                    className="flex flex-col items-center"
                   >
+                    {/* Cooperative name */}
                     <h1 className="font-headline font-extrabold text-3xl tracking-tighter text-on-surface">
                       {tenant.tenant_name}
                     </h1>
 
-                    {/* Subdomain badge — e.g. "east-branch" */}
-                    {tenant.subdomain && (
-                      <div className="inline-flex items-center gap-1.5 mt-2 mb-1 px-2.5 py-0.5 rounded-full bg-primary/10 border border-primary/20">
-                        <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
-                        <span className="text-primary text-xs font-semibold tracking-wide">
-                          {tenant.subdomain.replace(/-/g, ' ')}
-                        </span>
-                      </div>
-                    )}
+                    {/* Subdomain badge — always rendered, shows "No Branch" as fallback for debugging */}
+                    <div className="inline-flex items-center gap-1.5 mt-2.5 px-3 py-1 rounded-full bg-primary/10 border border-primary/20">
+                      <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
+                      <span className="text-primary text-xs font-semibold tracking-wide capitalize">
+                        {tenant.subdomain
+                          ? tenant.subdomain.replace(/-/g, ' ')
+                          : 'Main Branch'}
+                      </span>
+                    </div>
 
-                    <p className="text-on-surface-variant text-xs mt-2 font-medium">
+                    {/* CredenceLend credit */}
+                    <p className="text-on-surface-variant text-xs mt-2.5 font-medium">
                       powered by{' '}
                       <span className="text-primary font-semibold">CredenceLend</span>
                     </p>
@@ -438,6 +441,83 @@ export default function Login() {
                   </>
                 )}
               </div>
+
+              {/* ── Login Card ── */}
+              <div className="w-full bg-surface-container-low rounded-[2rem] p-8 shadow-2xl shadow-black/60 border-t border-white/5 backdrop-blur-sm">
+
+                {/* Welcome header */}
+                <div className="mb-8">
+                  <h2 className="font-headline font-bold text-2xl text-on-surface">Welcome Back</h2>
+                  <p className="text-on-surface-variant text-sm mt-1 leading-relaxed">
+                    {tenant?.tenant_name
+                      ? `Sign in to access your ${tenant.tenant_name} loan account.`
+                      : 'Sign in to your account to continue.'}
+                  </p>
+                </div>
+
+                <form className="space-y-6" onSubmit={handleLogin}>
+                  {error && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+                      className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-500 text-xs font-bold text-center"
+                    >
+                      {error}
+                    </motion.div>
+                  )}
+                  <Input
+                    label="USERNAME"
+                    placeholder="Enter your username"
+                    type="text"
+                    icon={<User size={20} />}
+                    value={username}
+                    onChange={(e) => { setUsername(e.target.value); if (usernameError) setUsernameError(''); }}
+                    error={usernameError}
+                    required
+                  />
+                  <Input
+                    label="PASSWORD"
+                    placeholder="••••••••"
+                    type={showPassword ? 'text' : 'password'}
+                    icon={<Lock size={20} />}
+                    value={password}
+                    onChange={(e) => { setPassword(e.target.value); if (error) setError(''); }}
+                    required
+                  />
+
+                  <div className="flex items-center justify-between px-1">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={showPassword}
+                        onChange={(e) => setShowPassword(e.target.checked)}
+                        className="w-4 h-4 rounded border-outline-variant bg-surface-container text-primary focus:ring-primary/30"
+                      />
+                      <span className="text-sm text-on-surface-variant font-medium">Show Password</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => navigate('/forgot-password')}
+                      className="text-sm font-semibold text-primary hover:underline"
+                    >
+                      Forgot Password?
+                    </button>
+                  </div>
+
+                  <Button type="submit" disabled={loading || !!greeting}>
+                    {loading ? 'Signing in...' : 'Login'} <ArrowRight size={20} />
+                  </Button>
+                </form>
+
+                <div className="mt-8 pt-8 border-t border-outline-variant/10 text-center">
+                  <p className="text-on-surface-variant text-sm">
+                    Don't have an account?
+                    <button onClick={() => navigate('/register')} className="text-primary font-bold ml-1 hover:underline">
+                      Register
+                    </button>
+                  </p>
+                </div>
+              </div>
+            </div>
 
               {/* Login Card */}
               <div className="w-full bg-surface-container-low rounded-[2rem] p-8 shadow-2xl shadow-black/60 border-t border-white/5 backdrop-blur-sm">
