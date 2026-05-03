@@ -238,7 +238,7 @@ async function startServer() {
 
     try {
       const [rows]: any = await pool.query(
-        `SELECT tenant_id, tenant_name, display_name, logo_path, primary_color
+        `SELECT tenant_id, tenant_name, subdomain, display_name, logo_path, primary_color
          FROM tenants
          WHERE mobile_app_code = ?
            AND tenant_status = 'ACTIVE'
