@@ -461,38 +461,47 @@ async function startServer() {
 
   // ── Loans: Apply ──────────────────────────────────────────────────────────
   app.post("/api/loans/apply", async (req, res) => {
-    
-    const [activeLoans] = await pool.query<RowDataPacket[]>(
-      `SELECT loan_id FROM loans
-       WHERE customer_id = ? AND tenant_id = ?
-       AND status NOT IN ('Paid', 'Closed', 'Denied')
-       AND is_active = 1`,
-      [customer_id, tenant_id]
-    );
-
-    if (activeLoans.length > 0) {
-      return res.status(409).json({
-        success: false,
-        message: 'You already have an active loan. Please settle your current loan before applying for a new one.'
-      });
-    }
-
     try {
-      const { customer_id, tenant_id, principal_amount, payment_term, interest_rate, term_months, id_type, collateral_type, co_maker } = req.body;
+      // ✅ Destructure first before using any variables
+      const {
+        customer_id, tenant_id, principal_amount, payment_term,
+        interest_rate, term_months, id_type, collateral_type, co_maker,
+      } = req.body;
+
       if (!customer_id || !principal_amount || !payment_term || !collateral_type)
         return res.status(400).json({ success: false, message: "Please complete all required fields." });
+
       const amount = Number(principal_amount);
       if (isNaN(amount) || amount < 1000 || amount > 500000)
         return res.status(400).json({ success: false, message: "Loan amount must be between ₱1,000 and ₱500,000." });
 
+      // ✅ Active loan check now inside try, after destructuring
+      const [activeLoans] = await pool.query<RowDataPacket[]>(
+        `SELECT loan_id FROM loans
+         WHERE customer_id = ? AND tenant_id = ?
+         AND status NOT IN ('Paid', 'Closed', 'Denied', 'CLOSED', 'PAID')
+         AND is_active = 1`,
+        [customer_id, tenant_id]
+      );
+
+      if (activeLoans.length > 0) {
+        return res.status(409).json({
+          success:    false,
+          error_code: 'UNPAID_LOANS_EXIST',
+          message:    'You already have an active loan. Please settle your current loan before applying for a new one.',
+        });
+      }
+
       const year = new Date().getFullYear();
       const [lastLoanRows] = await pool.query<RowDataPacket[]>(
-        `SELECT reference_no FROM loans WHERE reference_no LIKE ? ORDER BY loan_id DESC LIMIT 1`, [`LOAN-${year}-%`]
+        `SELECT reference_no FROM loans WHERE reference_no LIKE ? ORDER BY loan_id DESC LIMIT 1`,
+        [`LOAN-${year}-%`]
       );
-      const reference_no  = getNextReferenceNo(lastLoanRows[0]?.reference_no ?? null, year);
-      const rate          = Number(interest_rate) || 0;
-      const months        = Number(term_months) || 1;
-      const total_payable = Number((amount + amount * (rate / 100) * months).toFixed(2));
+
+      const reference_no     = getNextReferenceNo(lastLoanRows[0]?.reference_no ?? null, year);
+      const rate             = Number(interest_rate) || 0;
+      const months           = Number(term_months) || 1;
+      const total_payable    = Number((amount + amount * (rate / 100) * months).toFixed(2));
       const resolvedTenantId = Number(tenant_id ?? FALLBACK_TENANT_ID);
 
       const [loanResult] = await pool.query<ResultSetHeader>(
@@ -505,20 +514,36 @@ async function startServer() {
       if (co_maker?.first_name && co_maker?.last_name) {
         try {
           await pool.query(
-            `INSERT INTO co_makers (loan_id, customer_id, first_name, last_name, contact_no, email, province, city, barangay, street) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [loan_id, customer_id, String(co_maker.first_name).trim(), String(co_maker.last_name).trim(), co_maker.contact_no || null, co_maker.email || null, co_maker.province || null, co_maker.city || null, co_maker.barangay || null, co_maker.street || null]
+            `INSERT INTO co_makers (loan_id, customer_id, first_name, last_name, contact_no, email, province, city, barangay, street)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [loan_id, customer_id, String(co_maker.first_name).trim(), String(co_maker.last_name).trim(),
+             co_maker.contact_no || null, co_maker.email || null, co_maker.province || null,
+             co_maker.city || null, co_maker.barangay || null, co_maker.street || null]
           );
         } catch (coMakerErr: any) { console.warn("Co-maker insert skipped:", coMakerErr.message); }
       }
 
-      await insertNotification(customer_id, resolvedTenantId, "Loan Application Received",
-        `Your application (${reference_no}) for ₱${amount.toLocaleString()} has been submitted and is pending review.`, "general");
+      await insertNotification(
+        customer_id, resolvedTenantId,
+        "Loan Application Received",
+        `Your application (${reference_no}) for ₱${amount.toLocaleString()} has been submitted and is pending review.`,
+        "general"
+      );
 
       try {
-        await pool.query(`INSERT INTO loan_status_cache (loan_id, last_status) VALUES (?, 'Pending') ON DUPLICATE KEY UPDATE last_status = 'Pending'`, [loan_id]);
+        await pool.query(
+          `INSERT INTO loan_status_cache (loan_id, last_status) VALUES (?, 'Pending')
+           ON DUPLICATE KEY UPDATE last_status = 'Pending'`,
+          [loan_id]
+        );
       } catch (cacheErr: any) { console.warn("Status cache seed skipped:", cacheErr.message); }
 
-      res.status(201).json({ success: true, message: "Your loan application has been submitted successfully.", loan: { loan_id, reference_no, total_payable, status: "Pending" } });
+      res.status(201).json({
+        success: true,
+        message: "Your loan application has been submitted successfully.",
+        loan:    { loan_id, reference_no, total_payable, status: "Pending" },
+      });
+
     } catch (err: any) {
       console.error("Loan apply error:", err);
       res.status(500).json({ success: false, message: "Failed to submit loan application.", error: err.message });
