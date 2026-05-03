@@ -193,12 +193,21 @@ export default function Payment() {
 
       if (isCapacitor) {
         // Listen for the success_url redirect back into the app
-        const listener = await App.addListener('appUrlOpen', async (event) => {
-          await listener.remove();
-          await Browser.close();
-          // Navigate to success page inside the app
-          const successPath = `/loan/${id}/pay/success?amount=${amount}`;
-          window.location.href = successPath;
+        const finishedListener = await Browser.addListener('browserFinished', async () => {
+          await finishedListener.remove();
+
+          try {
+            const raw = localStorage.getItem(SS_PENDING_KEY);
+            if (raw) {
+              const pending = JSON.parse(raw);
+              if (pending.loan_id === id) {
+                window.location.href = `/loan/${id}/pay/success?amount=${amount}`;
+                return;
+              }
+            }
+          } catch {}
+
+          setPayStatus('idle');
         });
 
         // Open PayMongo in Capacitor in-app browser (not external browser)
