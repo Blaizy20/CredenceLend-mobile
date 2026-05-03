@@ -261,7 +261,7 @@ async function startServer() {
         success:       true,
         tenant_id:     rows[0].tenant_id,
         tenant_name:   rows[0].display_name || rows[0].tenant_name,
-        subdomain:     rows[0].subdomain    ?? null,
+        subdomain:     rows[0].subdomain    ?? ''
         logo_path:     rows[0].logo_path    ?? null,
         primary_color: rows[0].primary_color ?? null,
       });
