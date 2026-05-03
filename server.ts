@@ -970,7 +970,7 @@ async function startServer() {
       );
 
       await pool.query(
-        `UPDATE loans SET remaining_balance = ?, status = IF(? <= 0, 'Paid', status) WHERE loan_id = ?`,
+        `UPDATE loans SET remaining_balance = ?, status = IF(? <= 0, 'CLOSED', status) WHERE loan_id = ?`,
         [newBalance, newBalance, loan_id]
       );
 
