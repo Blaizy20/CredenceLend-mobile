@@ -8,9 +8,19 @@ const BASE = Capacitor.isNativePlatform()
 
 export { BASE as API_BASE };
 
+// ─── Tenant helper ────────────────────────────────────────────────────────────
+// Reads the verified tenant from whichever storage has it.
+function getStoredTenantId(): number {
+  try {
+    const t = JSON.parse(localStorage.getItem('tenant')   || 'null')
+           ?? JSON.parse(sessionStorage.getItem('tenant') || 'null');
+    return Number(t?.tenant_id ?? 0);
+  } catch {
+    return 0;
+  }
+}
+
 // ─── Auth token helper ────────────────────────────────────────────────────────
-// Reads Bearer token from the stored user object once and returns headers.
-// Every protected endpoint uses this instead of duplicating token logic.
 function authHeaders(): Record<string, string> {
   try {
     const user = JSON.parse(localStorage.getItem('user') || 'null');
@@ -45,8 +55,8 @@ export interface LoanApplyPayload {
 }
 
 export interface LoanApplyResponse {
-  success:   boolean;
-  message?:  string;
+  success:     boolean;
+  message?:    string;
   error_code?: string;
   data?: {
     loan_id:              number;
@@ -66,21 +76,25 @@ export interface LoanApplyResponse {
 
 export const authAPI = {
   login: async (username: string, password: string) => {
+    const tenant_id = getStoredTenantId();
+
     const res = await fetch(`${BASE}/api/auth/login`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ username, password }),
+      body:    JSON.stringify({ username, password, tenant_id }),
     });
     const data = await res.json();
     if (!data.success) throw new Error(data.message || 'Invalid username or password.');
     return data;
   },
 
-  register: async (data: Record<string, string>) => {
+  register: async (data: Record<string, string | number>) => {
+    const tenant_id = getStoredTenantId();
+
     const res = await fetch(`${BASE}/api/auth/register`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(data),
+      body:    JSON.stringify({ ...data, tenant_id }),
     });
     return res.json();
   },
@@ -185,38 +199,33 @@ export const loansAPI = {
       throw new Error(e.message || `Server error (${res.status}). Please try again.`);
     }
 
-    // Map known backend error codes to friendly messages
     if (!result.success) {
       const friendlyMessages: Record<string, string> = {
-        UNPAID_LOANS_EXIST:   'You have an existing active loan. Please settle it before applying for a new one.',
-        INVALID_AMOUNT:       'The loan amount entered is invalid.',
-        INVALID_TERM:         'The loan term entered is invalid.',
-        CUSTOMER_NOT_FOUND:   'Your account could not be found. Please log in again.',
-        TENANT_REQUIRED:      'Cooperative configuration error. Please contact support.',
-        AUTH_INVALID:         'Your session has expired. Please log in again.',
-        TOKEN_MISSING:        'Authentication required. Please log in again.',
+        UNPAID_LOANS_EXIST: 'You have an existing active loan. Please settle it before applying for a new one.',
+        INVALID_AMOUNT:     'The loan amount entered is invalid.',
+        INVALID_TERM:       'The loan term entered is invalid.',
+        CUSTOMER_NOT_FOUND: 'Your account could not be found. Please log in again.',
+        TENANT_REQUIRED:    'Cooperative configuration error. Please contact support.',
+        AUTH_INVALID:       'Your session has expired. Please log in again.',
+        TOKEN_MISSING:      'Authentication required. Please log in again.',
       };
-      const code    = result.error_code ?? '';
+      const code     = result.error_code ?? '';
       result.message = friendlyMessages[code] || result.message || 'Submission failed. Please try again.';
     }
 
     return result;
   },
 
-  // ── Upload a single requirement document ──────────────────────────────────
-  // Called once per file AFTER applyLoan() returns a loan_id.
-  // ⚠️  Confirm the exact route path with your web dev — search their repo
-  //     for where 'uploads/requirements' is referenced in a POST route.
   uploadDocument: async (loanId: number, requirementCode: string, file: File): Promise<boolean> => {
     try {
       const form = new FormData();
       form.append('loan_id',          String(loanId));
       form.append('requirement_code', requirementCode);
-      form.append('file',             file);           // ← confirm field name with web dev
+      form.append('file',             file);
 
-      const res = await fetch(`${BASE}/api/loans/requirements/upload`, {  // ← confirm path
+      const res = await fetch(`${BASE}/api/loans/requirements/upload`, {
         method:  'POST',
-        headers: authHeaders(),  // NOTE: do NOT set Content-Type — browser sets multipart boundary automatically
+        headers: authHeaders(),
         body:    form,
       });
 
