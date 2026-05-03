@@ -8,9 +8,6 @@ const BASE = Capacitor.isNativePlatform()
 
 export { BASE as API_BASE };
 
-// ─── Auth token helper ────────────────────────────────────────────────────────
-// Reads Bearer token from the stored user object once and returns headers.
-// Every protected endpoint uses this instead of duplicating token logic.
 function authHeaders(): Record<string, string> {
   try {
     const user = JSON.parse(localStorage.getItem('user') || 'null');
@@ -34,7 +31,7 @@ export interface LoanApplyPayload {
   customer_id:       number;
   tenant_id:         number;
   principal_amount:  number;
-  payment_term:      string;   // 'daily' | 'weekly' | 'semi_monthly' | 'monthly'
+  payment_term:      string;
   interest_rate:     number;
   term_months:       number;
   id_type:           string;
@@ -45,9 +42,9 @@ export interface LoanApplyPayload {
 }
 
 export interface LoanApplyResponse {
-  success:   boolean;
-  message?:  string;
-  error_code?: string;
+  success:      boolean;
+  message?:     string;
+  error_code?:  string;
   data?: {
     loan_id:              number;
     reference_no:         string;
@@ -165,7 +162,7 @@ export const loansAPI = {
   },
 
   applyLoan: async (data: LoanApplyPayload): Promise<LoanApplyResponse> => {
-    const res = await fetch(`${BASE}/api/loans/apply`, {
+    const res = await fetch(`${BASE}/api/v1/loans.php?action=apply`, {  // ✅ corrected URL
       method:  'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -173,6 +170,7 @@ export const loansAPI = {
       },
       body: JSON.stringify(data),
     });
+
     let result: any = {};
     try {
       const contentType = res.headers.get('content-type') ?? '';
@@ -185,18 +183,17 @@ export const loansAPI = {
       throw new Error(e.message || `Server error (${res.status}). Please try again.`);
     }
 
-    // Map known backend error codes to friendly messages
     if (!result.success) {
       const friendlyMessages: Record<string, string> = {
-        UNPAID_LOANS_EXIST:   'You have an existing active loan. Please settle it before applying for a new one.',
-        INVALID_AMOUNT:       'The loan amount entered is invalid.',
-        INVALID_TERM:         'The loan term entered is invalid.',
-        CUSTOMER_NOT_FOUND:   'Your account could not be found. Please log in again.',
-        TENANT_REQUIRED:      'Cooperative configuration error. Please contact support.',
-        AUTH_INVALID:         'Your session has expired. Please log in again.',
-        TOKEN_MISSING:        'Authentication required. Please log in again.',
+        UNPAID_LOANS_EXIST:  'You have an existing active loan. Please settle it before applying for a new one.',
+        INVALID_AMOUNT:      'The loan amount entered is invalid.',
+        INVALID_TERM:        'The loan term entered is invalid.',
+        CUSTOMER_NOT_FOUND:  'Your account could not be found. Please log in again.',
+        TENANT_REQUIRED:     'Cooperative configuration error. Please contact support.',
+        AUTH_INVALID:        'Your session has expired. Please log in again.',
+        TOKEN_MISSING:       'Authentication required. Please log in again.',
       };
-      const code    = result.error_code ?? '';
+      const code     = result.error_code ?? '';
       result.message = friendlyMessages[code] || result.message || 'Submission failed. Please try again.';
     }
 
@@ -205,18 +202,18 @@ export const loansAPI = {
 
   // ── Upload a single requirement document ──────────────────────────────────
   // Called once per file AFTER applyLoan() returns a loan_id.
-  // ⚠️  Confirm the exact route path with your web dev — search their repo
-  //     for where 'uploads/requirements' is referenced in a POST route.
+  // Best-guess URL following the same loans.php?action= pattern.
+  // If this 404s, try: action=uploadDocument or action=upload
   uploadDocument: async (loanId: number, requirementCode: string, file: File): Promise<boolean> => {
     try {
       const form = new FormData();
       form.append('loan_id',          String(loanId));
       form.append('requirement_code', requirementCode);
-      form.append('file',             file);           // ← confirm field name with web dev
+      form.append('file',             file);
 
-      const res = await fetch(`${BASE}/api/loans/requirements/upload`, {  // ← confirm path
+      const res = await fetch(`${BASE}/api/v1/loans.php?action=upload_document`, {  // ✅ updated to PHP pattern
         method:  'POST',
-        headers: authHeaders(),  // NOTE: do NOT set Content-Type — browser sets multipart boundary automatically
+        headers: authHeaders(),  // no Content-Type — browser sets multipart boundary automatically
         body:    form,
       });
 
