@@ -9,11 +9,11 @@ const BASE = Capacitor.isNativePlatform()
 export { BASE as API_BASE };
 
 // ─── Tenant helper ────────────────────────────────────────────────────────────
-// Reads the verified tenant from whichever storage has it.
+// ✅ sessionStorage first — most recent selection always wins over remembered one
 function getStoredTenantId(): number {
   try {
-    const t = JSON.parse(localStorage.getItem('tenant')   || 'null')
-           ?? JSON.parse(sessionStorage.getItem('tenant') || 'null');
+    const t = JSON.parse(sessionStorage.getItem('tenant') || 'null')
+           ?? JSON.parse(localStorage.getItem('tenant')   || 'null');
     return Number(t?.tenant_id ?? 0);
   } catch {
     return 0;
