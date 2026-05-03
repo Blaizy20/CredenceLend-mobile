@@ -195,10 +195,13 @@ async function startServer() {
   // ── Auth: Availability Checks ─────────────────────────────────────────────
   app.get("/api/auth/check-username", async (req, res) => {
     try {
-      const username = String(req.query.username || "").trim();
-      if (!username) return res.status(400).json({ taken: false, message: "Username is required." });
+      const username  = String(req.query.username  || "").trim();
+      const tenant_id = Number(req.query.tenant_id || 0);
+      if (!username)  return res.status(400).json({ taken: false, message: "Username is required." });
+      if (!tenant_id) return res.status(400).json({ taken: false, message: "Cooperative is required." });
       const [rows] = await pool.query<RowDataPacket[]>(
-        "SELECT customer_id FROM customers WHERE username = ? LIMIT 1", [username]
+        "SELECT customer_id FROM customers WHERE username = ? AND tenant_id = ? LIMIT 1",
+        [username, tenant_id]
       );
       res.json({ taken: rows.length > 0 });
     } catch { res.status(500).json({ taken: false, message: "An unexpected error occurred." }); }
@@ -206,10 +209,13 @@ async function startServer() {
 
   app.get("/api/auth/check-email", async (req, res) => {
     try {
-      const email = String(req.query.email || "").trim();
-      if (!email) return res.status(400).json({ taken: false, message: "Email is required." });
+      const email     = String(req.query.email     || "").trim();
+      const tenant_id = Number(req.query.tenant_id || 0);
+      if (!email)     return res.status(400).json({ taken: false, message: "Email is required." });
+      if (!tenant_id) return res.status(400).json({ taken: false, message: "Cooperative is required." });
       const [rows] = await pool.query<RowDataPacket[]>(
-        "SELECT customer_id FROM customers WHERE email = ? LIMIT 1", [email]
+        "SELECT customer_id FROM customers WHERE email = ? AND tenant_id = ? LIMIT 1",
+        [email, tenant_id]
       );
       res.json({ taken: rows.length > 0 });
     } catch { res.status(500).json({ taken: false, message: "An unexpected error occurred." }); }
@@ -218,9 +224,12 @@ async function startServer() {
   app.get("/api/auth/check-contact", async (req, res) => {
     try {
       const contactNo = String(req.query.contactNo || "").trim();
+      const tenant_id = Number(req.query.tenant_id || 0);
       if (!contactNo) return res.status(400).json({ taken: false, message: "Contact number is required." });
+      if (!tenant_id) return res.status(400).json({ taken: false, message: "Cooperative is required." });
       const [rows] = await pool.query<RowDataPacket[]>(
-        "SELECT customer_id FROM customers WHERE contact_no = ? LIMIT 1", [contactNo]
+        "SELECT customer_id FROM customers WHERE contact_no = ? AND tenant_id = ? LIMIT 1",
+        [contactNo, tenant_id]
       );
       res.json({ taken: rows.length > 0 });
     } catch { res.status(500).json({ taken: false, message: "An unexpected error occurred." }); }
@@ -360,9 +369,11 @@ async function startServer() {
       if (!/\S+@\S+\.\S+/.test(email))
         return res.status(400).json({ success: false, message: "Please enter a valid email address." });
 
+      // ✅ NEW — scoped to tenant_id only
       const [duplicateRows] = await pool.query<RowDataPacket[]>(
-        `SELECT customer_id, username, email, contact_no FROM customers WHERE username = ? OR email = ? OR contact_no = ? LIMIT 1`,
-        [username, email, contact_no]
+        `SELECT customer_id, username, email, contact_no FROM customers
+         WHERE tenant_id = ? AND (username = ? OR email = ? OR contact_no = ?) LIMIT 1`,
+        [tenant_id, username, email, contact_no]
       );
       if (duplicateRows.length > 0) {
         const dup = duplicateRows[0];
