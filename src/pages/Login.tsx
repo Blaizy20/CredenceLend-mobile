@@ -4,12 +4,11 @@ import { useNavigate } from 'react-router-dom';
 import { Button }  from '../components/Button';
 import { Input }   from '../components/Input';
 import { motion, AnimatePresence } from 'motion/react';
-import { authAPI } from '../lib/api';
+import { authAPI, BASE } from '../lib/api';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const CODE_LENGTH = 6;
-const API_BASE    = import.meta.env.VITE_API_URL ?? '';
 
 function getGreeting() {
   const h = new Date().getHours();
@@ -34,19 +33,22 @@ export default function Login() {
 
   // ── Tenant gate — skip if already verified ────────────────────────────────
   const existingTenant = React.useMemo(() => {
-    try { return JSON.parse(localStorage.getItem('tenant') || 'null'); }
-    catch { return null; }
+    try {
+      return JSON.parse(localStorage.getItem('tenant')   || 'null')
+          ?? JSON.parse(sessionStorage.getItem('tenant') || 'null');
+    } catch { return null; }
   }, []);
 
   type Screen = 'tenant' | 'login';
   const [screen, setScreen] = React.useState<Screen>(existingTenant ? 'login' : 'tenant');
 
-  // ── Tenant gate state ────────────────────────────────────────────────────
-  const [code, setCode]             = React.useState<string[]>(Array(CODE_LENGTH).fill(''));
+  // ── Tenant gate state ─────────────────────────────────────────────────────
+  const [code, setCode]               = React.useState<string[]>(Array(CODE_LENGTH).fill(''));
   const [codeLoading, setCodeLoading] = React.useState(false);
-  const [codeError, setCodeError]   = React.useState('');
+  const [codeError, setCodeError]     = React.useState('');
   const [codeSuccess, setCodeSuccess] = React.useState(false);
-  const inputRefs                   = useRef<(HTMLInputElement | null)[]>([]);
+  const [rememberTenant, setRememberTenant] = React.useState(false);
+  const inputRefs                     = useRef<(HTMLInputElement | null)[]>([]);
 
   React.useEffect(() => {
     if (screen === 'tenant' && !splashVisible) {
@@ -54,7 +56,7 @@ export default function Login() {
     }
   }, [screen, splashVisible]);
 
-  const fullCode = code.join('').toUpperCase();
+  const fullCode  = code.join('').toUpperCase();
   const codeReady = fullCode.length === CODE_LENGTH && !code.includes('');
 
   const handleCodeChange = (idx: number, value: string) => {
@@ -93,7 +95,7 @@ export default function Login() {
     setCodeError('');
 
     try {
-      const res  = await fetch(`${API_BASE}/api/tenants/verify-code`, {
+      const res  = await fetch(`${BASE}/api/tenants/verify-code`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ code: fullCode }),
@@ -107,13 +109,20 @@ export default function Login() {
         return;
       }
 
-      localStorage.setItem('tenant', JSON.stringify({
+      const tenantPayload = JSON.stringify({
         tenant_id:     data.tenant_id,
         tenant_name:   data.tenant_name   ?? '',
         logo_path:     data.logo_path     ?? null,
         primary_color: data.primary_color ?? null,
         code:          fullCode,
-      }));
+      });
+
+      // Save to localStorage (persists) or sessionStorage (clears on app close)
+      if (rememberTenant) {
+        localStorage.setItem('tenant', tenantPayload);
+      } else {
+        sessionStorage.setItem('tenant', tenantPayload);
+      }
 
       setCodeSuccess(true);
       setTimeout(() => setScreen('login'), 1000);
@@ -264,7 +273,7 @@ export default function Login() {
       {/* ── Screens ── */}
       <AnimatePresence mode="wait">
 
-        {/* Tenant Gate Screen */}
+        {/* ── Tenant Gate Screen ── */}
         {screen === 'tenant' && !splashVisible && (
           <motion.div
             key="tenant"
@@ -287,7 +296,7 @@ export default function Login() {
             </div>
 
             {/* Code Boxes */}
-            <div className="flex gap-3 mb-6" onPaste={handleCodePaste}>
+            <div className="flex gap-3 mb-5" onPaste={handleCodePaste}>
               {Array(CODE_LENGTH).fill(null).map((_, idx) => (
                 <input
                   key={idx}
@@ -304,14 +313,26 @@ export default function Login() {
                     bg-surface-container-highest border-2 text-on-surface
                     transition-all outline-none caret-transparent
                     focus:border-primary focus:bg-surface-container disabled:opacity-60
-                    ${codeError   ? 'border-error/60 bg-error/5' :
-                      code[idx]   ? 'border-primary/50'          :
-                                    'border-outline/20'}
+                    ${codeError ? 'border-error/60 bg-error/5' :
+                      code[idx] ? 'border-primary/50'          :
+                                  'border-outline/20'}
                   `}
                 />
               ))}
             </div>
 
+            {/* Remember checkbox */}
+            <label className="flex items-center gap-2 cursor-pointer mb-5">
+              <input
+                type="checkbox"
+                checked={rememberTenant}
+                onChange={(e) => setRememberTenant(e.target.checked)}
+                className="w-4 h-4 rounded border-outline-variant bg-surface-container text-primary focus:ring-primary/30"
+              />
+              <span className="text-sm text-on-surface-variant font-medium">Remember this cooperative</span>
+            </label>
+
+            {/* Error */}
             <AnimatePresence>
               {codeError && (
                 <motion.div
@@ -324,6 +345,7 @@ export default function Login() {
               )}
             </AnimatePresence>
 
+            {/* Verify Button */}
             <div className="w-full max-w-[300px]">
               <button
                 onClick={handleVerifyCode}
@@ -344,7 +366,7 @@ export default function Login() {
           </motion.div>
         )}
 
-        {/* Login Screen */}
+        {/* ── Login Screen ── */}
         {screen === 'login' && !splashVisible && (
           <motion.div
             key="login"
@@ -408,7 +430,7 @@ export default function Login() {
                   />
 
                   <div className="flex items-center justify-between px-1">
-                    <label className="flex items-center gap-2 cursor-pointer group">
+                    <label className="flex items-center gap-2 cursor-pointer">
                       <input
                         type="checkbox"
                         checked={showPassword}
