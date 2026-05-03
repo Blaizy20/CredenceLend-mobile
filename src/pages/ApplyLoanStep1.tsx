@@ -1,17 +1,17 @@
 import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { X, ArrowRight, Camera } from 'lucide-react';
-import { TopBar } from '../components/TopBar';
-import { Button } from '../components/Button';
-import { Input } from '../components/Input';
+import { TopBar }  from '../components/TopBar';
+import { Button }  from '../components/Button';
+import { Input }   from '../components/Input';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const TERM_OPTIONS = [
-  { label: 'Daily',        apiValue: 'daily',       rate: 2.75, periodsPerMonth: 30    },
-  { label: 'Weekly',       apiValue: 'weekly',      rate: 3.0,  periodsPerMonth: 4.33  },
-  { label: 'Semi-monthly', apiValue: 'semi_monthly', rate: 3.5,  periodsPerMonth: 2    },
-  { label: 'Monthly',      apiValue: 'monthly',     rate: 4.0,  periodsPerMonth: 1     },
+  { label: 'Daily',        apiValue: 'daily',        periodsPerMonth: 30   },
+  { label: 'Weekly',       apiValue: 'weekly',        periodsPerMonth: 4.33 },
+  { label: 'Semi-monthly', apiValue: 'semi_monthly',  periodsPerMonth: 2    },
+  { label: 'Monthly',      apiValue: 'monthly',       periodsPerMonth: 1    },
 ];
 
 const COLLATERAL_TYPES = [
@@ -31,14 +31,13 @@ const ID_TYPES = [
   'PhilSys ID',
 ];
 
-// Docs collected in Step 1 — mapped to backend requirement_code
 const STEP1_DOCS = [
-  { code: 'VALID_ID',         label: 'Valid ID — Front',    hint: 'Clear photo of front side',      required: true,  collateralOnly: false },
-  { code: 'VALID_ID',         label: 'Valid ID — Back',     hint: 'Clear photo of back side',       required: true,  collateralOnly: false },
-  { code: 'PROOF_OF_BILLING', label: 'Proof of Billing',    hint: 'Utility bill or bank statement', required: true,  collateralOnly: false },
-  { code: 'PROOF_OF_INCOME',  label: 'Proof of Income',     hint: 'Payslip, ITR, or certificate',   required: true,  collateralOnly: false },
-  { code: 'COLLATERAL_PROOF', label: 'Collateral Proof',    hint: 'Photo or document of collateral', required: false, collateralOnly: true },
-  { code: 'COLLATERAL_TYPE',  label: 'Collateral Type Doc', hint: 'e.g. OR/CR, title, appraisal',   required: false, collateralOnly: true },
+  { code: 'VALID_ID',         label: 'Valid ID — Front',    hint: 'Clear photo of front side',       required: true,  collateralOnly: false },
+  { code: 'VALID_ID',         label: 'Valid ID — Back',     hint: 'Clear photo of back side',        required: true,  collateralOnly: false },
+  { code: 'PROOF_OF_BILLING', label: 'Proof of Billing',    hint: 'Utility bill or bank statement',  required: true,  collateralOnly: false },
+  { code: 'PROOF_OF_INCOME',  label: 'Proof of Income',     hint: 'Payslip, ITR, or certificate',    required: true,  collateralOnly: false },
+  { code: 'COLLATERAL_PROOF', label: 'Collateral Proof',    hint: 'Photo or document of collateral', required: false, collateralOnly: true  },
+  { code: 'COLLATERAL_TYPE',  label: 'Collateral Type Doc', hint: 'e.g. OR/CR, title, appraisal',    required: false, collateralOnly: true  },
 ];
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -54,6 +53,7 @@ interface Step1Data {
   amount:           string;
   term:             string;
   term_months:      string;
+  interest_rate:    string;   // ← now user-inputtable
   id_type:          string;
   collateral_type:  string;
   collateral_notes: string;
@@ -69,6 +69,7 @@ export default function ApplyLoanStep1() {
     amount:           '',
     term:             'Monthly',
     term_months:      '12',
+    interest_rate:    '',
     id_type:          "Driver's License",
     collateral_type:  '',
     collateral_notes: '',
@@ -77,28 +78,33 @@ export default function ApplyLoanStep1() {
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  const set = (field: keyof Omit<Step1Data, 'docs'>, value: string) =>
+    setFormData(prev => ({ ...prev, [field]: value }));
+
   // ── Live Breakdown ──────────────────────────────────────────────────────────
 
   const breakdown = useMemo(() => {
     const principal  = Number(formData.amount);
     const months     = parseInt(formData.term_months, 10);
+    const rate       = parseFloat(formData.interest_rate);
     const termOption = TERM_OPTIONS.find(t => t.label === formData.term) ?? TERM_OPTIONS[3];
 
-    if (!principal || principal <= 0 || !months || months <= 0) return null;
+    if (!principal || principal <= 0 || !months || months <= 0 || !rate || rate <= 0) return null;
 
-    // Add-on interest: rate is per MONTH applied each month of the loan
-    const totalInterest = principal * (termOption.rate / 100) * months;
+    // Add-on interest: rate % per month × number of months × principal
+    // e.g. ₱3,000 × 4% × 12 months = ₱1,440 total interest → ₱4,440 total payable
+    const totalInterest = principal * (rate / 100) * months;
     const totalPayable  = principal + totalInterest;
     const totalPeriods  = Math.round(months * termOption.periodsPerMonth);
     const perPayment    = totalPeriods > 0 ? totalPayable / totalPeriods : 0;
 
     const periodLabel =
-      formData.term === 'Daily'        ? 'day' :
-      formData.term === 'Weekly'       ? 'week' :
+      formData.term === 'Daily'        ? 'day'         :
+      formData.term === 'Weekly'       ? 'week'        :
       formData.term === 'Semi-monthly' ? '15-day period' : 'month';
 
-    return { rate: termOption.rate, totalInterest, totalPayable, totalPeriods, perPayment, periodLabel };
-  }, [formData.amount, formData.term, formData.term_months]);
+    return { rate, totalInterest, totalPayable, totalPeriods, perPayment, periodLabel };
+  }, [formData.amount, formData.term, formData.term_months, formData.interest_rate]);
 
   // ── File Handling ───────────────────────────────────────────────────────────
 
@@ -123,6 +129,7 @@ export default function ApplyLoanStep1() {
     const newErrors: Record<string, string> = {};
     const amt    = Number(formData.amount);
     const months = parseInt(formData.term_months, 10);
+    const rate   = parseFloat(formData.interest_rate);
 
     if (!formData.amount || isNaN(amt) || amt <= 0)
       newErrors.amount = 'Please enter a valid loan amount.';
@@ -136,10 +143,14 @@ export default function ApplyLoanStep1() {
     else if (months > 180)
       newErrors.term_months = 'Maximum term is 180 months (15 years).';
 
+    if (!formData.interest_rate || isNaN(rate) || rate <= 0)
+      newErrors.interest_rate = 'Please enter the interest rate given by the cooperative.';
+    else if (rate > 100)
+      newErrors.interest_rate = 'Interest rate cannot exceed 100%.';
+
     if (!formData.collateral_type)
       newErrors.collateral_type = 'Please select a collateral type.';
 
-    // Enforce required docs (only non-collateral docs checked when no collateral selected)
     const missingDocs = formData.docs.filter((d, idx) => {
       const def = STEP1_DOCS[idx];
       if (def.collateralOnly && !formData.collateral_type) return false;
@@ -160,20 +171,20 @@ export default function ApplyLoanStep1() {
 
     const termOption = TERM_OPTIONS.find(t => t.label === formData.term) ?? TERM_OPTIONS[3];
     const months     = parseInt(formData.term_months, 10);
+    const rate       = parseFloat(formData.interest_rate);
 
     navigate('/apply/step2', {
       state: {
         step1: {
-          principal_amount:  Number(formData.amount),
-          payment_term:      termOption.apiValue,
+          principal_amount:   Number(formData.amount),
+          payment_term:       termOption.apiValue,
           payment_term_label: formData.term,
-          interest_rate:     termOption.rate,
-          term_months:       months,
-          id_type:           formData.id_type,
-          collateral_type:   formData.collateral_type,
-          collateral_notes:  formData.collateral_notes.trim(),
+          interest_rate:      rate,
+          term_months:        months,
+          id_type:            formData.id_type,
+          collateral_type:    formData.collateral_type,
+          collateral_notes:   formData.collateral_notes.trim(),
         },
-        // Raw File objects — uploaded AFTER loan_id is returned in Step 2
         uploadDocs: formData.docs
           .filter((d, idx) => {
             const def = STEP1_DOCS[idx];
@@ -212,7 +223,7 @@ export default function ApplyLoanStep1() {
           <h2 className="text-3xl font-headline font-extrabold text-on-surface">Loan Details</h2>
         </div>
 
-        {/* Loan Amount & Term */}
+        {/* ── Loan Amount & Term ── */}
         <section className="space-y-5 mb-10">
           <Input
             label="REQUESTED AMOUNT"
@@ -221,21 +232,21 @@ export default function ApplyLoanStep1() {
             icon={<span className="font-bold text-lg">₱</span>}
             className="text-xl font-bold"
             value={formData.amount}
-            onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+            onChange={(e) => set('amount', e.target.value)}
             error={errors.amount}
           />
           <p className="text-xs text-on-surface-variant -mt-3 ml-1">
             Minimum: ₱1,000 · Maximum: ₱500,000
           </p>
 
-          {/* Payment Term — clean labels only */}
+          {/* Payment Term */}
           <div className="space-y-2">
             <label className="block text-[10px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">
               PAYMENT TERM
             </label>
             <select
               value={formData.term}
-              onChange={(e) => setFormData({ ...formData, term: e.target.value })}
+              onChange={(e) => set('term', e.target.value)}
               className="w-full bg-surface-container-highest border-none focus:ring-2 focus:ring-primary/50 rounded-xl py-4 px-4 text-on-surface font-medium transition-all appearance-none"
             >
               {TERM_OPTIONS.map(t => (
@@ -250,11 +261,25 @@ export default function ApplyLoanStep1() {
             placeholder="e.g. 12"
             type="number"
             value={formData.term_months}
-            onChange={(e) => setFormData({ ...formData, term_months: e.target.value })}
+            onChange={(e) => set('term_months', e.target.value)}
             error={errors.term_months}
           />
           <p className="text-xs text-on-surface-variant -mt-3 ml-1">
             1 month minimum · 180 months (15 years) maximum
+          </p>
+
+          {/* Interest Rate — user-inputtable, given by cooperative */}
+          <Input
+            label="INTEREST RATE (% PER MONTH)"
+            placeholder="e.g. 4"
+            type="number"
+            icon={<span className="font-bold text-sm">%</span>}
+            value={formData.interest_rate}
+            onChange={(e) => set('interest_rate', e.target.value)}
+            error={errors.interest_rate}
+          />
+          <p className="text-xs text-on-surface-variant -mt-3 ml-1">
+            Enter the monthly interest rate provided by the cooperative.
           </p>
 
           {/* Live Breakdown Card */}
@@ -295,13 +320,13 @@ export default function ApplyLoanStep1() {
           ) : (
             <div className="rounded-2xl bg-surface-container-low border border-outline-variant/20 p-5">
               <p className="text-xs text-on-surface-variant text-center">
-                Enter an amount and duration to see your loan breakdown.
+                Enter amount, duration, and interest rate to see your loan breakdown.
               </p>
             </div>
           )}
         </section>
 
-        {/* Applicant ID Information */}
+        {/* ── Applicant ID Information ── */}
         <section className="space-y-5 mb-10">
           <h3 className="text-sm font-bold tracking-wider text-primary/80 uppercase">
             Applicant ID Information
@@ -312,7 +337,7 @@ export default function ApplyLoanStep1() {
             </label>
             <select
               value={formData.id_type}
-              onChange={(e) => setFormData({ ...formData, id_type: e.target.value })}
+              onChange={(e) => set('id_type', e.target.value)}
               className="w-full bg-surface-container-highest border-none focus:ring-2 focus:ring-primary/50 rounded-xl py-4 px-4 text-on-surface font-medium transition-all appearance-none"
             >
               {ID_TYPES.map(id => (
@@ -322,7 +347,7 @@ export default function ApplyLoanStep1() {
           </div>
         </section>
 
-        {/* Collateral Information */}
+        {/* ── Collateral Information ── */}
         <section className="space-y-5 mb-10">
           <h3 className="text-sm font-bold tracking-wider text-primary/80 uppercase">
             Collateral Information
@@ -333,7 +358,7 @@ export default function ApplyLoanStep1() {
             </label>
             <select
               value={formData.collateral_type}
-              onChange={(e) => setFormData({ ...formData, collateral_type: e.target.value })}
+              onChange={(e) => set('collateral_type', e.target.value)}
               className={`w-full bg-surface-container-highest border-none focus:ring-2 focus:ring-primary/50 rounded-xl py-4 px-4 text-on-surface font-medium transition-all appearance-none ${
                 errors.collateral_type ? 'ring-2 ring-error/50' : ''
               }`}
@@ -351,14 +376,14 @@ export default function ApplyLoanStep1() {
             label="COLLATERAL NOTES"
             placeholder="e.g. Honda Click 125, 2022 model"
             value={formData.collateral_notes}
-            onChange={(e) => setFormData({ ...formData, collateral_notes: e.target.value })}
+            onChange={(e) => set('collateral_notes', e.target.value)}
           />
           <p className="text-xs text-on-surface-variant -mt-3 ml-1">
             Describe the collateral (brand, model, address, etc.)
           </p>
         </section>
 
-        {/* Required Documents */}
+        {/* ── Required Documents ── */}
         <section className="space-y-4 mb-10">
           <div className="flex items-baseline justify-between">
             <h3 className="text-sm font-bold tracking-wider text-primary/80 uppercase">
@@ -374,10 +399,8 @@ export default function ApplyLoanStep1() {
           )}
 
           {STEP1_DOCS.map((docDef, idx) => {
-            // Hide collateral docs until a collateral type is chosen
             if (docDef.collateralOnly && !formData.collateral_type) return null;
             const doc = formData.docs[idx];
-
             return (
               <div
                 key={`${docDef.code}-${idx}`}
@@ -426,7 +449,7 @@ export default function ApplyLoanStep1() {
           })}
         </section>
 
-        {/* Next Button */}
+        {/* ── Next Button ── */}
         <div className="fixed bottom-0 left-0 w-full p-6 bg-gradient-to-t from-background via-background/95 to-transparent flex justify-center">
           <div className="w-full max-w-md">
             <Button onClick={handleNext}>

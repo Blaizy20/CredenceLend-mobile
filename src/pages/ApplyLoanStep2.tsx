@@ -2,13 +2,41 @@ import { loansAPI, LoanApplyPayload } from '../lib/api';
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
-  BadgeCheck, AlertTriangle, CheckCircle2,
+  AlertTriangle, CheckCircle2,
   User, MapPin, FileText, LayoutDashboard, Upload, Camera,
 } from 'lucide-react';
-import { TopBar }   from '../components/TopBar';
-import { Button }   from '../components/Button';
-import { Input }    from '../components/Input';
+import { TopBar }  from '../components/TopBar';
+import { Button }  from '../components/Button';
+import { Input }   from '../components/Input';
 import { motion, AnimatePresence } from 'motion/react';
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const COMAKER_DOCS = [
+  { code: 'COMAKER_INFO', label: 'Co-maker Info Sheet', hint: 'Signed info / application form' },
+  { code: 'COMAKER_ID',   label: 'Co-maker Valid ID',   hint: "Clear photo of co-maker's ID"  },
+];
+
+const TERM_LABELS: Record<string, string> = {
+  daily:        'Daily',
+  weekly:       'Weekly',
+  semi_monthly: 'Semi-monthly',
+  monthly:      'Monthly',
+};
+
+const TERM_PERIODS: Record<string, { periodsPerMonth: number; label: string }> = {
+  daily:        { periodsPerMonth: 30,   label: 'Daily Payment'        },
+  weekly:       { periodsPerMonth: 4.33, label: 'Weekly Payment'       },
+  semi_monthly: { periodsPerMonth: 2,    label: 'Semi-monthly Payment' },
+  monthly:      { periodsPerMonth: 1,    label: 'Monthly Payment'      },
+};
+
+const REASON_MESSAGES: Record<string, string> = {
+  AUTO_PASSED_AWAITING_REQUIREMENTS:   'Your application passed initial checks. Please complete your document uploads for manager review.',
+  AUTO_PASSED_MANAGER_REVIEW_REQUIRED: 'Your application is now pending manager review.',
+  AMOUNT_EXCEEDS_AFFORDABILITY:        'Your application was denied — the amount exceeds your income threshold.',
+  CI_REVIEW_REQUIRED:                  'Your application has been routed to a credit investigator for review.',
+};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -28,18 +56,6 @@ interface UploadDoc {
   label: string;
   file:  File;
 }
-
-const COMAKER_DOCS = [
-  { code: 'COMAKER_INFO', label: 'Co-maker Info Sheet', hint: 'Signed info / application form' },
-  { code: 'COMAKER_ID',   label: 'Co-maker Valid ID',   hint: "Clear photo of co-maker's ID"  },
-];
-
-const TERM_LABELS: Record<string, string> = {
-  daily:        'Daily',
-  weekly:       'Weekly',
-  semi_monthly: 'Semi-monthly',
-  monthly:      'Monthly',
-};
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -63,12 +79,12 @@ export default function ApplyLoanStep2() {
     COMAKER_ID:   null,
   });
 
-  const [errors, setErrors]                   = useState<Record<string, string>>({});
-  const [submitting, setSubmitting]           = useState(false);
-  const [submitError, setSubmitError]         = useState('');
-  const [showConfirm, setShowConfirm]         = useState(false);
-  const [uploadProgress, setUploadProgress]   = useState('');
-  const [successStep, setSuccessStep]         = useState<'idle' | 'loading' | 'done'>('idle');
+  const [errors, setErrors]                 = useState<Record<string, string>>({});
+  const [submitting, setSubmitting]         = useState(false);
+  const [submitError, setSubmitError]       = useState('');
+  const [showConfirm, setShowConfirm]       = useState(false);
+  const [uploadProgress, setUploadProgress] = useState('');
+  const [successStep, setSuccessStep]       = useState<'idle' | 'loading' | 'done'>('idle');
 
   const [successData, setSuccessData] = useState<{
     instant_reason:       string;
@@ -76,7 +92,21 @@ export default function ApplyLoanStep2() {
     ci_required:          boolean;
   } | null>(null);
 
-  // ── Helpers ─────────────────────────────────────────────────────────────────
+  // ── Payment breakdown (respects payment term frequency) ─────────────────────
+
+  const paymentBreakdown = step1
+    ? (() => {
+        const { principal_amount, interest_rate, term_months, payment_term } = step1;
+        const termInfo      = TERM_PERIODS[payment_term] ?? TERM_PERIODS['monthly'];
+        const totalInterest = principal_amount * (interest_rate / 100) * term_months;
+        const totalPayable  = principal_amount + totalInterest;
+        const totalPeriods  = Math.round(term_months * termInfo.periodsPerMonth);
+        const perPayment    = totalPeriods > 0 ? totalPayable / totalPeriods : 0;
+        return { totalPayable, totalInterest, totalPeriods, perPayment, label: termInfo.label };
+      })()
+    : null;
+
+  // ── Helpers ──────────────────────────────────────────────────────────────────
 
   const handleChange = (field: keyof CoMakerForm, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -94,15 +124,6 @@ export default function ApplyLoanStep2() {
     }
     setComakerFiles(prev => ({ ...prev, [code]: file }));
   };
-
-  const perMonthPayment = step1
-    ? (() => {
-        const { principal_amount, interest_rate, term_months } = step1;
-        const totalInterest = principal_amount * (interest_rate / 100) * term_months;
-        const totalPayable  = principal_amount + totalInterest;
-        return term_months > 0 ? totalPayable / term_months : 0;
-      })()
-    : 0;
 
   // ── Validation ───────────────────────────────────────────────────────────────
 
@@ -126,7 +147,7 @@ export default function ApplyLoanStep2() {
     setShowConfirm(true);
   };
 
-  // ── Upload helper ────────────────────────────────────────────────────────────
+  // ── Upload helper ─────────────────────────────────────────────────────────────
 
   const uploadFile = async (loanId: number, code: string, file: File): Promise<boolean> => {
     try {
@@ -149,7 +170,7 @@ export default function ApplyLoanStep2() {
     }
   };
 
-  // ── Submit ───────────────────────────────────────────────────────────────────
+  // ── Submit ────────────────────────────────────────────────────────────────────
 
   const handleSubmit = async () => {
     if (!step1) return;
@@ -212,9 +233,9 @@ export default function ApplyLoanStep2() {
       }
 
       setSuccessData({
-        instant_reason:       result.data?.instant_reason ?? '',
+        instant_reason:       result.data?.instant_reason       ?? '',
         missing_requirements: result.data?.missing_requirements ?? [],
-        ci_required:          result.data?.ci_required ?? false,
+        ci_required:          result.data?.ci_required          ?? false,
       });
       setUploadProgress('');
       setTimeout(() => setSuccessStep('done'), 600);
@@ -229,12 +250,7 @@ export default function ApplyLoanStep2() {
 
   if (!step1) return null;
 
-  const reasonMessages: Record<string, string> = {
-    AUTO_PASSED_AWAITING_REQUIREMENTS:   'Your application passed initial checks. Please complete your document uploads for manager review.',
-    AUTO_PASSED_MANAGER_REVIEW_REQUIRED: 'Your application is now pending manager review.',
-    AMOUNT_EXCEEDS_AFFORDABILITY:        'Your application was denied — the amount exceeds your income threshold.',
-    CI_REVIEW_REQUIRED:                  'Your application has been routed to a credit investigator for review.',
-  };
+  const fmt = (n: number) => n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
     <div className="min-h-screen bg-background pb-12">
@@ -260,9 +276,7 @@ export default function ApplyLoanStep2() {
           <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-2">Loan Summary</p>
           <div className="flex justify-between text-sm">
             <span className="text-on-surface-variant">Amount</span>
-            <span className="font-bold text-on-surface">
-              ₱{Number(step1.principal_amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-            </span>
+            <span className="font-bold text-on-surface">₱{fmt(Number(step1.principal_amount))}</span>
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-on-surface-variant">Term</span>
@@ -275,6 +289,12 @@ export default function ApplyLoanStep2() {
             <span className="font-bold text-primary">{step1.interest_rate}% / month</span>
           </div>
           <div className="flex justify-between text-sm">
+            <span className="text-on-surface-variant">Total Interest</span>
+            <span className="font-bold text-on-surface">
+              ₱{paymentBreakdown ? fmt(paymentBreakdown.totalInterest) : '—'}
+            </span>
+          </div>
+          <div className="flex justify-between text-sm">
             <span className="text-on-surface-variant">Collateral</span>
             <span className="font-bold text-on-surface">{step1.collateral_type}</span>
           </div>
@@ -285,9 +305,9 @@ export default function ApplyLoanStep2() {
             </div>
           ) : null}
           <div className="border-t border-outline-variant/10 pt-2 flex justify-between text-sm">
-            <span className="text-on-surface-variant">Est. Monthly Payment</span>
+            <span className="text-on-surface-variant">{paymentBreakdown?.label ?? 'Est. Payment'}</span>
             <span className="font-extrabold text-primary">
-              ₱{perMonthPayment.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ₱{paymentBreakdown ? fmt(paymentBreakdown.perPayment) : '—'}
             </span>
           </div>
         </div>
@@ -416,13 +436,15 @@ export default function ApplyLoanStep2() {
                 {/* Loan details */}
                 <div className="mb-5 p-4 bg-primary/5 border border-primary/10 rounded-2xl space-y-3">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-primary mb-3">Loan Details</p>
-                  {[
-                    ['Principal Amount', `₱${Number(step1.principal_amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`],
+                  {([
+                    ['Principal Amount', `₱${fmt(Number(step1.principal_amount))}`],
                     ['Payment Term',     `${TERM_LABELS[step1.payment_term] ?? step1.payment_term} · ${step1.term_months} months`],
                     ['Interest Rate',    `${step1.interest_rate}% / month`],
+                    ['Total Interest',   `₱${paymentBreakdown ? fmt(paymentBreakdown.totalInterest) : '—'}`],
+                    ['Total Payable',    `₱${paymentBreakdown ? fmt(paymentBreakdown.totalPayable) : '—'}`],
                     ['Collateral',        step1.collateral_type],
                     ...(step1.collateral_notes ? [['Collateral Notes', step1.collateral_notes]] : []),
-                  ].map(([label, value]) => (
+                  ] as [string, string][]).map(([label, value]) => (
                     <div key={label} className="flex justify-between text-sm">
                       <span className="text-on-surface-variant">{label}</span>
                       <span className="font-bold text-on-surface text-right max-w-[55%]">{value}</span>
@@ -430,9 +452,11 @@ export default function ApplyLoanStep2() {
                   ))}
                   <div className="border-t border-primary/10 my-1" />
                   <div className="flex justify-between text-sm">
-                    <span className="text-on-surface-variant">Est. Monthly Payment</span>
+                    <span className="text-on-surface-variant">
+                      Est. {paymentBreakdown?.label ?? 'Payment'}
+                    </span>
                     <span className="font-extrabold text-primary text-base">
-                      ₱{perMonthPayment.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      ₱{paymentBreakdown ? fmt(paymentBreakdown.perPayment) : '—'}
                     </span>
                   </div>
                 </div>
@@ -470,7 +494,7 @@ export default function ApplyLoanStep2() {
                   </p>
                 </div>
 
-                {/* Documents attached summary */}
+                {/* Documents */}
                 <div className="mb-5 p-4 bg-surface-container-high rounded-2xl">
                   <div className="flex items-center gap-2 mb-3">
                     <Upload size={14} className="text-on-surface-variant" />
@@ -574,10 +598,9 @@ export default function ApplyLoanStep2() {
                   <h2 className="font-headline font-extrabold text-2xl text-on-surface">
                     Application Submitted!
                   </h2>
-                  {/* ✅ reference_no removed — instant_reason shown instead */}
                   {successData.instant_reason && (
                     <p className="text-on-surface-variant text-sm leading-relaxed mt-1">
-                      {reasonMessages[successData.instant_reason] ?? successData.instant_reason}
+                      {REASON_MESSAGES[successData.instant_reason] ?? successData.instant_reason}
                     </p>
                   )}
                 </motion.div>
