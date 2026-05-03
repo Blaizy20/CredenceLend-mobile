@@ -407,8 +407,6 @@ async function startServer() {
   });
 
   // ── Auth: Login ───────────────────────────────────────────────────────────
-  // Now requires tenant_id in the request body. Login is rejected if the
-  // customer's tenant_id does not match the cooperative they verified.
   app.post("/api/auth/login", async (req, res) => {
     try {
       const usernameOrEmail = String(req.body.username ?? req.body.email ?? "").trim();
@@ -421,10 +419,13 @@ async function startServer() {
       if (!tenant_id)
         return res.status(400).json({ success: false, message: "Cooperative verification is required. Please restart the app and enter your cooperative code." });
 
+      // ✅ Filter by tenant_id in the query itself — no cross-tenant matches
       const [rows] = await pool.query<CustomerRow[]>(
         `SELECT customer_id, tenant_id, user_id, username, password, customer_no, first_name, last_name, contact_no, email, province, city, barangay, street, created_at, is_active
-         FROM customers WHERE (username = ? OR email = ?) AND is_active = 1 LIMIT 1`,
-        [usernameOrEmail, usernameOrEmail]
+         FROM customers
+         WHERE (username = ? OR email = ?) AND tenant_id = ? AND is_active = 1
+         LIMIT 1`,
+        [usernameOrEmail, usernameOrEmail, tenant_id]
       );
 
       if (rows.length === 0)
@@ -436,12 +437,9 @@ async function startServer() {
       if (!match)
         return res.status(401).json({ success: false, message: "Incorrect username or password." });
 
-      // Strictly enforce tenant match — prevent cross-cooperative login
-      if (Number(customer.tenant_id) !== tenant_id)
-        return res.status(403).json({ success: false, message: "This account does not belong to the selected cooperative. Please check your cooperative code." });
-
       const { password: _pw, ...safeCustomer } = customer;
       res.json({ success: true, customer: safeCustomer });
+
     } catch (err: any) {
       console.error("Login error:", err.message);
       res.status(500).json({ success: false, message: "An unexpected error occurred." });
