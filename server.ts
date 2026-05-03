@@ -224,6 +224,46 @@ async function startServer() {
     } catch { res.status(500).json({ taken: false, message: "An unexpected error occurred." }); }
   });
 
+  app.post('/api/tenants/verify-code', async (req: any, res: any) => {
+    const { code } = req.body;
+
+    if (!code || typeof code !== 'string' || code.length !== 6) {
+      return res.status(400).json({ success: false, message: 'Invalid code format.' });
+    }
+
+    try {
+      const [rows]: any = await pool.query(
+        `SELECT tenant_id, tenant_name, display_name, logo_path, primary_color
+         FROM tenants
+         WHERE mobile_app_code = ?
+           AND tenant_status = 'ACTIVE'
+           AND is_active = 1
+           AND subscription_status IN ('TRIAL', 'ACTIVE')
+         LIMIT 1`,
+        [code.toUpperCase()]
+      );
+
+      if (!rows.length) {
+        return res.status(404).json({
+          success: false,
+          message: 'Code not found or cooperative is inactive. Please contact your cooperative.',
+        });
+      }
+
+      return res.json({
+        success:       true,
+        tenant_id:     rows[0].tenant_id,
+        tenant_name:   rows[0].display_name || rows[0].tenant_name,
+        logo_path:     rows[0].logo_path    ?? null,
+        primary_color: rows[0].primary_color ?? null,
+      });
+
+    } catch (err) {
+      console.error('[verify-code]', err);
+      return res.status(500).json({ success: false, message: 'Server error. Please try again.' });
+    }
+  });
+
   // ── Auth: Send OTP ────────────────────────────────────────────────────────
   app.post("/api/auth/send-otp", async (req, res) => {
     try {
