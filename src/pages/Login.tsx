@@ -18,7 +18,6 @@ function getGreeting() {
   return 'Working late';
 }
 
-// ✅ sessionStorage first — most recent selection always wins
 function getStoredTenant() {
   try {
     return JSON.parse(sessionStorage.getItem('tenant') || 'null')
@@ -26,7 +25,6 @@ function getStoredTenant() {
   } catch { return null; }
 }
 
-// ✅ Converts #rrggbb → "H S% L%" for CSS variable injection
 function hexToHSL(hex: string): string {
   const r = parseInt(hex.slice(1, 3), 16) / 255;
   const g = parseInt(hex.slice(3, 5), 16) / 255;
@@ -51,7 +49,6 @@ function hexToHSL(hex: string): string {
 export default function Login() {
   const navigate = useNavigate();
 
-  // ── Splash ────────────────────────────────────────────────────────────────
   const [splashVisible, setSplashVisible] = React.useState(true);
 
   React.useEffect(() => {
@@ -59,7 +56,6 @@ export default function Login() {
     return () => clearTimeout(timer);
   }, []);
 
-  // ── Tenant gate — skip if already verified ────────────────────────────────
   const existingTenant = React.useMemo(() => getStoredTenant(), []);
 
   type Screen = 'tenant' | 'login';
@@ -74,7 +70,7 @@ export default function Login() {
     primary_color?: string | null;
   } | null>(existingTenant);
 
-  // ✅ Apply primary_color as CSS variable — only if valid hex, else revert to default
+  // ✅ Apply primary_color — only if valid hex, else revert to default
   React.useEffect(() => {
     if (tenant?.primary_color && tenant.primary_color.startsWith('#')) {
       const hsl = hexToHSL(tenant.primary_color);
@@ -84,7 +80,6 @@ export default function Login() {
     }
   }, [tenant]);
 
-  // ── Tenant gate state ─────────────────────────────────────────────────────
   const [code, setCode]               = React.useState<string[]>(Array(CODE_LENGTH).fill(''));
   const [codeLoading, setCodeLoading] = React.useState(false);
   const [codeError, setCodeError]     = React.useState('');
@@ -154,7 +149,7 @@ export default function Login() {
       const tenantData = {
         tenant_id:     data.tenant_id,
         tenant_name:   data.tenant_name   ?? '',
-        display_name:  data.display_name  ?? '',  // ✅ added
+        display_name:  data.display_name  ?? '',  // ✅ branch name
         subdomain:     data.subdomain     ?? '',
         logo_path:     data.logo_path     ?? null,
         primary_color: data.primary_color ?? null,
@@ -162,12 +157,8 @@ export default function Login() {
       };
 
       const tenantPayload = JSON.stringify(tenantData);
-
-      // ✅ Always clear both storages first so stale tenant never bleeds through
       localStorage.removeItem('tenant');
       sessionStorage.removeItem('tenant');
-
-      // ✅ Always save to both
       localStorage.setItem('tenant', tenantPayload);
       sessionStorage.setItem('tenant', tenantPayload);
 
@@ -191,8 +182,10 @@ export default function Login() {
   const [usernameError, setUsernameError] = React.useState('');
   const [greeting, setGreeting]           = React.useState<{ name: string } | null>(null);
 
-  // ✅ display_name takes priority, fallback to tenant_name
-  const displayTitle = tenant?.display_name || tenant?.tenant_name || '';
+  // ✅ Full label used in subtitles e.g. "7r Finance Pulilan Branch"
+  const fullLabel = tenant?.tenant_name
+    ? `${tenant.tenant_name}${tenant.display_name ? ` ${tenant.display_name}` : ''}`
+    : '';
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -208,7 +201,6 @@ export default function Login() {
     setLoading(true);
 
     try {
-      // ✅ Read tenant fresh at login time — sessionStorage first
       let tenant_id = 0;
       try {
         const t = JSON.parse(sessionStorage.getItem('tenant') || 'null')
@@ -322,16 +314,11 @@ export default function Login() {
               </h1>
               <p className="text-on-surface-variant text-sm mt-3">
                 Welcome back to{' '}
-                {/* ✅ display_name in greeting splash */}
+                {/* ✅ Full label in greeting e.g. "7r Finance Pulilan Branch" */}
                 <span className="text-primary font-semibold">
-                  {displayTitle || 'CredenceLend'}
+                  {fullLabel || 'CredenceLend'}
                 </span>
               </p>
-              {tenant?.tenant_name && (
-                <p className="text-on-surface-variant/60 text-xs mt-1">
-                  {tenant.tenant_name}
-                </p>
-              )}
             </motion.div>
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }}
               className="flex gap-2 mt-12">
@@ -372,7 +359,6 @@ export default function Login() {
               </p>
             </div>
 
-            {/* Code Boxes */}
             <div className="flex gap-3 mb-5" onPaste={handleCodePaste}>
               {Array(CODE_LENGTH).fill(null).map((_, idx) => (
                 <input
@@ -398,7 +384,6 @@ export default function Login() {
               ))}
             </div>
 
-            {/* Remember checkbox */}
             <label className="flex items-center gap-2 cursor-pointer mb-5">
               <input
                 type="checkbox"
@@ -409,7 +394,6 @@ export default function Login() {
               <span className="text-sm text-on-surface-variant font-medium">Remember this cooperative</span>
             </label>
 
-            {/* Error */}
             <AnimatePresence>
               {codeError && (
                 <motion.div
@@ -422,7 +406,6 @@ export default function Login() {
               )}
             </AnimatePresence>
 
-            {/* Verify Button */}
             <div className="w-full max-w-[300px]">
               <button
                 onClick={handleVerifyCode}
@@ -464,22 +447,22 @@ export default function Login() {
                   <User className="text-on-primary" size={32} />
                 </div>
 
-                {displayTitle ? (
+                {tenant?.tenant_name ? (
                   <motion.div
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.4 }}
                     className="flex flex-col items-center"
                   >
-                    {/* ✅ display_name as the big heading */}
+                    {/* ✅ tenant_name = company name (big heading) */}
                     <h1 className="font-headline font-extrabold text-3xl tracking-tighter text-on-surface">
-                      {displayTitle}
+                      {tenant.tenant_name}
                     </h1>
-                    {/* ✅ tenant_name in the badge */}
+                    {/* ✅ display_name = branch name (badge below) */}
                     <div className="inline-flex items-center gap-1.5 mt-2.5 px-3 py-1 rounded-full bg-primary/10 border border-primary/20">
                       <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
                       <span className="text-primary text-xs font-semibold tracking-wide">
-                        {tenant?.tenant_name}
+                        {tenant.display_name || 'Main Branch'}
                       </span>
                     </div>
                     <p className="text-on-surface-variant text-xs mt-2.5 font-medium">
@@ -503,10 +486,10 @@ export default function Login() {
               <div className="w-full bg-surface-container-low rounded-[2rem] p-8 shadow-2xl shadow-black/60 border-t border-white/5 backdrop-blur-sm">
                 <div className="mb-8">
                   <h2 className="font-headline font-bold text-2xl text-on-surface">Welcome Back</h2>
-                  {/* ✅ display_name in login card subtitle */}
                   <p className="text-on-surface-variant text-sm mt-1 leading-relaxed">
-                    {displayTitle
-                      ? `Sign in to access your ${displayTitle} loan account.`
+                    {/* ✅ Full label in subtitle */}
+                    {fullLabel
+                      ? `Sign in to access your ${fullLabel} loan account.`
                       : 'Sign in to your account to continue.'}
                   </p>
                 </div>
@@ -574,7 +557,7 @@ export default function Login() {
                 </div>
               </div>
 
-              {/* ✅ Switch cooperative button — also resets primary color */}
+              {/* ✅ Switch cooperative — resets color too */}
               <button
                 onClick={() => {
                   localStorage.removeItem('tenant');
