@@ -24,10 +24,16 @@ export default function Transactions() {
   const [error, setError]               = React.useState('');
 
   React.useEffect(() => {
-    let user: any = null;
+    let user: any   = null;
     let tenant: any = null;
-    try { user   = JSON.parse(localStorage.getItem('user')      || 'null'); } catch {}
-    try { tenant = JSON.parse(sessionStorage.getItem('tenant')  || 'null'); } catch {} // ← fixed
+
+    try { user = JSON.parse(localStorage.getItem('user') || 'null'); } catch {}
+
+    // ✅ sessionStorage first, localStorage fallback
+    try {
+      tenant = JSON.parse(sessionStorage.getItem('tenant') || 'null')
+            ?? JSON.parse(localStorage.getItem('tenant')   || 'null');
+    } catch {}
 
     if (!user?.customer_id) {
       navigate('/login', { replace: true });
