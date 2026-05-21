@@ -10,58 +10,40 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn }       from '@/src/lib/utils';
 import { loansAPI } from '../lib/api';
 
+// ── helpers ────────────────────────────────────────────────────────────────
 function fmt(n: number) {
   return n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-function getTermCount(paymentTerm: string, termMonths: number): number {
-  switch ((paymentTerm ?? '').toLowerCase().replace(/-/g, '_')) {
-    case 'daily':        return termMonths * 30;
-    case 'weekly':       return termMonths * 4;
-    case 'semi_monthly': return termMonths * 2;
-    case 'monthly':
-    default:             return termMonths;
-  }
-}
-
-// ✅ Safely derive amountPerTerm — reads DB first, falls back to computed
-function getAmountPerTerm(loan: any): number {
-  const stored = Number(loan.amount_per_term ?? 0);
-  if (stored > 0) return stored;
-  const total      = Number(loan.total_payable) || 0;
-  const termMonths = Number(loan.term_months)   || 1;
-  const termCount  = getTermCount(loan.payment_term ?? '', termMonths);
-  if (termCount > 0 && total > 0) return Number((total / termCount).toFixed(2));
-  return total;
-}
-
-// ✅ How many full terms have been paid
-function computePeriodsPaid(loan: any): number {
-  const amountPerTerm = getAmountPerTerm(loan);
-  const total         = Number(loan.total_payable)     || 0;
-  const remaining     = Number(loan.remaining_balance) || 0;
-  const paidSoFar     = total - remaining;
-  return amountPerTerm > 0 ? Math.floor(paidSoFar / amountPerTerm) : 0;
-}
-
-// ✅ Current installment due is always a flat amountPerTerm
-//    UNLESS this is the last term — then it's the actual remaining balance
+/**
+ * Computes how much is still owed for the CURRENT unpaid period.
+ * Returns 0 if the current period is already fully paid.
+ */
 function computeInstallmentDue(loan: any): number {
-  const total         = Number(loan.total_payable)     || 0;
-  const remaining     = Number(loan.remaining_balance) || 0;
-  const amountPerTerm = getAmountPerTerm(loan);
-  const termMonths    = Number(loan.term_months) || 1;
-  const totalTerms    = getTermCount(loan.payment_term ?? '', termMonths);
-  const periodsPaid   = computePeriodsPaid(loan);
-  const termsLeft     = totalTerms - periodsPaid;
+  const total     = Number(loan.total_payable)     || 0;
+  const remaining = Number(loan.remaining_balance) || 0;
+  const months    = Number(loan.term_months)       || 1;
 
   if (remaining <= 0) return 0;
 
-  // Last term — pay exact remaining balance
-  if (termsLeft === 1) return remaining;
+  const monthly      = parseFloat((total / months).toFixed(2));
+  const paidSoFar    = parseFloat((total - remaining).toFixed(2));
+  const periodsPaid  = monthly > 0 ? Math.floor(paidSoFar / monthly) : 0;
+  const partialCredit = parseFloat((paidSoFar - periodsPaid * monthly).toFixed(2));
+  const currentDue   = parseFloat((monthly - partialCredit).toFixed(2));
 
-  // All other terms — flat installment, capped at remaining
-  return Math.min(amountPerTerm, remaining);
+  return Math.min(Math.max(currentDue, 0), remaining);
+}
+
+/**
+ * How many full periods have been paid already?
+ */
+function computePeriodsPaid(loan: any): number {
+  const total   = Number(loan.total_payable) || 0;
+  const months  = Number(loan.term_months)   || 1;
+  const monthly = total / months;
+  const paid    = total - (Number(loan.remaining_balance) || 0);
+  return monthly > 0 ? Math.floor(paid / monthly) : 0;
 }
 
 type Option = 'installment' | 'advance' | 'full' | 'custom';
@@ -95,6 +77,7 @@ export default function PaymentOptions() {
     })();
   }, [id]);
 
+  // ── guards ────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -118,25 +101,28 @@ export default function PaymentOptions() {
     );
   }
 
-  // ── Derived values ─────────────────────────────────────────────────────────
+  // ── derived values ────────────────────────────────────────────────────
   const total          = Number(loan.total_payable)     || 0;
   const remaining      = Number(loan.remaining_balance) || 0;
-  const termMonths     = Number(loan.term_months)       || 1;
-  const amountPerTerm  = getAmountPerTerm(loan);
+  const months         = Number(loan.term_months)       || 1;
+  const monthly        = parseFloat((total / months).toFixed(2));
   const paidSoFar      = parseFloat((total - remaining).toFixed(2));
   const progress       = total > 0 ? Math.min((paidSoFar / total) * 100, 100) : 0;
   const installmentDue = computeInstallmentDue(loan);
   const periodsPaid    = computePeriodsPaid(loan);
 
-  // Current period is fully paid when installmentDue is 0
+  // Is the current period fully paid?
   const currentPeriodPaid = installmentDue <= 0;
 
-  // Advance = next period's flat installment, capped at remaining
-  const advanceAmount   = Math.min(amountPerTerm, remaining);
+  // Advance payment = next period's monthly due (capped at remaining balance)
+  const advanceAmount = Math.min(monthly, remaining);
+
+  // Which period number would the advance cover?
   const advancePeriodNo = periodsPaid + (currentPeriodPaid ? 2 : 1);
 
   const customValue = parseFloat(customAmt) || 0;
 
+  // Build OPTIONS dynamically — swap installment ↔ advance based on state
   const OPTIONS: {
     id: Option;
     icon: any;
@@ -166,24 +152,26 @@ export default function PaymentOptions() {
           badgeClass: 'bg-orange-500/10 text-orange-500',
         },
     {
-      id:     'full',
-      icon:   Wallet2,
-      label:  'Full Settlement',
-      sub:    'Clear entire remaining balance',
-      amount: remaining,
+      id:         'full',
+      icon:       Wallet2,
+      label:      'Full Settlement',
+      sub:        'Clear entire remaining balance',
+      amount:     remaining,
     },
     {
-      id:     'custom',
-      icon:   Calculator,
-      label:  'Custom Amount',
-      sub:    `Min ₱1.00 · Max ₱${fmt(remaining)}`,
-      amount: null,
+      id:         'custom',
+      icon:       Calculator,
+      label:      'Custom Amount',
+      sub:        `Min ₱1.00 · Max ₱${fmt(remaining)}`,
+      amount:     null,
     },
   ];
 
+  // Sync default selection when period status changes
+  const defaultOption = currentPeriodPaid ? 'advance' : 'installment';
   const effectiveSelected =
-    selected === 'installment' && currentPeriodPaid ? 'advance'     :
-    selected === 'advance'     && !currentPeriodPaid ? 'installment' :
+    selected === 'installment' && currentPeriodPaid ? 'advance' :
+    selected === 'advance' && !currentPeriodPaid    ? 'installment' :
     selected;
 
   const AMOUNT_FOR: Record<string, number> = {
@@ -206,11 +194,10 @@ export default function PaymentOptions() {
         return;
       }
     }
-
     const type =
-      effectiveSelected === 'full'    ? 'full'        :
-      effectiveSelected === 'custom'  ? 'custom'      :
-      effectiveSelected === 'advance' ? 'advance'     :
+      effectiveSelected === 'full'    ? 'full'    :
+      effectiveSelected === 'custom'  ? 'custom'  :
+      effectiveSelected === 'advance' ? 'advance' :
       'installment';
 
     navigate(`/loan/${id}/pay/confirm?amount=${finalAmount}&type=${type}`);
@@ -228,6 +215,7 @@ export default function PaymentOptions() {
           animate={{ opacity: 1, y: 0 }}
           className="bg-surface-container-highest rounded-2xl p-5 shadow-lg border border-outline-variant/10 space-y-4"
         >
+          {/* Reference + status */}
           <div className="flex justify-between items-start">
             <div>
               <p className="text-on-surface-variant text-[10px] uppercase tracking-widest mb-0.5">Loan Reference</p>
@@ -243,6 +231,7 @@ export default function PaymentOptions() {
             </span>
           </div>
 
+          {/* Progress bar */}
           <div>
             <div className="flex justify-between text-[10px] text-on-surface-variant mb-1.5">
               <span>₱{fmt(paidSoFar)} paid</span>
@@ -259,11 +248,12 @@ export default function PaymentOptions() {
             <p className="text-[10px] text-on-surface-variant mt-1 text-right">{progress.toFixed(1)}% complete</p>
           </div>
 
+          {/* Stats grid */}
           <div className="grid grid-cols-3 gap-3 pt-1 border-t border-outline-variant/10">
             {[
               { label: 'Principal',   value: `₱${fmt(Number(loan.principal_amount))}` },
-              { label: 'Per Term',    value: `₱${fmt(amountPerTerm)}` },
-              { label: 'Term',        value: `${termMonths} mo${termMonths > 1 ? 's' : ''}` },
+              { label: 'Monthly Due', value: `₱${fmt(monthly)}` },
+              { label: 'Term',        value: `${months} mo${months > 1 ? 's' : ''}` },
             ].map(({ label, value }) => (
               <div key={label} className="text-center">
                 <p className="text-[9px] uppercase tracking-wider text-on-surface-variant mb-0.5">{label}</p>
@@ -272,6 +262,7 @@ export default function PaymentOptions() {
             ))}
           </div>
 
+          {/* "Current period paid" banner */}
           {currentPeriodPaid && (
             <motion.div
               initial={{ opacity: 0, y: 4 }}
@@ -287,7 +278,7 @@ export default function PaymentOptions() {
           )}
         </motion.div>
 
-        {/* ── Payment options ── */}
+        {/* ── Amount options ── */}
         <section className="space-y-3">
           <h3 className="font-headline font-bold text-on-surface-variant uppercase text-[10px] tracking-widest px-1">
             How much to pay?
@@ -343,6 +334,7 @@ export default function PaymentOptions() {
             );
           })}
 
+          {/* Custom amount input */}
           <AnimatePresence>
             {effectiveSelected === 'custom' && (
               <motion.div
@@ -409,7 +401,10 @@ export default function PaymentOptions() {
       {/* ── CTA ── */}
       <div className="fixed bottom-0 left-0 w-full bg-background/80 backdrop-blur-xl pt-4 pb-10 px-6 rounded-t-3xl shadow-[0_-10px_40px_rgba(0,0,0,0.4)]">
         <div className="max-w-md mx-auto">
-          <Button onClick={validateAndProceed} disabled={finalAmount <= 0}>
+          <Button
+            onClick={validateAndProceed}
+            disabled={finalAmount <= 0}
+          >
             Continue to Payment <ChevronRight size={18} />
           </Button>
         </div>
