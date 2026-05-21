@@ -103,7 +103,6 @@ export default function LoanDetails() {
 
   const totalTermCount = getTermCount(paymentTerm, termMonths);
 
-  // ✅ Safe amountPerTerm — reads DB first, falls back to computed
   const amountPerTerm = (() => {
     const stored = Number(loan.amount_per_term ?? 0);
     if (stored > 0) return stored;
@@ -120,13 +119,9 @@ export default function LoanDetails() {
         ? new Date(loan.created_at)
         : new Date();
 
-    // ✅ Use remaining_balance from DB as source of truth
-    const totalPaid     = totalPayable - remainingBal;
-    const paidCount     = amountPerTerm > 0 ? Math.floor(totalPaid / amountPerTerm) : 0;
-    const termsLeft     = totalTermCount - paidCount;
-
-    // ✅ Carry-over credit reduces the current upcoming term
-    //    (mirrors computeInstallmentDue in PaymentOptions.tsx)
+    const totalPaid    = totalPayable - remainingBal;
+    const paidCount    = amountPerTerm > 0 ? Math.floor(totalPaid / amountPerTerm) : 0;
+    const termsLeft    = totalTermCount - paidCount;
     const partialCredit  = parseFloat((totalPaid - paidCount * amountPerTerm).toFixed(2));
     const currentTermDue = parseFloat((amountPerTerm - partialCredit).toFixed(2));
 
@@ -143,18 +138,14 @@ export default function LoanDetails() {
 
       const isPaid     = i < paidCount;
       const isUpcoming = i === paidCount;
-      const isLastTerm = i === totalTermCount - 1;
 
-      // ✅ Upcoming term: show carry-over reduced amount
-      //    Last term: show exact remaining balance
-      //    All others: show flat amountPerTerm
       const termAmount = isPaid
         ? amountPerTerm
         : isUpcoming
           ? (termsLeft === 1
-              ? remainingBal                                    // last term → exact remaining
-              : Math.min(currentTermDue, remainingBal))        // current → carry-over reduced
-          : amountPerTerm;                                      // future → flat installment
+              ? remainingBal
+              : Math.min(currentTermDue, remainingBal))
+          : amountPerTerm;
 
       schedule.push({
         date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
@@ -188,7 +179,7 @@ export default function LoanDetails() {
               <CheckCircle size={16} className="text-white" />
             </div>
             <p className="text-green-500 font-headline font-bold text-sm tracking-tight">
-              This loan is fully paid. Congratulations!
+              This loan has been fully settled.
             </p>
           </motion.div>
         )}
@@ -390,24 +381,56 @@ export default function LoanDetails() {
                 </thead>
                 <tbody className="divide-y divide-surface-bright/10">
                   {schedule.map((item, i) => (
-                    <tr key={i} className="hover:bg-white/5 transition-colors">
+                    <tr
+                      key={i}
+                      className={cn(
+                        'transition-colors',
+                        item.status === 'PAID'
+                          ? 'bg-green-500/5 opacity-60'
+                          : item.isUpcoming
+                            ? 'bg-primary/5'
+                            : 'hover:bg-white/5'
+                      )}
+                    >
                       <td className="px-5 py-4">
-                        <p className="text-sm font-semibold">{item.date}</p>
+                        <p className={cn(
+                          'text-sm font-semibold',
+                          item.status === 'PAID'
+                            ? 'line-through text-on-surface-variant'
+                            : 'text-on-surface'
+                        )}>
+                          {item.date}
+                        </p>
                         {item.isUpcoming && (
-                          <p className="text-[9px] text-primary font-bold uppercase mt-1">Upcoming</p>
+                          <p className="text-[9px] text-primary font-bold uppercase tracking-widest mt-1">
+                            Upcoming
+                          </p>
                         )}
                       </td>
                       <td className="px-5 py-4">
-                        <p className="text-sm font-headline font-bold">{item.amount}</p>
+                        <p className={cn(
+                          'text-sm font-headline font-bold tabular-nums',
+                          item.status === 'PAID'
+                            ? 'line-through text-on-surface-variant'
+                            : item.isUpcoming
+                              ? 'text-primary'
+                              : 'text-on-surface'
+                        )}>
+                          {item.amount}
+                        </p>
                       </td>
                       <td className="px-5 py-4 text-right">
                         <span className={cn(
-                          'inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full',
+                          'inline-flex items-center gap-1.5 text-[10px] font-bold px-2.5 py-1 rounded-full border tracking-widest uppercase',
                           item.status === 'PAID'
-                            ? 'text-primary bg-primary/10 border border-primary/20'
-                            : 'text-outline bg-white/5 border border-white/10'
+                            ? 'text-green-600 bg-green-500/10 border-green-500/20'
+                            : item.isUpcoming
+                              ? 'text-primary bg-primary/10 border-primary/20'
+                              : 'text-outline bg-transparent border-outline/20'
                         )}>
-                          {item.status === 'PAID' && <CheckCircle size={12} fill="currentColor" className="text-primary" />}
+                          {item.status === 'PAID' && (
+                            <CheckCircle size={11} fill="currentColor" className="text-green-600" />
+                          )}
                           {item.status}
                         </span>
                       </td>
