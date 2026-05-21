@@ -1,16 +1,15 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { CheckCircle2, LayoutDashboard, Receipt, Loader2, AlertTriangle } from 'lucide-react';
+import { CheckCircle2, LayoutDashboard, Receipt, Loader2, AlertTriangle, Smartphone, X } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Button } from '../components/Button';
 import { API_BASE } from '../lib/api';
 
-type Status = 'verifying' | 'recording' | 'done' | 'failed';
+type Status = 'verifying' | 'recording' | 'done' | 'failed' | 'external';
 
 const SS_PENDING_KEY = 'paymongo_pending';
 
 const methodLabel: Record<string, string> = {
-  // Raw PayMongo types
   gcash:             'GCash',
   card:              'Credit / Debit Card',
   paymaya:           'Maya',
@@ -26,7 +25,6 @@ const methodLabel: Record<string, string> = {
   brankas_landbank:  'Landbank (Brankas)',
   brankas_metrobank: 'Metrobank (Brankas)',
   billease:          'BillEase',
-  // Normalized DB values
   GCASH:             'GCash',
   CARD:              'Credit / Debit Card',
   MAYA:              'Maya',
@@ -36,7 +34,6 @@ const methodLabel: Record<string, string> = {
   UNIONBANK:         'UnionBank Online',
   BRANKAS_BDO:       'BDO',
   BANK:              'Bank Transfer',
-  // Legacy / offline
   wallet:            'E-Wallet',
   online:            'Online Payment',
   walkin:            'Walk-in',
@@ -47,42 +44,50 @@ const methodLabel: Record<string, string> = {
 };
 
 export default function PaymentSuccess() {
-  const navigate               = useNavigate();
-  const { id }                 = useParams();
-  const [searchParams]         = useSearchParams();
-  const [status, setStatus]    = useState<Status>('verifying');
-  const [error, setError]      = useState('');
-  const [dbPaymentId, setDbPaymentId] = useState<number | null>(null);
-  const [pmPaymentId, setPmPaymentId] = useState<string>('');
-  const [paidAmount, setPaidAmount]   = useState<number>(0);
-  const [paidMethod, setPaidMethod]   = useState<string>('');
-  const hasRun                 = useRef(false);
+  const navigate                       = useNavigate();
+  const { id }                         = useParams();
+  const [searchParams]                 = useSearchParams();
+  const [status, setStatus]            = useState<Status>('verifying');
+  const [error, setError]              = useState('');
+  const [dbPaymentId, setDbPaymentId]  = useState<number | null>(null);
+  const [pmPaymentId, setPmPaymentId]  = useState<string>('');
+  const [paidAmount, setPaidAmount]    = useState<number>(0);
+  const [paidMethod, setPaidMethod]    = useState<string>('');
+  const hasRun                         = useRef(false);
 
   useEffect(() => {
     if (hasRun.current) return;
     hasRun.current = true;
+
+    // ✅ Detect external browser — no logged-in user means PayMongo redirected
+    // here from an external browser tab opened by Capacitor
+    let user: any = null;
+    try { user = JSON.parse(localStorage.getItem('user') || 'null'); } catch {}
+
+    if (!user?.customer_id) {
+      setStatus('external');
+      return;
+    }
+
     handleSuccess();
   }, []);
 
   async function handleSuccess() {
     try {
-      // ── Step 1: Resolve identifiers ───────────────────────────────────────
       let sessionId = '';
       let sourceId  = searchParams.get('id')                ?? '';
       let intentId  = searchParams.get('payment_intent_id') ?? '';
       let amount    = Number(searchParams.get('amount') ?? 0);
 
-      // PRIMARY: read from localStorage — survives cross-domain redirect
       try {
         const storedRaw = localStorage.getItem(SS_PENDING_KEY);
         if (storedRaw) {
           const stored = JSON.parse(storedRaw);
-          if (stored.session_id)           sessionId = stored.session_id;
-          if (!amount && stored.amount)    amount    = Number(stored.amount);
+          if (stored.session_id)        sessionId = stored.session_id;
+          if (!amount && stored.amount) amount    = Number(stored.amount);
         }
-      } catch { /* ignore malformed storage */ }
+      } catch {}
 
-      // ── Step 2: Guard — must have a loan id ───────────────────────────────
       if (!id) {
         setError('Loan details are missing. Please go back and try again.');
         setStatus('failed');
@@ -98,19 +103,14 @@ export default function PaymentSuccess() {
         return;
       }
 
-      // ── Step 3: Verify with PayMongo ──────────────────────────────────────
       let resolvedMethod     = 'other';
       let currentPmPaymentId = '';
 
-      // Checkout Session flow
       if (sessionId) {
         setStatus('verifying');
         const statusRes  = await fetch(`${API_BASE}/api/paymongo/checkout-status/${sessionId}`);
         const statusData = await statusRes.json();
 
-        // FIX: PayMongo GCash/Maya test mode often returns payment_status:"unpaid"
-        // even after a successful payment, but always attaches a payment_id.
-        // Accept either condition as verified proof of payment.
         const isVerified =
           statusData.success &&
           (statusData.payment_status === 'paid' || !!statusData.payment_id);
@@ -125,41 +125,30 @@ export default function PaymentSuccess() {
         }
 
         resolvedMethod = statusData.payment_method_type ?? 'other';
-        if (statusData.amount)      amount             = statusData.amount;
+        if (statusData.amount)     amount             = statusData.amount;
         if (statusData.payment_id) {
           currentPmPaymentId = statusData.payment_id;
           setPmPaymentId(statusData.payment_id);
         }
-      }
-
-      // Source flow (in-app GCash QR)
-      else if (sourceId) {
+      } else if (sourceId) {
         setStatus('verifying');
         const verified = await pollSourceStatus(sourceId);
         if (!verified) {
-          setError(
-            'GCash payment could not be verified. ' +
-            'If money was deducted, please contact support.'
-          );
+          setError('GCash payment could not be verified. If money was deducted, please contact support.');
           setStatus('failed');
           return;
         }
         resolvedMethod = 'gcash';
-      }
-
-      // Card Payment Intent flow (3DS redirect)
-      else if (intentId) {
+      } else if (intentId) {
         resolvedMethod = 'card';
       }
 
-      // ── Step 4: Amount guard ──────────────────────────────────────────────
       if (!amount) {
         setError('Payment amount is missing. Please contact support.');
         setStatus('failed');
         return;
       }
 
-      // ── Step 5: Record in database ────────────────────────────────────────
       setPaidAmount(amount);
       setPaidMethod(resolvedMethod);
       setStatus('recording');
@@ -188,8 +177,6 @@ export default function PaymentSuccess() {
 
       setDbPaymentId(data.payment_id);
       if (data.pm_payment_id) setPmPaymentId(data.pm_payment_id);
-
-      // Clean up localStorage
       localStorage.removeItem(SS_PENDING_KEY);
       setStatus('done');
     } catch (err: any) {
@@ -207,12 +194,101 @@ export default function PaymentSuccess() {
         const st   = data.source?.attributes?.status ?? '';
         if (st === 'chargeable' || st === 'consumed') return true;
         if (st === 'failed'     || st === 'cancelled') return false;
-      } catch { /* keep polling */ }
+      } catch {}
     }
     return false;
   }
 
-  // ── Loading screens ───────────────────────────────────────────────────────
+  // ── External browser screen ───────────────────────────────────────────────
+  if (status === 'external') {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="fixed inset-0 z-50 bg-background flex flex-col items-center justify-center px-8 text-center"
+      >
+        {/* Ambient glow */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-primary/10 rounded-full blur-[120px]" />
+        </div>
+
+        {/* Icon */}
+        <motion.div
+          initial={{ scale: 0, rotate: -20 }}
+          animate={{ scale: 1, rotate: 0 }}
+          transition={{ type: 'spring', stiffness: 260, damping: 18, delay: 0.1 }}
+          className="w-24 h-24 rounded-3xl bg-green-500/10 border border-green-500/20 flex items-center justify-center mb-8 shadow-2xl shadow-green-500/10"
+        >
+          <CheckCircle2 className="text-green-500" size={48} />
+        </motion.div>
+
+        {/* Heading */}
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.25 }}
+          className="space-y-2 mb-8"
+        >
+          <p className="text-on-surface-variant text-sm font-bold uppercase tracking-widest">
+            Payment Received
+          </p>
+          <h1 className="font-headline font-extrabold text-4xl text-on-surface tracking-tight">
+            Thank You<span className="text-green-500">.</span>
+          </h1>
+          <p className="text-on-surface-variant text-sm mt-3 max-w-xs mx-auto leading-relaxed">
+            Your payment was processed successfully.
+          </p>
+        </motion.div>
+
+        {/* Close tab instruction card */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.38 }}
+          className="w-full max-w-xs bg-surface-container-high border border-outline-variant/10 rounded-2xl p-6 mb-8 space-y-4"
+        >
+          <div className="flex items-center justify-center w-12 h-12 rounded-2xl bg-primary/10 mx-auto">
+            <Smartphone className="text-primary" size={26} />
+          </div>
+          <div className="text-center space-y-1.5">
+            <p className="font-bold text-on-surface text-sm">Return to the App</p>
+            <p className="text-on-surface-variant text-xs leading-relaxed">
+              Your payment has been recorded. You may now{' '}
+              <span className="font-semibold text-on-surface">close this tab</span>{' '}
+              and return to <span className="text-primary font-semibold">CredenceLend</span> to view your updated loan balance.
+            </p>
+          </div>
+          {/* Close tab button — works on most mobile browsers */}
+          <button
+            onClick={() => window.close()}
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-full bg-surface-container-highest text-on-surface-variant text-xs font-bold active:scale-95 transition-transform"
+          >
+            <X size={14} />
+            Close This Tab
+          </button>
+        </motion.div>
+
+        {/* Pulse dots */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.5 }}
+          className="flex gap-2"
+        >
+          {[0, 1, 2].map((i) => (
+            <motion.div
+              key={i}
+              animate={{ opacity: [0.3, 1, 0.3], scale: [0.8, 1, 0.8] }}
+              transition={{ duration: 1.1, repeat: Infinity, delay: i * 0.18 }}
+              className="w-1.5 h-1.5 rounded-full bg-primary"
+            />
+          ))}
+        </motion.div>
+      </motion.div>
+    );
+  }
+
+  // ── Verifying / Recording screens ─────────────────────────────────────────
   if (status === 'verifying' || status === 'recording') {
     return (
       <motion.div
@@ -294,7 +370,7 @@ export default function PaymentSuccess() {
     );
   }
 
-  // ── Success screen ────────────────────────────────────────────────────────
+  // ── Success screen (in-app / logged-in browser) ───────────────────────────
   return (
     <motion.div
       initial={{ opacity: 0 }}
