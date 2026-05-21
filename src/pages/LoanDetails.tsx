@@ -18,7 +18,7 @@ const statusStyle: Record<string, string> = {
 const getStatusStyle = (status: string) =>
   statusStyle[status?.toLowerCase()] ?? 'bg-outline/10 text-outline border-outline/20';
 
-// ✅ Mirrors server-side getTermCount — must stay in sync
+// ✅ Mirrors server-side getTermCount
 function getTermCount(paymentTerm: string, termMonths: number): number {
   switch ((paymentTerm ?? '').toLowerCase().replace(/-/g, '_')) {
     case 'daily':        return termMonths * 30;
@@ -92,19 +92,19 @@ export default function LoanDetails() {
   }
 
   // ── Derived values ────────────────────────────────────────────────────────
-  const principal      = Number(loan.principal_amount  ?? 0);
-  const interestRate   = Number(loan.interest_rate     ?? 0);
-  const termMonths     = Number(loan.term_months       ?? 1);
-  const totalPayable   = Number(loan.total_payable     ?? principal);
-  const remainingBal   = Number(loan.remaining_balance ?? totalPayable);
-  const paidAmount     = totalPayable - remainingBal;
-  const progress       = totalPayable > 0 ? (paidAmount / totalPayable) * 100 : 0;
-  const isFullyPaid    = loan.status?.toLowerCase() === 'closed' || remainingBal <= 0;
-  const paymentTerm    = loan.payment_term ?? '';
+  const principal    = Number(loan.principal_amount  ?? 0);
+  const interestRate = Number(loan.interest_rate     ?? 0);
+  const termMonths   = Number(loan.term_months       ?? 1);
+  const totalPayable = Number(loan.total_payable     ?? principal);
+  const remainingBal = Number(loan.remaining_balance ?? totalPayable);
+  const paidAmount   = totalPayable - remainingBal;
+  const progress     = totalPayable > 0 ? (paidAmount / totalPayable) * 100 : 0;
+  const isFullyPaid  = loan.status?.toLowerCase() === 'closed' || remainingBal <= 0;
+  const paymentTerm  = loan.payment_term ?? '';
 
   // ✅ Use server-stored amount_per_term if available, else derive it
-  const totalTermCount  = getTermCount(paymentTerm, termMonths);
-  const amountPerTerm   = Number(loan.amount_per_term ?? 0) || Number((totalPayable / totalTermCount).toFixed(2));
+  const totalTermCount = getTermCount(paymentTerm, termMonths);
+  const amountPerTerm  = Number(loan.amount_per_term ?? 0) || Number((totalPayable / totalTermCount).toFixed(2));
 
   // ── Schedule generator ────────────────────────────────────────────────────
   const generateSchedule = () => {
@@ -114,10 +114,7 @@ export default function LoanDetails() {
         ? new Date(loan.created_at)
         : new Date();
 
-    // ✅ Total paid from actual payment records
     const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount ?? 0), 0);
-
-    // ✅ How many full terms have been paid
     const paidCount = amountPerTerm > 0 ? Math.floor(totalPaid / amountPerTerm) : 0;
 
     const schedule = [];
@@ -126,25 +123,32 @@ export default function LoanDetails() {
       const date = new Date(startDate);
       const term = paymentTerm.toLowerCase().replace(/-/g, '_');
 
-      if (term.includes('daily'))        date.setDate(date.getDate() + i);
-      else if (term.includes('weekly'))  date.setDate(date.getDate() + i * 7);
-      else if (term.includes('semi'))    date.setDate(date.getDate() + i * 15);
-      else                               date.setMonth(date.getMonth() + i);
+      if (term.includes('daily'))       date.setDate(date.getDate() + i);
+      else if (term.includes('weekly')) date.setDate(date.getDate() + i * 7);
+      else if (term.includes('semi'))   date.setDate(date.getDate() + i * 15);
+      else                              date.setMonth(date.getMonth() + i);
 
-      // ✅ Last term shows remaining balance, not fixed amount
-      const isLastTerm      = i === totalTermCount - 1;
-      const alreadyPaidAmt  = paidCount * amountPerTerm;
-      const leftover        = Math.max(0, totalPayable - alreadyPaidAmt);
-      const termAmount      = isLastTerm
-        ? Math.min(amountPerTerm, leftover)   // last term = whatever is left
-        : amountPerTerm;                      // all other terms = fixed
+      const isPaid     = i < paidCount;
+      const isUpcoming = i === paidCount;
+
+      // ✅ Upcoming term = real remaining balance from DB
+      // ✅ Paid terms    = original fixed installment
+      // ✅ Future terms  = fixed installment capped at leftover
+      const termAmount = isPaid
+        ? amountPerTerm
+        : isUpcoming
+          ? remainingBal
+          : Math.min(
+              amountPerTerm,
+              Math.max(0, totalPayable - (paidCount + (i - paidCount)) * amountPerTerm)
+            );
 
       schedule.push({
         date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
         amount: `₱ ${termAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-        rawAmount: termAmount,
-        status:     i < paidCount ? 'PAID' : 'PENDING',
-        isUpcoming: i === paidCount,
+        rawAmount:  termAmount,
+        status:     isPaid ? 'PAID' : 'PENDING',
+        isUpcoming,
       });
     }
 
