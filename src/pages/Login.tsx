@@ -68,16 +68,19 @@ export default function Login() {
   const [tenant, setTenant] = React.useState<{
     tenant_id:      number;
     tenant_name:    string;
-    subdomain?:     string;
+    display_name?:  string;
     logo_path?:     string | null;
     primary_color?: string | null;
   } | null>(existingTenant);
 
-  // ✅ Apply primary_color as CSS variable whenever tenant changes
+  // ✅ Apply primary_color as CSS variable — only if valid hex, else revert to default
   React.useEffect(() => {
-    if (!tenant?.primary_color) return;
-    const hsl = hexToHSL(tenant.primary_color);
-    document.documentElement.style.setProperty('--color-primary', hsl);
+    if (tenant?.primary_color && tenant.primary_color.startsWith('#')) {
+      const hsl = hexToHSL(tenant.primary_color);
+      document.documentElement.style.setProperty('--color-primary', hsl);
+    } else {
+      document.documentElement.style.removeProperty('--color-primary');
+    }
   }, [tenant]);
 
   // ── Tenant gate state ─────────────────────────────────────────────────────
@@ -187,7 +190,7 @@ export default function Login() {
   const [greeting, setGreeting]           = React.useState<{ name: string } | null>(null);
 
   const branchLabel = tenant?.subdomain
-    ? tenant.subdomain.replace(/-/g, ' ').replace(/\\b\\w/g, c => c.toUpperCase())
+    ? tenant.subdomain.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
     : 'Main Branch';
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -566,11 +569,13 @@ export default function Login() {
                 </div>
               </div>
 
-              {/* ✅ Switch cooperative button */}
+              {/* ✅ Switch cooperative button — also resets primary color */}
               <button
                 onClick={() => {
                   localStorage.removeItem('tenant');
                   sessionStorage.removeItem('tenant');
+                  // ✅ Revert primary color to default on cooperative switch
+                  document.documentElement.style.removeProperty('--color-primary');
                   setTenant(null);
                   setScreen('tenant');
                   setCode(Array(CODE_LENGTH).fill(''));
