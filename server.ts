@@ -7,13 +7,10 @@ import { fileURLToPath } from "url";
 import mysql, { ResultSetHeader, RowDataPacket } from "mysql2/promise";
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname  = path.dirname(__filename);
 
 const PORT = Number(process.env.PORT || 3000);
 
-// DEFAULT_TENANT_ID is no longer a static env var.
-// It gets resolved dynamically from the verified tenant code sent by the client.
-// This fallback is only used for legacy/server-side routes that don't receive tenant_id.
 const FALLBACK_TENANT_ID = Number(process.env.DEFAULT_TENANT_ID || 1);
 
 const pool = mysql.createPool({
@@ -29,22 +26,22 @@ const pool = mysql.createPool({
 });
 
 type CustomerRow = RowDataPacket & {
-  customer_id: number;
-  tenant_id: number | null;
-  user_id: number | null;
-  username: string;
-  password: string;
-  customer_no: string;
-  first_name: string;
-  last_name: string;
-  contact_no: string | null;
-  email: string | null;
-  province: string | null;
-  city: string | null;
-  barangay: string | null;
-  street: string | null;
-  created_at: string;
-  is_active: number;
+  customer_id:  number;
+  tenant_id:    number | null;
+  user_id:      number | null;
+  username:     string;
+  password:     string;
+  customer_no:  string;
+  first_name:   string;
+  last_name:    string;
+  contact_no:   string | null;
+  email:        string | null;
+  province:     string | null;
+  city:         string | null;
+  barangay:     string | null;
+  street:       string | null;
+  created_at:   string;
+  is_active:    number;
 };
 
 // ── Payment method normalization ──────────────────────────────────────────────
@@ -92,12 +89,23 @@ function getNextReferenceNo(lastRef: string | null, year: number): string {
   return `LOAN-${year}-${String(seq + 1).padStart(4, "0")}`;
 }
 
+// ✅ Derives the number of payment periods from payment_term + term_months
+function getTermCount(paymentTerm: string, termMonths: number): number {
+  switch ((paymentTerm ?? "").toLowerCase().replace(/-/g, "_")) {
+    case "daily":        return termMonths * 30;
+    case "weekly":       return termMonths * 4;
+    case "semi_monthly": return termMonths * 2;
+    case "monthly":
+    default:             return termMonths;
+  }
+}
+
 async function insertNotification(
   customerId: number,
-  tenantId: number,
-  title: string,
-  message: string,
-  type: string
+  tenantId:   number,
+  title:      string,
+  message:    string,
+  type:       string
 ): Promise<void> {
   try {
     const [existing] = await pool.query<RowDataPacket[]>(
@@ -236,14 +244,10 @@ async function startServer() {
   });
 
   // ── Tenant: Verify Code ───────────────────────────────────────────────────
-  // Returns the tenant_id from the matching row so the frontend can store it
-  // and use it for all subsequent requests (login, register, etc.)
   app.post('/api/tenants/verify-code', async (req: any, res: any) => {
     const { code } = req.body;
-
-    if (!code || typeof code !== 'string' || code.length !== 6) {
+    if (!code || typeof code !== 'string' || code.length !== 6)
       return res.status(400).json({ success: false, message: 'Invalid code format.' });
-    }
 
     try {
       const [rows]: any = await pool.query(
@@ -257,24 +261,21 @@ async function startServer() {
         [code.toUpperCase()]
       );
 
-      if (!rows.length) {
+      if (!rows.length)
         return res.status(404).json({
           success: false,
           message: 'Code not found or cooperative is inactive. Please contact your cooperative.',
         });
-      }
 
-      // Return the real tenant_id from the DB row — the frontend stores this
-      // and sends it back with every login/register request.
       return res.json({
         success:       true,
         tenant_id:     rows[0].tenant_id,
-        tenant_name:   rows[0].display_name || rows[0].tenant_name,
-        subdomain:     rows[0].subdomain    ?? '',
-        logo_path:     rows[0].logo_path    ?? null,
+        // ✅ Always return tenant_name — never display_name
+        tenant_name:   rows[0].tenant_name,
+        subdomain:     rows[0].subdomain     ?? '',
+        logo_path:     rows[0].logo_path     ?? null,
         primary_color: rows[0].primary_color ?? null,
       });
-
     } catch (err) {
       console.error('[verify-code]', err);
       return res.status(500).json({ success: false, message: 'Server error. Please try again.' });
@@ -282,16 +283,25 @@ async function startServer() {
   });
 
   // ── Auth: Send OTP ────────────────────────────────────────────────────────
+  // ✅ Now scoped to tenant_id — prevents cross-tenant password reset
   app.post("/api/auth/send-otp", async (req, res) => {
     try {
-      const { email } = req.body;
-      if (!email) return res.status(400).json({ success: false, message: "Please provide your email address." });
+      const email     = String(req.body.email     ?? "").trim().toLowerCase();
+      const tenant_id = Number(req.body.tenant_id ?? 0);
+
+      if (!email)
+        return res.status(400).json({ success: false, message: "Please provide your email address." });
+      if (!tenant_id)
+        return res.status(400).json({ success: false, message: "Cooperative verification is required." });
+
       const [customers] = await pool.query<RowDataPacket[]>(
-        "SELECT customer_id FROM customers WHERE email = ? AND is_active = 1 LIMIT 1", [email]
+        "SELECT customer_id FROM customers WHERE email = ? AND tenant_id = ? AND is_active = 1 LIMIT 1",
+        [email, tenant_id]
       );
       if (customers.length === 0)
-        return res.status(404).json({ success: false, message: "No account is associated with this email address." });
-      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        return res.status(404).json({ success: false, message: "No account is associated with this email address in the selected cooperative." });
+
+      const otp       = Math.floor(100000 + Math.random() * 900000).toString();
       const expiresAt = Date.now() + 10 * 60 * 1000;
       await pool.query("REPLACE INTO otps (email, otp, expires_at) VALUES (?, ?, ?)", [email, otp, expiresAt]);
       await sendOtpEmail(email, otp);
@@ -323,21 +333,32 @@ async function startServer() {
   });
 
   // ── Auth: Reset Password ──────────────────────────────────────────────────
+  // ✅ Now scoped to tenant_id — prevents cross-tenant password reset
   app.post("/api/auth/reset-password", async (req, res) => {
     try {
       const email       = String(req.body.email       ?? "").trim().toLowerCase();
       const newPassword = String(req.body.newPassword ?? "");
+      const tenant_id   = Number(req.body.tenant_id   ?? 0);
+
       if (!email || !newPassword)
         return res.status(400).json({ success: false, message: "Email and new password are required." });
+      if (!tenant_id)
+        return res.status(400).json({ success: false, message: "Cooperative verification is required." });
       if (newPassword.length < 8)
         return res.status(400).json({ success: false, message: "Password must be at least 8 characters." });
+
       const [rows] = await pool.query<RowDataPacket[]>(
-        "SELECT customer_id FROM customers WHERE email = ? AND is_active = 1 LIMIT 1", [email]
+        "SELECT customer_id FROM customers WHERE email = ? AND tenant_id = ? AND is_active = 1 LIMIT 1",
+        [email, tenant_id]
       );
       if (rows.length === 0)
-        return res.status(404).json({ success: false, message: "No account found with this email address." });
+        return res.status(404).json({ success: false, message: "No account found with this email address in the selected cooperative." });
+
       const hashed = await bcrypt.hash(newPassword, 10);
-      await pool.query("UPDATE customers SET password = ? WHERE email = ? AND is_active = 1", [hashed, email]);
+      await pool.query(
+        "UPDATE customers SET password = ? WHERE email = ? AND tenant_id = ? AND is_active = 1",
+        [hashed, email, tenant_id]
+      );
       res.json({ success: true, message: "Your password has been reset successfully." });
     } catch (err: any) {
       console.error("Reset password error:", err.message);
@@ -346,11 +367,9 @@ async function startServer() {
   });
 
   // ── Auth: Register ────────────────────────────────────────────────────────
-  // Now accepts tenant_id from the request body (set by the frontend after
-  // the user verifies their cooperative code). Falls back to FALLBACK_TENANT_ID.
   app.post("/api/auth/register", async (req, res) => {
     try {
-      const tenant_id  = Number(req.body.tenant_id ?? FALLBACK_TENANT_ID);
+      const tenant_id  = Number(req.body.tenant_id  ?? FALLBACK_TENANT_ID);
       const first_name = String(req.body.first_name ?? req.body.firstName ?? "").trim();
       const last_name  = String(req.body.last_name  ?? req.body.lastName  ?? "").trim();
       const username   = String(req.body.username   ?? "").trim();
@@ -369,7 +388,6 @@ async function startServer() {
       if (!/\S+@\S+\.\S+/.test(email))
         return res.status(400).json({ success: false, message: "Please enter a valid email address." });
 
-      // ✅ NEW — scoped to tenant_id only
       const [duplicateRows] = await pool.query<RowDataPacket[]>(
         `SELECT customer_id, username, email, contact_no FROM customers
          WHERE tenant_id = ? AND (username = ? OR email = ? OR contact_no = ?) LIMIT 1`,
@@ -377,8 +395,8 @@ async function startServer() {
       );
       if (duplicateRows.length > 0) {
         const dup = duplicateRows[0];
-        if (dup.username === username)     return res.status(409).json({ success: false, message: "This username is already taken." });
-        if (dup.email === email)           return res.status(409).json({ success: false, message: "An account with this email already exists." });
+        if (dup.username   === username)   return res.status(409).json({ success: false, message: "This username is already taken." });
+        if (dup.email      === email)      return res.status(409).json({ success: false, message: "An account with this email already exists." });
         if (dup.contact_no === contact_no) return res.status(409).json({ success: false, message: "An account with this contact number already exists." });
       }
 
@@ -415,11 +433,9 @@ async function startServer() {
 
       if (!usernameOrEmail || !password)
         return res.status(400).json({ success: false, message: "Please enter your username and password." });
-
       if (!tenant_id)
         return res.status(400).json({ success: false, message: "Cooperative verification is required. Please restart the app and enter your cooperative code." });
 
-      // ✅ Filter by tenant_id in the query itself — no cross-tenant matches
       const [rows] = await pool.query<CustomerRow[]>(
         `SELECT customer_id, tenant_id, user_id, username, password, customer_no, first_name, last_name, contact_no, email, province, city, barangay, street, created_at, is_active
          FROM customers
@@ -433,13 +449,11 @@ async function startServer() {
 
       const customer = rows[0];
       const match    = await bcrypt.compare(password, customer.password);
-
       if (!match)
         return res.status(401).json({ success: false, message: "Incorrect username or password." });
 
       const { password: _pw, ...safeCustomer } = customer;
       res.json({ success: true, customer: safeCustomer });
-
     } catch (err: any) {
       console.error("Login error:", err.message);
       res.status(500).json({ success: false, message: "An unexpected error occurred." });
@@ -462,7 +476,6 @@ async function startServer() {
   // ── Loans: Apply ──────────────────────────────────────────────────────────
   app.post("/api/loans/apply", async (req, res) => {
     try {
-      // ✅ Destructure first before using any variables
       const {
         customer_id, tenant_id, principal_amount, payment_term,
         interest_rate, term_months, id_type, collateral_type, co_maker,
@@ -475,22 +488,19 @@ async function startServer() {
       if (isNaN(amount) || amount < 1000 || amount > 500000)
         return res.status(400).json({ success: false, message: "Loan amount must be between ₱1,000 and ₱500,000." });
 
-      // ✅ Active loan check now inside try, after destructuring
       const [activeLoans] = await pool.query<RowDataPacket[]>(
         `SELECT loan_id FROM loans
          WHERE customer_id = ? AND tenant_id = ?
-         AND status NOT IN ('Paid', 'Closed', 'Denied', 'CLOSED', 'PAID')
+         AND status NOT IN ('CLOSED', 'DENIED')
          AND is_active = 1`,
         [customer_id, tenant_id]
       );
-
-      if (activeLoans.length > 0) {
+      if (activeLoans.length > 0)
         return res.status(409).json({
           success:    false,
-          error_code: 'UNPAID_LOANS_EXIST',
-          message:    'You already have an active loan. Please settle your current loan before applying for a new one.',
+          error_code: "UNPAID_LOANS_EXIST",
+          message:    "You already have an active loan. Please settle your current loan before applying for a new one.",
         });
-      }
 
       const year = new Date().getFullYear();
       const [lastLoanRows] = await pool.query<RowDataPacket[]>(
@@ -500,14 +510,21 @@ async function startServer() {
 
       const reference_no     = getNextReferenceNo(lastLoanRows[0]?.reference_no ?? null, year);
       const rate             = Number(interest_rate) || 0;
-      const months           = Number(term_months) || 1;
-      const total_payable    = Number((amount + amount * (rate / 100) * months).toFixed(2));
-      const resolvedTenantId = Number(tenant_id ?? FALLBACK_TENANT_ID);
+      const months           = Number(term_months)   || 1;
+      const resolvedTenantId = Number(tenant_id      ?? FALLBACK_TENANT_ID);
+
+      // ✅ Correct interest calculation
+      const totalInterest   = amount * (rate / 100) * months;
+      const total_payable   = Number((amount + totalInterest).toFixed(2));
+
+      // ✅ Correct per-term amount based on payment_term
+      const termCount       = getTermCount(payment_term, months);
+      const amount_per_term = Number((total_payable / termCount).toFixed(2));
 
       const [loanResult] = await pool.query<ResultSetHeader>(
-        `INSERT INTO loans (tenant_id, customer_id, reference_no, principal_amount, interest_rate, payment_term, term_months, total_payable, remaining_balance, id_type, collateral_type, status, is_active)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pending', 1)`,
-        [resolvedTenantId, customer_id, reference_no, amount, rate, payment_term, months, total_payable, total_payable, id_type ?? null, collateral_type]
+        `INSERT INTO loans (tenant_id, customer_id, reference_no, principal_amount, interest_rate, payment_term, term_months, total_payable, amount_per_term, remaining_balance, id_type, collateral_type, status, is_active)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 1)`,
+        [resolvedTenantId, customer_id, reference_no, amount, rate, payment_term, months, total_payable, amount_per_term, total_payable, id_type ?? null, collateral_type]
       );
       const loan_id = loanResult.insertId;
 
@@ -532,8 +549,8 @@ async function startServer() {
 
       try {
         await pool.query(
-          `INSERT INTO loan_status_cache (loan_id, last_status) VALUES (?, 'Pending')
-           ON DUPLICATE KEY UPDATE last_status = 'Pending'`,
+          `INSERT INTO loan_status_cache (loan_id, last_status) VALUES (?, 'PENDING')
+           ON DUPLICATE KEY UPDATE last_status = 'PENDING'`,
           [loan_id]
         );
       } catch (cacheErr: any) { console.warn("Status cache seed skipped:", cacheErr.message); }
@@ -541,9 +558,8 @@ async function startServer() {
       res.status(201).json({
         success: true,
         message: "Your loan application has been submitted successfully.",
-        loan:    { loan_id, reference_no, total_payable, status: "Pending" },
+        loan:    { loan_id, reference_no, total_payable, amount_per_term, status: "PENDING" },
       });
-
     } catch (err: any) {
       console.error("Loan apply error:", err);
       res.status(500).json({ success: false, message: "Failed to submit loan application.", error: err.message });
@@ -555,32 +571,42 @@ async function startServer() {
     try {
       const customerId = req.params.customerId;
       const [rows] = await pool.query<RowDataPacket[]>(
-        `SELECT l.loan_id, l.reference_no, l.principal_amount, l.interest_rate, l.payment_term, l.term_months, l.total_payable, l.remaining_balance, l.status, l.due_date, l.activated_at, l.created_at, l.is_active, c.tenant_id
+        `SELECT l.loan_id, l.reference_no, l.principal_amount, l.interest_rate,
+                l.payment_term, l.term_months, l.total_payable, l.amount_per_term,
+                l.remaining_balance, l.status, l.due_date, l.activated_at,
+                l.created_at, l.is_active, c.tenant_id
          FROM loans l JOIN customers c ON c.customer_id = l.customer_id
          WHERE l.customer_id = ? AND l.is_active = 1 ORDER BY l.created_at DESC`,
         [customerId]
       );
 
       const NOTIF_MAP: Record<string, { title: string; message: (ref: string) => string; type: string }> = {
-        active: { title: "Loan Approved ✅",        message: (ref) => `Your loan (${ref}) has been approved. View your payment schedule now.`, type: "approved" },
-        denied: { title: "Loan Application Denied", message: (ref) => `Your loan application (${ref}) was not approved. Please contact your cooperative.`, type: "denied" },
-        paid:   { title: "Loan Fully Paid 🎉",      message: (ref) => `Congratulations! Your loan (${ref}) has been fully paid.`, type: "payment" },
-        closed: { title: "Loan Closed",             message: (ref) => `Your loan (${ref}) has been closed.`, type: "general" },
+        active:  { title: "Loan Approved ✅",        message: (ref) => `Your loan (${ref}) has been approved. View your payment schedule now.`, type: "approved" },
+        denied:  { title: "Loan Application Denied", message: (ref) => `Your loan application (${ref}) was not approved. Please contact your cooperative.`, type: "denied" },
+        closed:  { title: "Loan Fully Paid 🎉",      message: (ref) => `Congratulations! Your loan (${ref}) has been fully paid.`, type: "payment" },
       };
 
       for (const loan of rows) {
         const newStatus  = String(loan.status ?? "").toLowerCase();
         const tenantId   = loan.tenant_id ?? FALLBACK_TENANT_ID;
-        const [cached]   = await pool.query<RowDataPacket[]>(`SELECT last_status FROM loan_status_cache WHERE loan_id = ? LIMIT 1`, [loan.loan_id]);
+        const [cached]   = await pool.query<RowDataPacket[]>(
+          `SELECT last_status FROM loan_status_cache WHERE loan_id = ? LIMIT 1`, [loan.loan_id]
+        );
         const lastStatus = cached[0] ? String(cached[0].last_status).toLowerCase() : null;
         if (!lastStatus) {
-          await pool.query(`INSERT INTO loan_status_cache (loan_id, last_status) VALUES (?, ?) ON DUPLICATE KEY UPDATE last_status = VALUES(last_status)`, [loan.loan_id, loan.status]);
+          await pool.query(
+            `INSERT INTO loan_status_cache (loan_id, last_status) VALUES (?, ?) ON DUPLICATE KEY UPDATE last_status = VALUES(last_status)`,
+            [loan.loan_id, loan.status]
+          );
           continue;
         }
         if (lastStatus !== newStatus) {
           const notif = NOTIF_MAP[newStatus];
           if (notif) await insertNotification(Number(customerId), tenantId, notif.title, notif.message(loan.reference_no), notif.type);
-          await pool.query(`INSERT INTO loan_status_cache (loan_id, last_status) VALUES (?, ?) ON DUPLICATE KEY UPDATE last_status = VALUES(last_status)`, [loan.loan_id, loan.status]);
+          await pool.query(
+            `INSERT INTO loan_status_cache (loan_id, last_status) VALUES (?, ?) ON DUPLICATE KEY UPDATE last_status = VALUES(last_status)`,
+            [loan.loan_id, loan.status]
+          );
         }
       }
       res.json(rows.map(({ tenant_id: _tid, ...rest }) => rest));
@@ -594,7 +620,9 @@ async function startServer() {
   app.get("/api/loan/:loanId", async (req, res) => {
     try {
       const [rows] = await pool.query<RowDataPacket[]>(
-        `SELECT loan_id, reference_no, principal_amount, interest_rate, payment_term, term_months, total_payable, remaining_balance, status, due_date, denial_reason, notes, activated_at, created_at, is_active
+        `SELECT loan_id, reference_no, principal_amount, interest_rate, payment_term,
+                term_months, total_payable, amount_per_term, remaining_balance,
+                status, due_date, denial_reason, notes, activated_at, created_at, is_active
          FROM loans WHERE loan_id = ? LIMIT 1`,
         [req.params.loanId]
       );
@@ -657,7 +685,10 @@ async function startServer() {
   // ── Notifications: Mark All Read ──────────────────────────────────────────
   app.patch("/api/notifications/:customerId/read-all", async (req, res) => {
     try {
-      await pool.query(`UPDATE notifications SET is_read = 1 WHERE customer_id = ? AND is_read = 0`, [req.params.customerId]);
+      await pool.query(
+        `UPDATE notifications SET is_read = 1 WHERE customer_id = ? AND is_read = 0`,
+        [req.params.customerId]
+      );
       res.json({ success: true });
     } catch { res.status(500).json({ success: false, message: "Unable to update notifications." }); }
   });
@@ -681,7 +712,6 @@ async function startServer() {
         return res.status(400).json({ success: false, message: "amount, success_url and cancel_url are required." });
 
       const desc = description || "Loan Payment";
-
       const response = await fetch("https://api.paymongo.com/v1/checkout_sessions", {
         method: "POST",
         headers: PAYMONGO_HEADERS,
@@ -719,11 +749,7 @@ async function startServer() {
       if (!response.ok)
         return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to create checkout session." });
 
-      res.json({
-        success:      true,
-        checkout_url: data.data.attributes.checkout_url,
-        session_id:   data.data.id,
-      });
+      res.json({ success: true, checkout_url: data.data.attributes.checkout_url, session_id: data.data.id });
     } catch (err: any) {
       console.error("PayMongo checkout error:", err.message);
       res.status(500).json({ success: false, message: "Payment service unavailable. Please try again." });
@@ -741,11 +767,10 @@ async function startServer() {
       if (!response.ok)
         return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to retrieve session." });
 
-      const attrs = data.data.attributes;
+      const attrs                = data.data.attributes;
       const sessionPaymentStatus = attrs.payment_status ?? "unpaid";
-
-      const payment   = attrs.payments?.[0];
-      const rawMethod = payment?.attributes?.payment_method_type
+      const payment              = attrs.payments?.[0];
+      const rawMethod            = payment?.attributes?.payment_method_type
         ?? payment?.attributes?.source?.type
         ?? payment?.payment_method_type
         ?? attrs.payment_method_type
@@ -755,11 +780,9 @@ async function startServer() {
       const lineItemsTotal = Array.isArray(attrs.line_items)
         ? attrs.line_items.reduce((sum: number, item: any) => sum + (item.amount ?? 0), 0) / 100
         : null;
-      const paymentAmount = payment?.attributes?.amount
+      const paymentAmount  = payment?.attributes?.amount
         ? payment.attributes.amount / 100
-        : payment?.amount
-          ? payment.amount / 100
-          : null;
+        : payment?.amount ? payment.amount / 100 : null;
       const resolvedAmount = lineItemsTotal ?? paymentAmount;
 
       res.json({
@@ -818,7 +841,7 @@ async function startServer() {
     }
   });
 
-  // ── PayMongo: Get Source Status (polling) ─────────────────────────────────
+  // ── PayMongo: Get Source Status ───────────────────────────────────────────
   app.get("/api/paymongo/source/:sourceId", async (req, res) => {
     try {
       const response = await fetch(
@@ -906,7 +929,7 @@ async function startServer() {
     }
   });
 
-  // ── PayMongo: Attach Payment Method to Intent (Card 3DS) ─────────────────
+  // ── PayMongo: Attach Payment Method to Intent ─────────────────────────────
   app.post("/api/paymongo/attach", async (req, res) => {
     try {
       const { intent_id, payment_method_id, client_key, return_url } = req.body;
@@ -969,11 +992,14 @@ async function startServer() {
       }
 
       const [loanRows] = await pool.query<RowDataPacket[]>(
-        `SELECT l.loan_id, l.customer_id, l.remaining_balance, COALESCE(l.tenant_id, c.tenant_id, ?) AS tenant_id
-         FROM loans l JOIN customers c ON c.customer_id = l.customer_id WHERE l.loan_id = ? LIMIT 1`,
+        `SELECT l.loan_id, l.customer_id, l.remaining_balance, l.amount_per_term,
+                COALESCE(l.tenant_id, c.tenant_id, ?) AS tenant_id
+         FROM loans l JOIN customers c ON c.customer_id = l.customer_id
+         WHERE l.loan_id = ? LIMIT 1`,
         [FALLBACK_TENANT_ID, loan_id]
       );
-      if (loanRows.length === 0) return res.status(404).json({ success: false, message: "Loan not found." });
+      if (loanRows.length === 0)
+        return res.status(404).json({ success: false, message: "Loan not found." });
 
       const loan        = loanRows[0];
       const payAmount   = Number(amount);
@@ -1007,14 +1033,16 @@ async function startServer() {
       );
 
       res.json({
-        success:       true,
-        payment_id:    payResult.insertId,
-        pm_payment_id: paymongo_payment_id ?? null,
-        new_balance:   newBalance,
-        fully_paid:    isFullyPaid,
-        method:        normalizedMethod,
+        success:        true,
+        payment_id:     payResult.insertId,
+        pm_payment_id:  paymongo_payment_id ?? null,
+        new_balance:    newBalance,
+        fully_paid:     isFullyPaid,
+        method:         normalizedMethod,
         or_no,
-        message:       isFullyPaid ? "Loan fully paid!" : "Payment recorded successfully.",
+        // ✅ Return amount_per_term so frontend can compute next due amount
+        amount_per_term: Number(loan.amount_per_term) || null,
+        message:        isFullyPaid ? "Loan fully paid!" : "Payment recorded successfully.",
       });
     } catch (err: any) {
       console.error("Record payment error:", err.message);
