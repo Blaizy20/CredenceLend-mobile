@@ -660,6 +660,79 @@ async function startServer() {
     }
   });
 
+// ── Profile: Update Credentials ───────────────────────────────────────────
+app.patch("/api/profile/update", async (req, res) => {
+  try {
+    const customer_id = Number(req.body.customer_id ?? 0);
+    const tenant_id   = Number(req.body.tenant_id   ?? 0);
+    const field       = String(req.body.field        ?? "");
+
+    if (!customer_id || !tenant_id || !field)
+      return res.status(400).json({ success: false, message: "Missing required fields." });
+
+    // ── Password change ───────────────────────────────────────────────────
+    if (field === "password") {
+      const currentPassword = String(req.body.current_password ?? "");
+      const newPassword     = String(req.body.new_password     ?? "");
+
+      if (!currentPassword || !newPassword)
+        return res.status(400).json({ success: false, message: "Current and new passwords are required." });
+      if (newPassword.length < 8)
+        return res.status(400).json({ success: false, message: "Password must be at least 8 characters." });
+
+      const [rows] = await pool.query<RowDataPacket[]>(
+        "SELECT password FROM customers WHERE customer_id = ? AND tenant_id = ? AND is_active = 1 LIMIT 1",
+        [customer_id, tenant_id]
+      );
+      if (rows.length === 0)
+        return res.status(404).json({ success: false, message: "Account not found." });
+
+      const match = await bcrypt.compare(currentPassword, rows[0].password);
+      if (!match)
+        return res.status(401).json({ success: false, message: "Current password is incorrect." });
+
+      const hashed = await bcrypt.hash(newPassword, 10);
+      await pool.query(
+        "UPDATE customers SET password = ? WHERE customer_id = ? AND tenant_id = ? AND is_active = 1",
+        [hashed, customer_id, tenant_id]
+      );
+      return res.json({ success: true, message: "Password updated successfully." });
+    }
+
+    // ── Other fields ──────────────────────────────────────────────────────
+    const ALLOWED_FIELDS: Record<string, string> = {
+      username:   "username",
+      email:      "email",
+      contact_no: "contact_no",
+    };
+    const dbField = ALLOWED_FIELDS[field];
+    if (!dbField)
+      return res.status(400).json({ success: false, message: "Invalid field." });
+
+    const value = String(req.body.value ?? "").trim();
+    if (!value)
+      return res.status(400).json({ success: false, message: "Value is required." });
+
+    // ✅ Duplicate check — must not conflict with another customer in same tenant
+    const [dupRows] = await pool.query<RowDataPacket[]>(
+      `SELECT customer_id FROM customers WHERE ${dbField} = ? AND tenant_id = ? AND customer_id != ? AND is_active = 1 LIMIT 1`,
+      [value, tenant_id, customer_id]
+    );
+    if (dupRows.length > 0)
+      return res.status(409).json({ success: false, message: `This ${field.replace('_', ' ')} is already taken by another account.` });
+
+    await pool.query(
+      `UPDATE customers SET ${dbField} = ? WHERE customer_id = ? AND tenant_id = ? AND is_active = 1`,
+      [value, customer_id, tenant_id]
+    );
+    return res.json({ success: true, message: `${field.replace('_', ' ')} updated successfully.` });
+
+  } catch (err: any) {
+    console.error("Profile update error:", err.message);
+    res.status(500).json({ success: false, message: "An unexpected error occurred." });
+  }
+});
+
   // ── Loans: List by Customer ───────────────────────────────────────────────
   app.get("/api/loans/:customerId", async (req, res) => {
     try {
