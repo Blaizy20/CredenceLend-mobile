@@ -135,11 +135,10 @@ export default function Login() {
       localStorage.removeItem('tenant');
       sessionStorage.removeItem('tenant');
 
-      if (rememberTenant) {
-        localStorage.setItem('tenant', tenantPayload);
-      } else {
-        sessionStorage.setItem('tenant', tenantPayload);
-      }
+      // ✅ Always save to both — tenant is app-level context, not user-level
+      // rememberTenant checkbox is kept for UX but storage is always persistent
+      localStorage.setItem('tenant', tenantPayload);
+      sessionStorage.setItem('tenant', tenantPayload);
 
       setTenant(tenantData);
       setCodeSuccess(true);
