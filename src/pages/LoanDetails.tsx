@@ -18,7 +18,6 @@ const statusStyle: Record<string, string> = {
 const getStatusStyle = (status: string) =>
   statusStyle[status?.toLowerCase()] ?? 'bg-outline/10 text-outline border-outline/20';
 
-// ✅ Mirrors server-side getTermCount
 function getTermCount(paymentTerm: string, termMonths: number): number {
   switch ((paymentTerm ?? '').toLowerCase().replace(/-/g, '_')) {
     case 'daily':        return termMonths * 30;
@@ -102,9 +101,16 @@ export default function LoanDetails() {
   const isFullyPaid  = loan.status?.toLowerCase() === 'closed' || remainingBal <= 0;
   const paymentTerm  = loan.payment_term ?? '';
 
-  // ✅ Use server-stored amount_per_term if available, else derive it
   const totalTermCount = getTermCount(paymentTerm, termMonths);
-  const amountPerTerm  = Number(loan.amount_per_term ?? 0) || Number((totalPayable / totalTermCount).toFixed(2));
+
+  // ✅ Safe amountPerTerm — never zero, never NaN
+  const amountPerTerm = (() => {
+    const stored = Number(loan.amount_per_term ?? 0);
+    if (stored > 0) return stored;
+    if (totalTermCount > 0 && totalPayable > 0)
+      return Number((totalPayable / totalTermCount).toFixed(2));
+    return totalPayable; // last resort: treat as single-payment loan
+  })();
 
   // ── Schedule generator ────────────────────────────────────────────────────
   const generateSchedule = () => {
@@ -116,6 +122,7 @@ export default function LoanDetails() {
 
     const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount ?? 0), 0);
     const paidCount = amountPerTerm > 0 ? Math.floor(totalPaid / amountPerTerm) : 0;
+    const termsLeft = totalTermCount - paidCount;
 
     const schedule = [];
 
@@ -130,18 +137,15 @@ export default function LoanDetails() {
 
       const isPaid     = i < paidCount;
       const isUpcoming = i === paidCount;
+      const isLastTerm = i === totalTermCount - 1;
 
-      // ✅ Upcoming term = real remaining balance from DB
-      // ✅ Paid terms    = original fixed installment
-      // ✅ Future terms  = fixed installment capped at leftover
+      // ✅ Only show remainingBal on the LAST term when it's ALSO the next upcoming
+      //    All other terms (paid or future pending) always show fixed amountPerTerm
       const termAmount = isPaid
         ? amountPerTerm
-        : isUpcoming
+        : (isUpcoming && isLastTerm && termsLeft === 1)
           ? remainingBal
-          : Math.min(
-              amountPerTerm,
-              Math.max(0, totalPayable - (paidCount + (i - paidCount)) * amountPerTerm)
-            );
+          : amountPerTerm;
 
       schedule.push({
         date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
@@ -156,7 +160,7 @@ export default function LoanDetails() {
   };
 
   const schedule    = generateSchedule();
-  const nextPayment = schedule.find(s => s.status === 'PENDING');
+  const nextPayment = schedule.find(s => s.isUpcoming);
 
   return (
     <div className="min-h-screen bg-background pb-32">
