@@ -68,7 +68,7 @@ export default function Login() {
   const [tenant, setTenant] = React.useState<{
     tenant_id:      number;
     tenant_name:    string;
-    display_name?:  string;
+    subdomain?:  string;
     logo_path?:     string | null;
     primary_color?: string | null;
   } | null>(existingTenant);
@@ -153,7 +153,7 @@ export default function Login() {
       const tenantData = {
         tenant_id:     data.tenant_id,
         tenant_name:   data.tenant_name   ?? '',
-        subdomain:     data.subdomain     ?? '',
+        subdomain:     data.display_name     ?? '',
         logo_path:     data.logo_path     ?? null,
         primary_color: data.primary_color ?? null,
         code:          fullCode,
