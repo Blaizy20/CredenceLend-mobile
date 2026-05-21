@@ -103,13 +103,13 @@ export default function LoanDetails() {
 
   const totalTermCount = getTermCount(paymentTerm, termMonths);
 
-  // ✅ Safe amountPerTerm — never zero, never NaN
+  // ✅ Safe amountPerTerm — reads DB first, falls back to computed
   const amountPerTerm = (() => {
     const stored = Number(loan.amount_per_term ?? 0);
     if (stored > 0) return stored;
     if (totalTermCount > 0 && totalPayable > 0)
       return Number((totalPayable / totalTermCount).toFixed(2));
-    return totalPayable; // last resort: treat as single-payment loan
+    return totalPayable;
   })();
 
   // ── Schedule generator ────────────────────────────────────────────────────
@@ -120,9 +120,15 @@ export default function LoanDetails() {
         ? new Date(loan.created_at)
         : new Date();
 
-    const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount ?? 0), 0);
-    const paidCount = amountPerTerm > 0 ? Math.floor(totalPaid / amountPerTerm) : 0;
-    const termsLeft = totalTermCount - paidCount;
+    // ✅ Use remaining_balance from DB as source of truth
+    const totalPaid     = totalPayable - remainingBal;
+    const paidCount     = amountPerTerm > 0 ? Math.floor(totalPaid / amountPerTerm) : 0;
+    const termsLeft     = totalTermCount - paidCount;
+
+    // ✅ Carry-over credit reduces the current upcoming term
+    //    (mirrors computeInstallmentDue in PaymentOptions.tsx)
+    const partialCredit  = parseFloat((totalPaid - paidCount * amountPerTerm).toFixed(2));
+    const currentTermDue = parseFloat((amountPerTerm - partialCredit).toFixed(2));
 
     const schedule = [];
 
@@ -139,13 +145,16 @@ export default function LoanDetails() {
       const isUpcoming = i === paidCount;
       const isLastTerm = i === totalTermCount - 1;
 
-      // ✅ Only show remainingBal on the LAST term when it's ALSO the next upcoming
-      //    All other terms (paid or future pending) always show fixed amountPerTerm
+      // ✅ Upcoming term: show carry-over reduced amount
+      //    Last term: show exact remaining balance
+      //    All others: show flat amountPerTerm
       const termAmount = isPaid
         ? amountPerTerm
-        : (isUpcoming && isLastTerm && termsLeft === 1)
-          ? remainingBal
-          : amountPerTerm;
+        : isUpcoming
+          ? (termsLeft === 1
+              ? remainingBal                                    // last term → exact remaining
+              : Math.min(currentTermDue, remainingBal))        // current → carry-over reduced
+          : amountPerTerm;                                      // future → flat installment
 
       schedule.push({
         date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
