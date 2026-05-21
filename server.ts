@@ -89,7 +89,6 @@ function getNextReferenceNo(lastRef: string | null, year: number): string {
   return `LOAN-${year}-${String(seq + 1).padStart(4, "0")}`;
 }
 
-// ✅ Derives the number of payment periods from payment_term + term_months
 function getTermCount(paymentTerm: string, termMonths: number): number {
   switch ((paymentTerm ?? "").toLowerCase().replace(/-/g, "_")) {
     case "daily":        return termMonths * 30;
@@ -270,7 +269,6 @@ async function startServer() {
       return res.json({
         success:       true,
         tenant_id:     rows[0].tenant_id,
-        // ✅ Always return tenant_name — never display_name
         tenant_name:   rows[0].tenant_name,
         subdomain:     rows[0].subdomain     ?? '',
         logo_path:     rows[0].logo_path     ?? null,
@@ -283,7 +281,6 @@ async function startServer() {
   });
 
   // ── Auth: Send OTP ────────────────────────────────────────────────────────
-  // ✅ Now scoped to tenant_id — prevents cross-tenant password reset
   app.post("/api/auth/send-otp", async (req, res) => {
     try {
       const email     = String(req.body.email     ?? "").trim().toLowerCase();
@@ -313,17 +310,33 @@ async function startServer() {
   });
 
   // ── Auth: Verify OTP ──────────────────────────────────────────────────────
+  // ✅ Now scoped to tenant_id — prevents cross-tenant OTP verification
   app.post("/api/auth/verify-otp", async (req, res) => {
     try {
-      const { email, otp } = req.body;
+      const email     = String(req.body.email     ?? "").trim().toLowerCase();
+      const otp       = String(req.body.otp       ?? "").trim();
+      const tenant_id = Number(req.body.tenant_id ?? 0);
+
       if (!email || !otp)
         return res.status(400).json({ success: false, message: "Email and verification code are required." });
+      if (!tenant_id)
+        return res.status(400).json({ success: false, message: "Cooperative verification is required." });
+
+      // ✅ Confirm email belongs to this tenant before accepting OTP
+      const [customers] = await pool.query<RowDataPacket[]>(
+        "SELECT customer_id FROM customers WHERE email = ? AND tenant_id = ? AND is_active = 1 LIMIT 1",
+        [email, tenant_id]
+      );
+      if (customers.length === 0)
+        return res.status(404).json({ success: false, message: "No account is associated with this email address in the selected cooperative." });
+
       const [rows] = await pool.query<RowDataPacket[]>(
         "SELECT * FROM otps WHERE email = ? AND otp = ? AND expires_at > ? LIMIT 1",
         [email, otp, Date.now()]
       );
       if (rows.length === 0)
         return res.status(400).json({ success: false, message: "The verification code is invalid or has expired." });
+
       await pool.query("DELETE FROM otps WHERE email = ?", [email]);
       res.json({ success: true, message: "Verification successful." });
     } catch (err: any) {
@@ -333,7 +346,6 @@ async function startServer() {
   });
 
   // ── Auth: Reset Password ──────────────────────────────────────────────────
-  // ✅ Now scoped to tenant_id — prevents cross-tenant password reset
   app.post("/api/auth/reset-password", async (req, res) => {
     try {
       const email       = String(req.body.email       ?? "").trim().toLowerCase();
@@ -383,9 +395,9 @@ async function startServer() {
 
       if (!first_name || !last_name || !username || !contact_no || !email || !password || !province || !city || !barangay || !street)
         return res.status(400).json({ success: false, message: "All fields are required." });
-      if (!/^09\d{9}$/.test(contact_no))
+      if (!/^09\\d{9}$/.test(contact_no))
         return res.status(400).json({ success: false, message: "Please enter a valid Philippine mobile number (e.g. 09XXXXXXXXX)." });
-      if (!/\S+@\S+\.\S+/.test(email))
+      if (!/\\S+@\\S+\\.\\S+/.test(email))
         return res.status(400).json({ success: false, message: "Please enter a valid email address." });
 
       const [duplicateRows] = await pool.query<RowDataPacket[]>(
@@ -513,11 +525,8 @@ async function startServer() {
       const months           = Number(term_months)   || 1;
       const resolvedTenantId = Number(tenant_id      ?? FALLBACK_TENANT_ID);
 
-      // ✅ Correct interest calculation
       const totalInterest   = amount * (rate / 100) * months;
       const total_payable   = Number((amount + totalInterest).toFixed(2));
-
-      // ✅ Correct per-term amount based on payment_term
       const termCount       = getTermCount(payment_term, months);
       const amount_per_term = Number((total_payable / termCount).toFixed(2));
 
@@ -581,9 +590,9 @@ async function startServer() {
       );
 
       const NOTIF_MAP: Record<string, { title: string; message: (ref: string) => string; type: string }> = {
-        active:  { title: "Loan Approved ✅",        message: (ref) => `Your loan (${ref}) has been approved. View your payment schedule now.`, type: "approved" },
+        active:  { title: "Loan Approved",          message: (ref) => `Your loan (${ref}) has been approved. View your payment schedule now.`, type: "approved" },
         denied:  { title: "Loan Application Denied", message: (ref) => `Your loan application (${ref}) was not approved. Please contact your cooperative.`, type: "denied" },
-        closed:  { title: "Loan Fully Paid 🎉",      message: (ref) => `Congratulations! Your loan (${ref}) has been fully paid.`, type: "payment" },
+        closed:  { title: "Loan Fully Paid",         message: (ref) => `Congratulations! Your loan (${ref}) has been fully paid.`, type: "payment" },
       };
 
       for (const loan of rows) {
@@ -907,7 +916,7 @@ async function startServer() {
             attributes: {
               type: "card",
               details: {
-                card_number: String(card_number).replace(/\s/g, ""),
+                card_number: String(card_number).replace(/\\s/g, ""),
                 exp_month:   Number(exp_month),
                 exp_year:    Number(exp_year),
                 cvc:         String(cvc),
@@ -1018,14 +1027,19 @@ async function startServer() {
         [loan_id, payAmount, normalizedMethod, notes, loan.tenant_id, or_no, gcash_reference_no, bank_reference_no]
       );
 
+      // ✅ Stamp closed_at when loan becomes fully paid
       await pool.query(
-        `UPDATE loans SET remaining_balance = ?, status = IF(? <= 0, 'CLOSED', status) WHERE loan_id = ?`,
-        [newBalance, newBalance, loan_id]
+        `UPDATE loans
+         SET remaining_balance = ?,
+             status    = IF(? <= 0, 'CLOSED', status),
+             closed_at = IF(? <= 0, NOW(), closed_at)
+         WHERE loan_id = ?`,
+        [newBalance, newBalance, newBalance, loan_id]
       );
 
       await insertNotification(
         loan.customer_id, Number(loan.tenant_id) || FALLBACK_TENANT_ID,
-        isFullyPaid ? "Loan Fully Paid 🎉" : "Payment Received",
+        isFullyPaid ? "Loan Fully Paid" : "Payment Received",
         isFullyPaid
           ? "Congratulations! Your loan has been fully paid. Thank you!"
           : `Your payment of ₱${payAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })} has been received and is being processed.`,
@@ -1033,16 +1047,15 @@ async function startServer() {
       );
 
       res.json({
-        success:        true,
-        payment_id:     payResult.insertId,
-        pm_payment_id:  paymongo_payment_id ?? null,
-        new_balance:    newBalance,
-        fully_paid:     isFullyPaid,
-        method:         normalizedMethod,
+        success:         true,
+        payment_id:      payResult.insertId,
+        pm_payment_id:   paymongo_payment_id ?? null,
+        new_balance:     newBalance,
+        fully_paid:      isFullyPaid,
+        method:          normalizedMethod,
         or_no,
-        // ✅ Return amount_per_term so frontend can compute next due amount
         amount_per_term: Number(loan.amount_per_term) || null,
-        message:        isFullyPaid ? "Loan fully paid!" : "Payment recorded successfully.",
+        message:         isFullyPaid ? "Loan fully paid!" : "Payment recorded successfully.",
       });
     } catch (err: any) {
       console.error("Record payment error:", err.message);

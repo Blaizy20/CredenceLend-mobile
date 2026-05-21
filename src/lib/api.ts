@@ -9,7 +9,6 @@ const BASE = Capacitor.isNativePlatform()
 export { BASE as API_BASE };
 
 // ─── Tenant helper ────────────────────────────────────────────────────────────
-// ✅ sessionStorage first — most recent selection always wins over remembered one
 function getStoredTenantId(): number {
   try {
     const t = JSON.parse(sessionStorage.getItem('tenant') || 'null')
@@ -44,7 +43,7 @@ export interface LoanApplyPayload {
   customer_id:       number;
   tenant_id:         number;
   principal_amount:  number;
-  payment_term:      string;   // 'daily' | 'weekly' | 'semi_monthly' | 'monthly'
+  payment_term:      string;
   interest_rate:     number;
   term_months:       number;
   id_type:           string;
@@ -115,29 +114,35 @@ export const authAPI = {
   checkContact: (contactNo: string) =>
     fetch(`${BASE}/api/auth/check-contact?contactNo=${encodeURIComponent(contactNo)}`).then(r => r.json()),
 
+  // ✅ tenant_id now included — backend will reject if email doesn't belong to this tenant
   sendOtp: async (email: string) => {
+    const tenant_id = getStoredTenantId();
     const res = await fetch(`${BASE}/api/auth/send-otp`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ email }),
+      body:    JSON.stringify({ email, tenant_id }),
     });
     return res.json();
   },
 
+  // ✅ tenant_id now included — prevents OTP verification across tenants
   verifyOtp: async (email: string, otp: string) => {
+    const tenant_id = getStoredTenantId();
     const res = await fetch(`${BASE}/api/auth/verify-otp`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ email, otp }),
+      body:    JSON.stringify({ email, otp, tenant_id }),
     });
     return res.json();
   },
 
+  // ✅ tenant_id now included — prevents cross-tenant password reset
   resetPassword: async (email: string, newPassword: string) => {
+    const tenant_id = getStoredTenantId();
     const res = await fetch(`${BASE}/api/auth/reset-password`, {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ email, newPassword }),
+      body:    JSON.stringify({ email, newPassword, tenant_id }),
     });
     let result: any = {};
     try { result = await res.json(); } catch {
