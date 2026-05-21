@@ -18,14 +18,25 @@ const statusStyle: Record<string, string> = {
 const getStatusStyle = (status: string) =>
   statusStyle[status?.toLowerCase()] ?? 'bg-outline/10 text-outline border-outline/20';
 
+// ✅ Mirrors server-side getTermCount — must stay in sync
+function getTermCount(paymentTerm: string, termMonths: number): number {
+  switch ((paymentTerm ?? '').toLowerCase().replace(/-/g, '_')) {
+    case 'daily':        return termMonths * 30;
+    case 'weekly':       return termMonths * 4;
+    case 'semi_monthly': return termMonths * 2;
+    case 'monthly':
+    default:             return termMonths;
+  }
+}
+
 export default function LoanDetails() {
   const navigate = useNavigate();
   const { id }   = useParams();
 
-  const [loan, setLoan]               = useState<any>(null);
-  const [payments, setPayments]       = useState<any[]>([]);
-  const [loading, setLoading]         = useState(true);
-  const [error, setError]             = useState('');
+  const [loan, setLoan]                       = useState<any>(null);
+  const [payments, setPayments]               = useState<any[]>([]);
+  const [loading, setLoading]                 = useState(true);
+  const [error, setError]                     = useState('');
   const [showAllSchedule, setShowAllSchedule] = useState(false);
 
   useEffect(() => {
@@ -81,42 +92,57 @@ export default function LoanDetails() {
   }
 
   // ── Derived values ────────────────────────────────────────────────────────
-  const principal      = Number(loan.principal_amount   ?? 0);
-  const interestRate   = Number(loan.interest_rate      ?? 0);
-  const termMonths     = Number(loan.term_months        ?? 1);
-  const totalPayable   = Number(loan.total_payable      ?? principal);
-  const remainingBal   = Number(loan.remaining_balance  ?? totalPayable);
+  const principal      = Number(loan.principal_amount  ?? 0);
+  const interestRate   = Number(loan.interest_rate     ?? 0);
+  const termMonths     = Number(loan.term_months       ?? 1);
+  const totalPayable   = Number(loan.total_payable     ?? principal);
+  const remainingBal   = Number(loan.remaining_balance ?? totalPayable);
   const paidAmount     = totalPayable - remainingBal;
   const progress       = totalPayable > 0 ? (paidAmount / totalPayable) * 100 : 0;
-  const isFullyPaid    = loan.status?.toLowerCase() === 'paid' || remainingBal <= 0;
+  const isFullyPaid    = loan.status?.toLowerCase() === 'closed' || remainingBal <= 0;
   const paymentTerm    = loan.payment_term ?? '';
+
+  // ✅ Use server-stored amount_per_term if available, else derive it
+  const totalTermCount  = getTermCount(paymentTerm, termMonths);
+  const amountPerTerm   = Number(loan.amount_per_term ?? 0) || Number((totalPayable / totalTermCount).toFixed(2));
 
   // ── Schedule generator ────────────────────────────────────────────────────
   const generateSchedule = () => {
-    const startDate  = loan.activated_at
+    const startDate = loan.activated_at
       ? new Date(loan.activated_at)
       : loan.created_at
         ? new Date(loan.created_at)
         : new Date();
 
-    const installmentAmt = termMonths > 0 ? totalPayable / termMonths : totalPayable;
+    // ✅ Total paid from actual payment records
+    const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount ?? 0), 0);
 
-    // Figure out how many installments are paid from payments total
-    const totalPaid      = payments.reduce((sum, p) => sum + Number(p.amount ?? 0), 0);
-    const paidCount      = installmentAmt > 0 ? Math.floor(totalPaid / installmentAmt) : 0;
+    // ✅ How many full terms have been paid
+    const paidCount = amountPerTerm > 0 ? Math.floor(totalPaid / amountPerTerm) : 0;
 
     const schedule = [];
-    for (let i = 0; i < termMonths; i++) {
+
+    for (let i = 0; i < totalTermCount; i++) {
       const date = new Date(startDate);
-      const term = paymentTerm.toLowerCase();
+      const term = paymentTerm.toLowerCase().replace(/-/g, '_');
+
       if (term.includes('daily'))        date.setDate(date.getDate() + i);
       else if (term.includes('weekly'))  date.setDate(date.getDate() + i * 7);
       else if (term.includes('semi'))    date.setDate(date.getDate() + i * 15);
       else                               date.setMonth(date.getMonth() + i);
 
+      // ✅ Last term shows remaining balance, not fixed amount
+      const isLastTerm      = i === totalTermCount - 1;
+      const alreadyPaidAmt  = paidCount * amountPerTerm;
+      const leftover        = Math.max(0, totalPayable - alreadyPaidAmt);
+      const termAmount      = isLastTerm
+        ? Math.min(amountPerTerm, leftover)   // last term = whatever is left
+        : amountPerTerm;                      // all other terms = fixed
+
       schedule.push({
-        date:       date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-        amount:     `₱ ${installmentAmt.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+        amount: `₱ ${termAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        rawAmount: termAmount,
         status:     i < paidCount ? 'PAID' : 'PENDING',
         isUpcoming: i === paidCount,
       });
@@ -125,15 +151,12 @@ export default function LoanDetails() {
     return showAllSchedule ? schedule : schedule.slice(0, 6);
   };
 
-  const schedule = generateSchedule();
+  const schedule    = generateSchedule();
   const nextPayment = schedule.find(s => s.status === 'PENDING');
 
   return (
     <div className="min-h-screen bg-background pb-32">
-      <TopBar
-        title="Loan Details"
-        onBack={() => navigate('/dashboard')}
-      />
+      <TopBar title="Loan Details" onBack={() => navigate('/dashboard')} />
 
       <main className="pt-20 px-4 space-y-6 max-w-lg mx-auto">
 
@@ -164,7 +187,7 @@ export default function LoanDetails() {
           </div>
         )}
 
-        {/* Pay Button — active loans only */}
+        {/* Pay Button */}
         {loan.status?.toLowerCase() === 'active' && !isFullyPaid && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
@@ -264,7 +287,7 @@ export default function LoanDetails() {
               <span className="text-[10px] font-bold uppercase tracking-widest">Term</span>
             </div>
             <p className="font-headline font-bold text-xl">
-              {termMonths} <span className="text-xs font-normal text-on-surface-variant">Installments</span>
+              {totalTermCount} <span className="text-xs font-normal text-on-surface-variant">Installments</span>
             </p>
           </div>
         </section>
@@ -329,7 +352,7 @@ export default function LoanDetails() {
           <section className="space-y-4">
             <div className="flex items-center justify-between px-2">
               <h3 className="font-headline font-bold text-lg tracking-tight">Loan Schedule</h3>
-              {termMonths > 6 && (
+              {totalTermCount > 6 && (
                 <button
                   onClick={() => setShowAllSchedule(!showAllSchedule)}
                   className="text-primary text-xs font-bold uppercase tracking-widest flex items-center gap-1"
