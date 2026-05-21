@@ -248,9 +248,8 @@ export default function Login() {
             transition={{ duration: 0.5, ease: 'easeInOut' }}
             className="fixed inset-0 z-[60] bg-background flex flex-col items-center justify-center"
           >
-            <div className="absolute inset-0 overflow-hidden pointer-events-none">
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-primary/10 rounded-full blur-[120px]" />
-            </div>
+            <div className="fixed inset-0 z-0 bg-gradient-to-b from-background via-background/95 to-background" />
+            <div className="fixed top-0 right-0 w-64 h-64 bg-primary/5 blur-[120px] rounded-full -z-10" />
             <motion.div
               initial={{ scale: 0.7, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
