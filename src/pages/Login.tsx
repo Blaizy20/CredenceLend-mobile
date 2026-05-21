@@ -454,17 +454,14 @@ export default function Login() {
                     transition={{ duration: 0.4 }}
                     className="flex flex-col items-center"
                   >
-                    {/* ✅ tenant_name = company name (big heading) */}
                     <h1 className="font-headline font-extrabold text-3xl tracking-tighter text-on-surface">
                       {tenant.tenant_name}
                     </h1>
-                    {/* ✅ display_name = branch name (badge below) */}
-                    <div className="inline-flex items-center gap-1.5 mt-2.5 px-3 py-1 rounded-full bg-primary/10 border border-primary/20">
-                      <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
-                      <span className="text-primary text-xs font-semibold tracking-wide">
-                        {tenant.display_name || 'Main Branch'}
-                      </span>
-                    </div>
+                    {tenant.display_name && (
+                      <p className="text-on-surface-variant text-sm font-medium mt-1">
+                        {tenant.display_name}
+                      </p>
+                    )}
                     <p className="text-on-surface-variant text-xs mt-2.5 font-medium">
                       powered by{' '}
                       <span className="text-primary font-semibold">CredenceLend</span>
