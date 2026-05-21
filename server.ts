@@ -367,6 +367,35 @@ async function startServer() {
     }
   });
 
+  // ── Auth: Send OTP ────────────────────────────────────────────────────────
+  app.post("/api/auth/send-otp", async (req, res) => {
+    try {
+      const email     = String(req.body.email     ?? "").trim().toLowerCase();
+      const tenant_id = Number(req.body.tenant_id ?? 0);
+
+      if (!email)
+        return res.status(400).json({ success: false, message: "Please provide your email address." });
+      if (!tenant_id)
+        return res.status(400).json({ success: false, message: "Cooperative verification is required." });
+
+      const [customers] = await pool.query<RowDataPacket[]>(
+        "SELECT customer_id FROM customers WHERE email = ? AND tenant_id = ? AND is_active = 1 LIMIT 1",
+        [email, tenant_id]
+      );
+      if (customers.length === 0)
+        return res.status(404).json({ success: false, message: "No account is associated with this email address in the selected cooperative." });
+
+      const otp       = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = Date.now() + 10 * 60 * 1000;
+      await pool.query("REPLACE INTO otps (email, otp, expires_at) VALUES (?, ?, ?)", [email, otp, expiresAt]);
+      await sendOtpEmail(email, otp);
+      res.json({ success: true, message: "A verification code has been sent to your email." });
+    } catch (err: any) {
+      console.error("Send OTP error:", err.message);
+      res.status(500).json({ success: false, message: "Failed to send verification code. Please try again." });
+    }
+  });
+
   // ── Auth: Verify OTP ──────────────────────────────────────────────────────
   // ✅ Scoped to tenant_id — prevents cross-tenant OTP verification
   app.post("/api/auth/verify-otp", async (req, res) => {
