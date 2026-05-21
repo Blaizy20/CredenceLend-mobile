@@ -154,6 +154,92 @@ async function sendOtpEmail(toEmail: string, otp: string): Promise<void> {
   }
 }
 
+// ── Payment Confirmation Email ─────────────────────────────────────────────
+async function sendPaymentEmail(
+  toEmail:     string,
+  firstName:   string,
+  amount:      number,
+  newBalance:  number,
+  orNo:        string,
+  method:      string,
+  isFullyPaid: boolean
+): Promise<void> {
+  const formattedAmount  = amount.toLocaleString("en-PH", { minimumFractionDigits: 2 });
+  const formattedBalance = newBalance.toLocaleString("en-PH", { minimumFractionDigits: 2 });
+
+  const response = await fetch("https://api.brevo.com/v3/smtp/email", {
+    method: "POST",
+    headers: {
+      "accept":       "application/json",
+      "api-key":      process.env.BREVO_API_KEY ?? "",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      sender: {
+        name:  process.env.BREVO_SENDER_NAME  ?? "Loan Manager",
+        email: process.env.BREVO_SENDER_EMAIL ?? "",
+      },
+      to: [{ email: toEmail }],
+      subject: isFullyPaid ? "🎉 Your Loan is Fully Paid!" : "Payment Received – CredenceLend",
+      htmlContent: isFullyPaid ? `
+        <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#f9f8f5;border-radius:8px;">
+          <h2 style="color:#16a34a;">Loan Fully Paid! 🎉</h2>
+          <p>Hi <strong>${firstName}</strong>,</p>
+          <p>Congratulations! Your loan has been <strong>fully paid</strong>. Thank you for settling your account on time.</p>
+          <table style="width:100%;border-collapse:collapse;margin:24px 0;">
+            <tr style="background:#f0fdf4;">
+              <td style="padding:10px 14px;font-size:0.85rem;color:#374151;">Amount Paid</td>
+              <td style="padding:10px 14px;font-weight:700;color:#16a34a;">₱${formattedAmount}</td>
+            </tr>
+            <tr>
+              <td style="padding:10px 14px;font-size:0.85rem;color:#374151;">Payment Method</td>
+              <td style="padding:10px 14px;font-weight:600;color:#28251d;">${method}</td>
+            </tr>
+            <tr style="background:#f0fdf4;">
+              <td style="padding:10px 14px;font-size:0.85rem;color:#374151;">OR Number</td>
+              <td style="padding:10px 14px;font-weight:600;color:#28251d;">${orNo}</td>
+            </tr>
+            <tr>
+              <td style="padding:10px 14px;font-size:0.85rem;color:#374151;">Remaining Balance</td>
+              <td style="padding:10px 14px;font-weight:700;color:#16a34a;">₱0.00 — CLOSED</td>
+            </tr>
+          </table>
+          <p style="color:#7a7974;font-size:0.875rem;">This is an automated payment confirmation. Please keep this for your records.</p>
+        </div>` : `
+        <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#f9f8f5;border-radius:8px;">
+          <h2 style="color:#01696f;">Payment Received</h2>
+          <p>Hi <strong>${firstName}</strong>,</p>
+          <p>We have successfully received your payment. Here are the details:</p>
+          <table style="width:100%;border-collapse:collapse;margin:24px 0;">
+            <tr style="background:#f0faf9;">
+              <td style="padding:10px 14px;font-size:0.85rem;color:#374151;">Amount Paid</td>
+              <td style="padding:10px 14px;font-weight:700;color:#01696f;">₱${formattedAmount}</td>
+            </tr>
+            <tr>
+              <td style="padding:10px 14px;font-size:0.85rem;color:#374151;">Payment Method</td>
+              <td style="padding:10px 14px;font-weight:600;color:#28251d;">${method}</td>
+            </tr>
+            <tr style="background:#f0faf9;">
+              <td style="padding:10px 14px;font-size:0.85rem;color:#374151;">OR Number</td>
+              <td style="padding:10px 14px;font-weight:600;color:#28251d;">${orNo}</td>
+            </tr>
+            <tr>
+              <td style="padding:10px 14px;font-size:0.85rem;color:#374151;">Remaining Balance</td>
+              <td style="padding:10px 14px;font-weight:700;color:#28251d;">₱${formattedBalance}</td>
+            </tr>
+          </table>
+          <p style="color:#7a7974;font-size:0.875rem;">This is an automated payment confirmation. Please keep this for your records.</p>
+        </div>`,
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    console.error("Brevo payment email error:", err);
+    // ✅ Don't throw — payment already recorded, email failure must not block the response
+  }
+}
+
 async function startServer() {
   const REQUIRED_ENV = [
     "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD",
@@ -310,7 +396,7 @@ async function startServer() {
   });
 
   // ── Auth: Verify OTP ──────────────────────────────────────────────────────
-  // ✅ Now scoped to tenant_id — prevents cross-tenant OTP verification
+  // ✅ Scoped to tenant_id — prevents cross-tenant OTP verification
   app.post("/api/auth/verify-otp", async (req, res) => {
     try {
       const email     = String(req.body.email     ?? "").trim().toLowerCase();
@@ -322,7 +408,6 @@ async function startServer() {
       if (!tenant_id)
         return res.status(400).json({ success: false, message: "Cooperative verification is required." });
 
-      // ✅ Confirm email belongs to this tenant before accepting OTP
       const [customers] = await pool.query<RowDataPacket[]>(
         "SELECT customer_id FROM customers WHERE email = ? AND tenant_id = ? AND is_active = 1 LIMIT 1",
         [email, tenant_id]
@@ -395,9 +480,9 @@ async function startServer() {
 
       if (!first_name || !last_name || !username || !contact_no || !email || !password || !province || !city || !barangay || !street)
         return res.status(400).json({ success: false, message: "All fields are required." });
-      if (!/^09\\d{9}$/.test(contact_no))
+      if (!/^09\d{9}$/.test(contact_no))
         return res.status(400).json({ success: false, message: "Please enter a valid Philippine mobile number (e.g. 09XXXXXXXXX)." });
-      if (!/\\S+@\\S+\\.\\S+/.test(email))
+      if (!/\S+@\S+\.\S+/.test(email))
         return res.status(400).json({ success: false, message: "Please enter a valid email address." });
 
       const [duplicateRows] = await pool.query<RowDataPacket[]>(
@@ -590,9 +675,9 @@ async function startServer() {
       );
 
       const NOTIF_MAP: Record<string, { title: string; message: (ref: string) => string; type: string }> = {
-        active:  { title: "Loan Approved",          message: (ref) => `Your loan (${ref}) has been approved. View your payment schedule now.`, type: "approved" },
+        active:  { title: "Loan Approved",           message: (ref) => `Your loan (${ref}) has been approved. View your payment schedule now.`, type: "approved" },
         denied:  { title: "Loan Application Denied", message: (ref) => `Your loan application (${ref}) was not approved. Please contact your cooperative.`, type: "denied" },
-        closed:  { title: "Loan Fully Paid",         message: (ref) => `Congratulations! Your loan (${ref}) has been fully paid.`, type: "payment" },
+        closed:  { title: "Loan Fully Paid",          message: (ref) => `Congratulations! Your loan (${ref}) has been fully paid.`, type: "payment" },
       };
 
       for (const loan of rows) {
@@ -916,7 +1001,7 @@ async function startServer() {
             attributes: {
               type: "card",
               details: {
-                card_number: String(card_number).replace(/\\s/g, ""),
+                card_number: String(card_number).replace(/\s/g, ""),
                 exp_month:   Number(exp_month),
                 exp_year:    Number(exp_year),
                 cvc:         String(cvc),
@@ -1045,6 +1130,27 @@ async function startServer() {
           : `Your payment of ₱${payAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })} has been received and is being processed.`,
         "payment"
       );
+
+      // ✅ Send payment confirmation email to customer
+      try {
+        const [customerRows] = await pool.query<RowDataPacket[]>(
+          `SELECT first_name, email FROM customers WHERE customer_id = ? LIMIT 1`,
+          [loan.customer_id]
+        );
+        if (customerRows.length > 0 && customerRows[0].email) {
+          await sendPaymentEmail(
+            customerRows[0].email,
+            customerRows[0].first_name,
+            payAmount,
+            newBalance,
+            or_no,
+            normalizedMethod,
+            isFullyPaid
+          );
+        }
+      } catch (emailErr: any) {
+        console.warn("Payment email skipped:", emailErr.message);
+      }
 
       res.json({
         success:         true,
