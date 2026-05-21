@@ -68,7 +68,8 @@ export default function Login() {
   const [tenant, setTenant] = React.useState<{
     tenant_id:      number;
     tenant_name:    string;
-    subdomain?:  string;
+    display_name?:  string;
+    subdomain?:     string;
     logo_path?:     string | null;
     primary_color?: string | null;
   } | null>(existingTenant);
@@ -153,7 +154,8 @@ export default function Login() {
       const tenantData = {
         tenant_id:     data.tenant_id,
         tenant_name:   data.tenant_name   ?? '',
-        subdomain:     data.display_name     ?? '',
+        display_name:  data.display_name  ?? '',  // ✅ added
+        subdomain:     data.subdomain     ?? '',
         logo_path:     data.logo_path     ?? null,
         primary_color: data.primary_color ?? null,
         code:          fullCode,
@@ -189,9 +191,8 @@ export default function Login() {
   const [usernameError, setUsernameError] = React.useState('');
   const [greeting, setGreeting]           = React.useState<{ name: string } | null>(null);
 
-  const branchLabel = tenant?.subdomain
-    ? tenant.subdomain.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
-    : 'Main Branch';
+  // ✅ display_name takes priority, fallback to tenant_name
+  const displayTitle = tenant?.display_name || tenant?.tenant_name || '';
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -321,13 +322,14 @@ export default function Login() {
               </h1>
               <p className="text-on-surface-variant text-sm mt-3">
                 Welcome back to{' '}
+                {/* ✅ display_name in greeting splash */}
                 <span className="text-primary font-semibold">
-                  {tenant?.tenant_name || 'CredenceLend'}
+                  {displayTitle || 'CredenceLend'}
                 </span>
               </p>
               {tenant?.tenant_name && (
                 <p className="text-on-surface-variant/60 text-xs mt-1">
-                  {branchLabel}
+                  {tenant.tenant_name}
                 </p>
               )}
             </motion.div>
@@ -462,20 +464,22 @@ export default function Login() {
                   <User className="text-on-primary" size={32} />
                 </div>
 
-                {tenant?.tenant_name ? (
+                {displayTitle ? (
                   <motion.div
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.4 }}
                     className="flex flex-col items-center"
                   >
+                    {/* ✅ display_name as the big heading */}
                     <h1 className="font-headline font-extrabold text-3xl tracking-tighter text-on-surface">
-                      {tenant.tenant_name}
+                      {displayTitle}
                     </h1>
+                    {/* ✅ tenant_name in the badge */}
                     <div className="inline-flex items-center gap-1.5 mt-2.5 px-3 py-1 rounded-full bg-primary/10 border border-primary/20">
                       <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
                       <span className="text-primary text-xs font-semibold tracking-wide">
-                        {branchLabel}
+                        {tenant?.tenant_name}
                       </span>
                     </div>
                     <p className="text-on-surface-variant text-xs mt-2.5 font-medium">
@@ -499,9 +503,10 @@ export default function Login() {
               <div className="w-full bg-surface-container-low rounded-[2rem] p-8 shadow-2xl shadow-black/60 border-t border-white/5 backdrop-blur-sm">
                 <div className="mb-8">
                   <h2 className="font-headline font-bold text-2xl text-on-surface">Welcome Back</h2>
+                  {/* ✅ display_name in login card subtitle */}
                   <p className="text-on-surface-variant text-sm mt-1 leading-relaxed">
-                    {tenant?.tenant_name
-                      ? `Sign in to access your ${tenant.tenant_name} loan account.`
+                    {displayTitle
+                      ? `Sign in to access your ${displayTitle} loan account.`
                       : 'Sign in to your account to continue.'}
                   </p>
                 </div>
@@ -574,7 +579,6 @@ export default function Login() {
                 onClick={() => {
                   localStorage.removeItem('tenant');
                   sessionStorage.removeItem('tenant');
-                  // ✅ Revert primary color to default on cooperative switch
                   document.documentElement.style.removeProperty('--color-primary');
                   setTenant(null);
                   setScreen('tenant');
