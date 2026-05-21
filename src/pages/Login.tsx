@@ -6,8 +6,6 @@ import { Input }   from '../components/Input';
 import { motion, AnimatePresence } from 'motion/react';
 import { authAPI, API_BASE } from '../lib/api';
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
 const CODE_LENGTH = 6;
 
 function getGreeting() {
@@ -24,27 +22,6 @@ function getStoredTenant() {
         ?? JSON.parse(localStorage.getItem('tenant')   || 'null');
   } catch { return null; }
 }
-
-function hexToHSL(hex: string): string {
-  const r = parseInt(hex.slice(1, 3), 16) / 255;
-  const g = parseInt(hex.slice(3, 5), 16) / 255;
-  const b = parseInt(hex.slice(5, 7), 16) / 255;
-  const max = Math.max(r, g, b), min = Math.min(r, g, b);
-  let h = 0, s = 0;
-  const l = (max + min) / 2;
-  if (max !== min) {
-    const d = max - min;
-    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-    switch (max) {
-      case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
-      case g: h = ((b - r) / d + 2) / 6; break;
-      case b: h = ((r - g) / d + 4) / 6; break;
-    }
-  }
-  return `${Math.round(h * 360)} ${Math.round(s * 100)}% ${Math.round(l * 100)}%`;
-}
-
-// ─── Component ────────────────────────────────────────────────────────────────
 
 export default function Login() {
   const navigate = useNavigate();
@@ -70,11 +47,10 @@ export default function Login() {
     primary_color?: string | null;
   } | null>(existingTenant);
 
-  // ✅ Apply primary_color — only if valid hex, else revert to default
+  // ✅ Tailwind v4 uses hex directly — no HSL conversion needed
   React.useEffect(() => {
     if (tenant?.primary_color && tenant.primary_color.startsWith('#')) {
-      const hsl = hexToHSL(tenant.primary_color);
-      document.documentElement.style.setProperty('--color-primary', hsl);
+      document.documentElement.style.setProperty('--color-primary', tenant.primary_color);
     } else {
       document.documentElement.style.removeProperty('--color-primary');
     }
@@ -149,7 +125,7 @@ export default function Login() {
       const tenantData = {
         tenant_id:     data.tenant_id,
         tenant_name:   data.tenant_name   ?? '',
-        display_name:  data.display_name  ?? '',  // ✅ branch name
+        display_name:  data.display_name  || null,
         subdomain:     data.subdomain     ?? '',
         logo_path:     data.logo_path     ?? null,
         primary_color: data.primary_color ?? null,
@@ -173,7 +149,6 @@ export default function Login() {
     }
   };
 
-  // ── Login state ───────────────────────────────────────────────────────────
   const [username, setUsername]           = React.useState('');
   const [password, setPassword]           = React.useState('');
   const [showPassword, setShowPassword]   = React.useState(false);
@@ -182,7 +157,6 @@ export default function Login() {
   const [usernameError, setUsernameError] = React.useState('');
   const [greeting, setGreeting]           = React.useState<{ name: string } | null>(null);
 
-  // ✅ Full label used in subtitles e.g. "7r Finance Pulilan Branch"
   const fullLabel = tenant?.tenant_name
     ? `${tenant.tenant_name}${tenant.display_name ? ` ${tenant.display_name}` : ''}`
     : '';
@@ -235,8 +209,6 @@ export default function Login() {
     }
   };
 
-  // ── Render ────────────────────────────────────────────────────────────────
-
   return (
     <>
       {/* ── App Launch Splash ── */}
@@ -248,13 +220,11 @@ export default function Login() {
             transition={{ duration: 0.5, ease: 'easeInOut' }}
             className="fixed inset-0 z-[60] bg-background flex flex-col items-center justify-center"
           >
-            <div className="fixed inset-0 z-0 bg-gradient-to-b from-background via-background/95 to-background" />
-            <div className="fixed top-0 right-0 w-64 h-64 bg-primary/5 blur-[120px] rounded-full -z-10" />
             <motion.div
               initial={{ scale: 0.7, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               transition={{ type: 'spring', stiffness: 220, damping: 18, delay: 0.1 }}
-              className="w-24 h-24 rounded-3xl bg-gradient-to-br from-primary to-primary-dim flex items-center justify-center shadow-2xl shadow-primary/30 mb-8"
+              className="w-24 h-24 rounded-3xl bg-primary flex items-center justify-center shadow-2xl mb-8"
             >
               <User className="text-on-primary" size={48} />
             </motion.div>
@@ -294,15 +264,12 @@ export default function Login() {
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             className="fixed inset-0 z-50 bg-background flex flex-col items-center justify-center px-8 text-center"
           >
-            <div className="absolute inset-0 overflow-hidden pointer-events-none">
-              <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-primary/10 rounded-full blur-[100px]" />
-            </div>
             <motion.div
               initial={{ scale: 0, rotate: -20 }} animate={{ scale: 1, rotate: 0 }}
               transition={{ type: 'spring', stiffness: 260, damping: 18, delay: 0.1 }}
-              className="w-24 h-24 rounded-3xl bg-primary/10 border border-primary/20 flex items-center justify-center mb-8 shadow-2xl shadow-primary/20"
+              className="w-24 h-24 rounded-3xl bg-primary flex items-center justify-center mb-8 shadow-2xl"
             >
-              <Sparkles className="text-primary" size={44} />
+              <Sparkles className="text-on-primary" size={44} />
             </motion.div>
             <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 }}>
               <p className="text-on-surface-variant text-sm font-bold uppercase tracking-widest mb-2">
@@ -313,7 +280,6 @@ export default function Login() {
               </h1>
               <p className="text-on-surface-variant text-sm mt-3">
                 Welcome back to{' '}
-                {/* ✅ Full label in greeting e.g. "7r Finance Pulilan Branch" */}
                 <span className="text-primary font-semibold">
                   {fullLabel || 'CredenceLend'}
                 </span>
@@ -347,8 +313,8 @@ export default function Login() {
             className="min-h-screen bg-background flex flex-col items-center justify-center px-8"
           >
             <div className="flex flex-col items-center mb-10">
-              <div className="w-20 h-20 rounded-3xl bg-primary/10 border border-primary/20 flex items-center justify-center mb-5">
-                <ShieldCheck size={40} className="text-primary" />
+              <div className="w-20 h-20 rounded-3xl bg-primary flex items-center justify-center mb-5">
+                <ShieldCheck size={40} className="text-on-primary" />
               </div>
               <h1 className="font-headline font-extrabold text-2xl text-on-surface text-center">
                 Enter Access Code
@@ -375,9 +341,9 @@ export default function Login() {
                     bg-surface-container-highest border-2 text-on-surface
                     transition-all outline-none caret-transparent
                     focus:border-primary focus:bg-surface-container disabled:opacity-60
-                    ${codeError ? 'border-error/60 bg-error/5' :
-                      code[idx] ? 'border-primary/50'          :
-                                  'border-outline/20'}
+                    ${codeError    ? 'border-error'          :
+                      code[idx]    ? 'border-primary'        :
+                                     'border-outline-variant'}
                   `}
                 />
               ))}
@@ -388,7 +354,7 @@ export default function Login() {
                 type="checkbox"
                 checked={rememberTenant}
                 onChange={(e) => setRememberTenant(e.target.checked)}
-                className="w-4 h-4 rounded border-outline-variant bg-surface-container text-primary focus:ring-primary/30"
+                className="w-4 h-4 rounded border-outline-variant bg-surface-container text-primary"
               />
               <span className="text-sm text-on-surface-variant font-medium">Remember this cooperative</span>
             </label>
@@ -397,10 +363,10 @@ export default function Login() {
               {codeError && (
                 <motion.div
                   initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
-                  className="flex items-center gap-2 mb-5 px-4 py-2.5 bg-error/10 border border-error/20 rounded-xl max-w-[300px]"
+                  className="flex items-center gap-2 mb-5 px-4 py-2.5 bg-secondary-container border border-secondary rounded-xl max-w-[300px]"
                 >
-                  <AlertCircle size={15} className="text-error shrink-0" />
-                  <p className="text-xs text-error font-medium">{codeError}</p>
+                  <AlertCircle size={15} className="text-secondary shrink-0" />
+                  <p className="text-xs text-secondary font-medium">{codeError}</p>
                 </motion.div>
               )}
             </AnimatePresence>
@@ -413,7 +379,7 @@ export default function Login() {
                   w-full py-4 rounded-full font-bold text-sm flex items-center justify-center gap-2
                   transition-all active:scale-95
                   ${codeReady && !codeLoading && !codeSuccess
-                    ? 'bg-primary text-on-primary shadow-lg shadow-primary/20'
+                    ? 'bg-primary text-on-primary shadow-lg'
                     : 'bg-surface-container-highest text-on-surface-variant opacity-60'}
                 `}
               >
@@ -433,16 +399,13 @@ export default function Login() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -24 }}
             transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-            className="min-h-screen bg-background flex flex-col items-center justify-center px-6 relative overflow-hidden"
+            className="min-h-screen bg-background flex flex-col items-center justify-center px-6"
           >
-            <div className="fixed inset-0 z-0 bg-gradient-to-b from-background via-background/95 to-background" />
-            <div className="fixed top-0 right-0 w-64 h-64 bg-primary/5 blur-[120px] rounded-full -z-10" />
-
-            <div className="relative z-10 w-full max-w-md flex flex-col items-center">
+            <div className="w-full max-w-md flex flex-col items-center">
 
               {/* ── Brand ── */}
               <div className="mb-10 text-center">
-                <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-primary-dim shadow-2xl shadow-primary/20 mb-5">
+                <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-primary shadow-2xl mb-5">
                   <User className="text-on-primary" size={32} />
                 </div>
 
@@ -479,11 +442,10 @@ export default function Login() {
               </div>
 
               {/* ── Login Card ── */}
-              <div className="w-full bg-surface-container-low rounded-[2rem] p-8 shadow-2xl shadow-black/60 border-t border-white/5 backdrop-blur-sm">
+              <div className="w-full bg-surface-container-low rounded-[2rem] p-8 shadow-2xl border-t border-outline-variant backdrop-blur-sm">
                 <div className="mb-8">
                   <h2 className="font-headline font-bold text-2xl text-on-surface">Welcome Back</h2>
                   <p className="text-on-surface-variant text-sm mt-1 leading-relaxed">
-                    {/* ✅ Full label in subtitle */}
                     {fullLabel
                       ? `Sign in to access your ${fullLabel} loan account.`
                       : 'Sign in to your account to continue.'}
@@ -494,7 +456,7 @@ export default function Login() {
                   {error && (
                     <motion.div
                       initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
-                      className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-500 text-xs font-bold text-center"
+                      className="p-4 bg-secondary-container border border-secondary rounded-xl text-secondary text-xs font-bold text-center"
                     >
                       {error}
                     </motion.div>
@@ -525,7 +487,7 @@ export default function Login() {
                         type="checkbox"
                         checked={showPassword}
                         onChange={(e) => setShowPassword(e.target.checked)}
-                        className="w-4 h-4 rounded border-outline-variant bg-surface-container text-primary focus:ring-primary/30"
+                        className="w-4 h-4 rounded border-outline-variant bg-surface-container text-primary"
                       />
                       <span className="text-sm text-on-surface-variant font-medium">Show Password</span>
                     </label>
@@ -543,7 +505,7 @@ export default function Login() {
                   </Button>
                 </form>
 
-                <div className="mt-8 pt-8 border-t border-outline-variant/10 text-center">
+                <div className="mt-8 pt-8 border-t border-outline-variant text-center">
                   <p className="text-on-surface-variant text-sm">
                     Don't have an account?
                     <button onClick={() => navigate('/register')} className="text-primary font-bold ml-1 hover:underline">
@@ -553,7 +515,6 @@ export default function Login() {
                 </div>
               </div>
 
-              {/* ✅ Switch cooperative — resets color too */}
               <button
                 onClick={() => {
                   localStorage.removeItem('tenant');
