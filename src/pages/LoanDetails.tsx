@@ -6,7 +6,7 @@ import { BottomNav } from '../components/BottomNav';
 import { cn } from '@/src/lib/utils';
 import { motion } from 'motion/react';
 import { loansAPI } from '../lib/api';
-import LoanDocuments from '../components/LoanDocuments';
+import LoanDocuments from './LoanDocuments';
 
 const statusStyle: Record<string, string> = {
   active:  'bg-green-500/10 text-green-500 border-green-500/20',
