@@ -26,12 +26,33 @@ const DOC_ICONS: Record<string, string> = {
 export default function LoanDocuments({ loanId }: { loanId: number }) {
   const [documents, setDocuments] = useState<LoanDocument[]>([]);
   const [loading, setLoading]     = useState(true);
+  const [fetchError, setFetchError] = useState('');
   const [opening, setOpening]     = useState<number | null>(null);
 
   useEffect(() => {
-    axios.get(`${API}/api/loan/${loanId}/documents`)
-      .then((res) => setDocuments(res.data))
-      .catch((err) => console.error('Failed to load documents:', err))
+    if (!loanId) {
+      setFetchError('No loan ID provided.');
+      setLoading(false);
+      return;
+    }
+
+    const url = `${API}/api/loan/${loanId}/documents`;
+    console.log('[LoanDocuments] fetching:', url);
+
+    axios.get(url)
+      .then((res) => {
+        console.log('[LoanDocuments] response:', res.data);
+        if (Array.isArray(res.data)) {
+          setDocuments(res.data);
+        } else {
+          setFetchError('Unexpected response format.');
+        }
+      })
+      .catch((err) => {
+        const msg = err?.response?.data?.message ?? err?.message ?? 'Unknown error';
+        console.error('[LoanDocuments] error:', msg);
+        setFetchError(`Failed to load documents: ${msg}`);
+      })
       .finally(() => setLoading(false));
   }, [loanId]);
 
@@ -62,8 +83,9 @@ export default function LoanDocuments({ loanId }: { loanId: number }) {
       }
     } catch (err: any) {
       newTab?.close();
-      console.error('Failed to open document:', err?.response?.data ?? err?.message ?? err);
-      alert(`Error: ${JSON.stringify(err?.response?.data ?? err?.message ?? 'Unknown error')}`);
+      const msg = err?.response?.data?.message ?? err?.message ?? 'Unknown error';
+      console.error('[LoanDocuments] openDocument error:', msg);
+      alert(`Could not open document: ${msg}`);
     } finally {
       setOpening(null);
     }
@@ -75,9 +97,20 @@ export default function LoanDocuments({ loanId }: { loanId: number }) {
     </div>
   );
 
+  // ✅ Visible error state — shows on both browser and mobile
+  if (fetchError) return (
+    <div className="mx-4 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl">
+      <p className="text-xs font-bold text-red-500 uppercase tracking-widest mb-1">Document Load Error</p>
+      <p className="text-sm text-red-400">{fetchError}</p>
+      <p className="text-[10px] text-red-300 mt-2">API: {API || '(empty — VITE_API_URL not set)'}</p>
+      <p className="text-[10px] text-red-300">Loan ID: {loanId}</p>
+    </div>
+  );
+
   if (documents.length === 0) return (
-    <div className="flex justify-center py-6">
+    <div className="flex flex-col items-center py-6 gap-1">
       <span className="text-sm text-gray-400">No documents uploaded yet.</span>
+      <span className="text-[10px] text-gray-300">API: {API || '(empty)'} · Loan: {loanId}</span>
     </div>
   );
 
