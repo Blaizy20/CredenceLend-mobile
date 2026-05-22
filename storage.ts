@@ -7,7 +7,7 @@ export const s3 = new S3Client({
     accessKeyId:     process.env.RAILWAY_S3_ACCESS_KEY!,
     secretAccessKey: process.env.RAILWAY_S3_SECRET_KEY!,
   },
-  forcePathStyle: false,
+  forcePathStyle: true,
 });
 
 export const BUCKET = process.env.RAILWAY_S3_BUCKET!;
