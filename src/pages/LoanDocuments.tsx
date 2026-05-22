@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Browser } from '@capacitor/browser';
+import { Capacitor } from '@capacitor/core';
 import axios from 'axios';
 
 const API = import.meta.env.VITE_API_URL ?? '';
@@ -40,7 +41,14 @@ export default function LoanDocuments({ loanId }: { loanId: number }) {
       const res = await axios.get(`${API}/api/documents/signed-url`, {
         params: { key: doc.file_key },
       });
-      await Browser.open({ url: res.data.url });
+      const url = res.data.url;
+
+      // ✅ Use window.open in browser, Capacitor Browser in APK
+      if (Capacitor.isNativePlatform()) {
+        await Browser.open({ url });
+      } else {
+        window.open(url, '_blank');
+      }
     } catch (err) {
       console.error('Failed to open document:', err);
       alert('Could not open document. Please try again.');
