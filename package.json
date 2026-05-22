@@ -12,6 +12,8 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1052.0",
+    "@aws-sdk/lib-storage": "^3.1052.0",
     "@capacitor/android": "^6.2.1",
     "@capacitor/app": "^6.0.3",
     "@capacitor/browser": "^6.0.6",
@@ -34,6 +36,7 @@
     "jspdf": "^4.2.1",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
+    "multer": "^2.1.1",
     "mysql2": "^3.20.0",
     "nodemailer": "^8.0.4",
     "react": "^19.0.0",

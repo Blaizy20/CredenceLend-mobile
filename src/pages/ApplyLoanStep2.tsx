@@ -92,13 +92,12 @@ export default function ApplyLoanStep2() {
     ci_required:          boolean;
   } | null>(null);
 
-  // ── Payment breakdown ────────────────────────────────────────────────────────
+  // ── Payment breakdown ─────────────────────────────────────────────────────
 
   const paymentBreakdown = step1
     ? (() => {
         const { principal_amount, interest_rate, term_months, payment_term } = step1;
         const termInfo      = TERM_PERIODS[payment_term] ?? TERM_PERIODS['monthly'];
-        // Add-on: rate % per month × months × principal
         const totalInterest = principal_amount * (interest_rate / 100) * term_months;
         const totalPayable  = principal_amount + totalInterest;
         const totalPeriods  = Math.round(term_months * termInfo.periodsPerMonth);
@@ -110,7 +109,7 @@ export default function ApplyLoanStep2() {
   const fmt = (n: number) =>
     n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  // ── Helpers ──────────────────────────────────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────────────────────────
 
   const handleChange = (field: keyof CoMakerForm, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -129,7 +128,7 @@ export default function ApplyLoanStep2() {
     setComakerFiles(prev => ({ ...prev, [code]: file }));
   };
 
-  // ── Validation ───────────────────────────────────────────────────────────────
+  // ── Validation ────────────────────────────────────────────────────────────
 
   const validate = () => {
     const newErrors: Record<string, string> = {};
@@ -151,30 +150,39 @@ export default function ApplyLoanStep2() {
     setShowConfirm(true);
   };
 
-  // ── Upload helper ─────────────────────────────────────────────────────────────
+  // ── Upload helper ─────────────────────────────────────────────────────────
 
-  const uploadFile = async (loanId: number, code: string, file: File): Promise<boolean> => {
+  const uploadFile = async (
+    loanId: number,
+    code:   string,
+    file:   File,
+    label:  string,
+  ): Promise<boolean> => {
     try {
+      let user: any = null;
+      try { user = JSON.parse(localStorage.getItem('user') || 'null'); } catch {}
+
       const fd = new FormData();
-      fd.append('loan_id',          String(loanId));
-      fd.append('requirement_code', code);
-      fd.append('file',             file);
+      fd.append('file',        file);
+      fd.append('tenant_id',   String(user?.tenant_id   ?? ''));
+      fd.append('customer_id', String(user?.customer_id ?? ''));
+      fd.append('loan_id',     String(loanId));
+      fd.append('folder',      `loan-docs/${loanId}`);
+      fd.append('code',        code);
+      fd.append('label',       label);
 
-      let token = '';
-      try { token = JSON.parse(localStorage.getItem('user') || 'null')?.token ?? ''; } catch {}
-
-      const res = await fetch('/api/loans/upload', {
-        method:  'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body:    fd,
+      const res  = await fetch('/api/upload/document', {
+        method: 'POST',
+        body:   fd,
       });
-      return res.ok;
+      const data = await res.json();
+      return data.success ?? res.ok;
     } catch {
       return false;
     }
   };
 
-  // ── Submit ────────────────────────────────────────────────────────────────────
+  // ── Submit ────────────────────────────────────────────────────────────────
 
   const handleSubmit = async () => {
     if (!step1) return;
@@ -220,19 +228,22 @@ export default function ApplyLoanStep2() {
         return;
       }
 
-      const loanId = result.data?.loan_id;
+      // ✅ Grab loan_id from result
+      const loanId = result.loan?.loan_id;
 
-      const allDocs: { code: string; file: File }[] = [
-        ...uploadDocs.map(d => ({ code: d.code, file: d.file })),
+      // ✅ Combine step1 docs + co-maker docs
+      const allDocs: { code: string; label: string; file: File }[] = [
+        ...uploadDocs.map(d => ({ code: d.code, label: d.label, file: d.file })),
         ...COMAKER_DOCS
           .filter(d => comakerFiles[d.code] !== null)
-          .map(d => ({ code: d.code, file: comakerFiles[d.code]! })),
+          .map(d => ({ code: d.code, label: d.label, file: comakerFiles[d.code]! })),
       ];
 
+      // ✅ Upload each file to Railway S3
       if (loanId && allDocs.length > 0) {
         for (let i = 0; i < allDocs.length; i++) {
-          setUploadProgress(`Uploading documents ${i + 1} of ${allDocs.length}…`);
-          await uploadFile(loanId, allDocs[i].code, allDocs[i].file);
+          setUploadProgress(`Uploading document ${i + 1} of ${allDocs.length}…`);
+          await uploadFile(loanId, allDocs[i].code, allDocs[i].file, allDocs[i].label);
         }
       }
 
@@ -379,7 +390,7 @@ export default function ApplyLoanStep2() {
                     style={{ display: 'none' }} id={`comaker_${doc.code}`}
                     onChange={e => handleComakerFile(e, doc.code)} />
                   <label htmlFor={`comaker_${doc.code}`}
-                    className="bg-primary text-on-primary-container text-[10px] font-bold px-3 py-2 rounded-lg uppercase tracking-wider cursor-pointer whitespace-nowrap">
+                    className="bg-primary text-on-primary text-[10px] font-bold px-3 py-2 rounded-lg uppercase tracking-wider cursor-pointer whitespace-nowrap">
                     {file ? 'REPLACE' : 'CHOOSE FILE'}
                   </label>
                   {file
@@ -393,8 +404,8 @@ export default function ApplyLoanStep2() {
         </section>
 
         {submitError && (
-          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-xl">
-            <p className="text-red-500 text-sm font-medium">{submitError}</p>
+          <div className="mb-6 p-4 bg-secondary-container border border-secondary rounded-xl">
+            <p className="text-secondary text-sm font-medium">{submitError}</p>
           </div>
         )}
 
@@ -422,12 +433,12 @@ export default function ApplyLoanStep2() {
             <motion.div
               initial={{ opacity: 0, y: 80 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 80 }}
               transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-              className="fixed bottom-0 left-0 right-0 z-50 bg-surface-container-low rounded-t-[2rem] shadow-2xl border-t border-white/5 max-w-md mx-auto max-h-[85vh] overflow-y-auto">
+              className="fixed bottom-0 left-0 right-0 z-50 bg-surface-container-low rounded-t-[2rem] shadow-2xl border-t border-outline-variant max-w-md mx-auto max-h-[85vh] overflow-y-auto">
               <div className="p-6">
-                <div className="w-10 h-1 bg-outline/30 rounded-full mx-auto mb-6" />
+                <div className="w-10 h-1 bg-outline-variant rounded-full mx-auto mb-6" />
                 <div className="flex items-center gap-3 mb-6">
-                  <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
-                    <FileText size={24} />
+                  <div className="w-12 h-12 rounded-2xl bg-primary flex items-center justify-center shrink-0">
+                    <FileText size={24} className="text-on-primary" />
                   </div>
                   <div>
                     <h3 className="font-headline font-bold text-xl text-on-surface">Application Overview</h3>
@@ -436,7 +447,7 @@ export default function ApplyLoanStep2() {
                 </div>
 
                 {/* Loan details */}
-                <div className="mb-5 p-4 bg-primary/5 border border-primary/10 rounded-2xl space-y-3">
+                <div className="mb-5 p-4 bg-surface-container-high border border-outline-variant rounded-2xl space-y-3">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-primary mb-3">Loan Details</p>
                   {([
                     ['Principal Amount', `₱${fmt(Number(step1.principal_amount))}`],
@@ -452,7 +463,7 @@ export default function ApplyLoanStep2() {
                       <span className="font-bold text-on-surface text-right max-w-[55%]">{value}</span>
                     </div>
                   ))}
-                  <div className="border-t border-primary/10 my-1" />
+                  <div className="border-t border-outline-variant my-1" />
                   <div className="flex justify-between text-sm">
                     <span className="text-on-surface-variant">
                       Est. {paymentBreakdown?.label ?? 'Payment'}
@@ -512,8 +523,8 @@ export default function ApplyLoanStep2() {
                   ))}
                 </div>
 
-                <div className="flex gap-3 p-3 bg-orange-500/5 border border-orange-500/10 rounded-xl mb-6">
-                  <AlertTriangle size={16} className="text-orange-500 shrink-0 mt-0.5" />
+                <div className="flex gap-3 p-3 bg-surface-container-high border border-outline-variant rounded-xl mb-6">
+                  <AlertTriangle size={16} className="text-secondary shrink-0 mt-0.5" />
                   <p className="text-xs text-on-surface-variant leading-relaxed">
                     By submitting, you confirm all information is accurate. Your application will be reviewed by the cooperative.
                   </p>
@@ -549,17 +560,12 @@ export default function ApplyLoanStep2() {
                 className="flex flex-col items-center gap-6"
               >
                 <div className="relative w-24 h-24 flex items-center justify-center">
-                  <motion.div
-                    animate={{ scale: [1, 1.3, 1], opacity: [0.4, 0, 0.4] }}
-                    transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
-                    className="absolute inset-0 rounded-full bg-primary/20"
-                  />
                   <svg className="absolute inset-0 w-full h-full animate-spin" viewBox="0 0 96 96">
                     <circle cx="48" cy="48" r="40" fill="none" stroke="currentColor" strokeWidth="4"
                       strokeLinecap="round" strokeDasharray="180 72" className="text-primary" />
                   </svg>
-                  <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center">
-                    <FileText size={26} className="text-primary" />
+                  <div className="w-14 h-14 rounded-full bg-primary flex items-center justify-center">
+                    <FileText size={26} className="text-on-primary" />
                   </div>
                 </div>
                 <div className="text-center space-y-1">
@@ -585,11 +591,11 @@ export default function ApplyLoanStep2() {
                 <motion.div
                   initial={{ scale: 0 }} animate={{ scale: 1 }}
                   transition={{ type: 'spring', stiffness: 300, damping: 20, delay: 0.1 }}
-                  className="w-24 h-24 rounded-full bg-primary/10 border-2 border-primary/30 flex items-center justify-center"
+                  className="w-24 h-24 rounded-full bg-primary flex items-center justify-center shadow-2xl"
                 >
                   <motion.div initial={{ scale: 0, rotate: -30 }} animate={{ scale: 1, rotate: 0 }}
                     transition={{ type: 'spring', stiffness: 400, damping: 20, delay: 0.2 }}>
-                    <CheckCircle2 size={48} className="text-primary" />
+                    <CheckCircle2 size={48} className="text-on-primary" />
                   </motion.div>
                 </motion.div>
 
@@ -613,7 +619,7 @@ export default function ApplyLoanStep2() {
                     </p>
                     {successData.missing_requirements.map(req => (
                       <div key={req} className="flex items-center gap-2 py-1">
-                        <div className="w-1.5 h-1.5 rounded-full bg-orange-400 flex-shrink-0" />
+                        <div className="w-1.5 h-1.5 rounded-full bg-secondary flex-shrink-0" />
                         <p className="text-xs text-on-surface-variant">{req.replace(/_/g, ' ')}</p>
                       </div>
                     ))}
@@ -627,7 +633,7 @@ export default function ApplyLoanStep2() {
                   className="w-full flex flex-col gap-3 pt-2">
                   <button
                     onClick={() => navigate('/dashboard', { replace: true })}
-                    className="w-full py-4 rounded-full bg-primary text-on-primary font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-transform shadow-lg shadow-primary/20">
+                    className="w-full py-4 rounded-full bg-primary text-on-primary font-bold text-sm flex items-center justify-center gap-2 active:scale-95 transition-transform shadow-lg">
                     <LayoutDashboard size={18} />
                     Go to Dashboard
                   </button>
