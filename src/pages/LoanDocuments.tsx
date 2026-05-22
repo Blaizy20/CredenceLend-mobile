@@ -38,19 +38,32 @@ export default function LoanDocuments({ loanId }: { loanId: number }) {
   const openDocument = async (doc: LoanDocument) => {
     try {
       setOpening(doc.document_id);
+
+      // ✅ Open blank tab immediately on user click before async (bypasses popup blocker)
+      const newTab = Capacitor.isNativePlatform() ? null : window.open('', '_blank');
+
       const res = await axios.get(`${API}/api/documents/signed-url`, {
         params: { key: doc.file_key },
       });
-      const url = res.data.url;
 
-      // ✅ Use window.open in browser, Capacitor Browser in APK
+      const url = res.data?.url;
+      if (!url) {
+        newTab?.close();
+        alert('Could not generate document link. Please try again.');
+        return;
+      }
+
       if (Capacitor.isNativePlatform()) {
         await Browser.open({ url });
       } else {
-        window.open(url, '_blank');
+        if (newTab) {
+          newTab.location.href = url;
+        } else {
+          window.open(url, '_blank');
+        }
       }
-    } catch (err) {
-      console.error('Failed to open document:', err);
+    } catch (err: any) {
+      console.error('Failed to open document:', err?.response?.data ?? err.message);
       alert('Could not open document. Please try again.');
     } finally {
       setOpening(null);
