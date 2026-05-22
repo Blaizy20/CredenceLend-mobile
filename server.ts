@@ -801,7 +801,7 @@ async function startServer() {
     app.get("/api/loan/:loanId/documents", async (req, res) => {
       try {
         const [rows] = await pool.query<RowDataPacket[]>(
-          `SELECT document_id, loan_id, code, label, file_url, uploaded_at
+          `SELECT document_id, loan_id, code, label, file_url, file_key, uploaded_at
            FROM loan_documents WHERE loan_id = ? ORDER BY uploaded_at ASC`,
           [req.params.loanId]
         );
