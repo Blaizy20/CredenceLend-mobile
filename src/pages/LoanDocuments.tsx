@@ -36,11 +36,9 @@ export default function LoanDocuments({ loanId }: { loanId: number }) {
   }, [loanId]);
 
   const openDocument = async (doc: LoanDocument) => {
+    const newTab = Capacitor.isNativePlatform() ? null : window.open('', '_blank');
     try {
       setOpening(doc.document_id);
-
-      // ✅ Open blank tab immediately on user click before async (bypasses popup blocker)
-      const newTab = Capacitor.isNativePlatform() ? null : window.open('', '_blank');
 
       const res = await axios.get(`${API}/api/documents/signed-url`, {
         params: { key: doc.file_key },
@@ -63,8 +61,9 @@ export default function LoanDocuments({ loanId }: { loanId: number }) {
         }
       }
     } catch (err: any) {
-      console.error('Failed to open document:', err?.response?.data ?? err.message);
-      alert('Could not open document. Please try again.');
+      newTab?.close();
+      console.error('Failed to open document:', err?.response?.data ?? err?.message ?? err);
+      alert(`Error: ${JSON.stringify(err?.response?.data ?? err?.message ?? 'Unknown error')}`);
     } finally {
       setOpening(null);
     }
