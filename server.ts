@@ -844,10 +844,21 @@ async function startServer() {
         const loanIdRaw = req.body.loan_id;
         if (loanIdRaw && !isNaN(Number(loanIdRaw))) {
           try {
+            // Fetch customer_no and reference_no
+            const [metaRows]: any = await pool.query(
+              `SELECT c.customer_no, l.reference_no
+               FROM loans l
+               JOIN customers c ON c.customer_id = l.customer_id
+               WHERE l.loan_id = ? LIMIT 1`,
+              [Number(loanIdRaw)]
+            );
+            const customer_no  = metaRows[0]?.customer_no  ?? null;
+            const reference_no = metaRows[0]?.reference_no ?? null;
+
             await pool.query(
-              `INSERT INTO loan_documents (loan_id, tenant_id, customer_id, code, label, file_url, file_key)
-               VALUES (?, ?, ?, ?, ?, ?, ?)`,
-              [Number(loanIdRaw), tenant_id, customer_id, code, label, fileUrl, key]
+              `INSERT INTO loan_documents (loan_id, tenant_id, customer_id, customer_no, reference_no, code, label, file_url, file_key)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [Number(loanIdRaw), tenant_id, customer_id, customer_no, reference_no, code, label, fileUrl, key]
             );
           } catch (dbErr: any) {
             console.warn('[upload] DB insert skipped:', dbErr.message);
