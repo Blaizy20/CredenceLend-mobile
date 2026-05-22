@@ -6,6 +6,7 @@ import { BottomNav } from '../components/BottomNav';
 import { cn } from '@/src/lib/utils';
 import { motion } from 'motion/react';
 import { loansAPI } from '../lib/api';
+import LoanDocuments from '../components/LoanDocuments';
 
 const statusStyle: Record<string, string> = {
   active:  'bg-green-500/10 text-green-500 border-green-500/20',
@@ -119,9 +120,9 @@ export default function LoanDetails() {
         ? new Date(loan.created_at)
         : new Date();
 
-    const totalPaid    = totalPayable - remainingBal;
-    const paidCount    = amountPerTerm > 0 ? Math.floor(totalPaid / amountPerTerm) : 0;
-    const termsLeft    = totalTermCount - paidCount;
+    const totalPaid      = totalPayable - remainingBal;
+    const paidCount      = amountPerTerm > 0 ? Math.floor(totalPaid / amountPerTerm) : 0;
+    const termsLeft      = totalTermCount - paidCount;
     const partialCredit  = parseFloat((totalPaid - paidCount * amountPerTerm).toFixed(2));
     const currentTermDue = parseFloat((amountPerTerm - partialCredit).toFixed(2));
 
@@ -449,6 +450,17 @@ export default function LoanDetails() {
             <p className="text-sm text-on-surface leading-relaxed">{loan.notes}</p>
           </section>
         )}
+
+        {/* ── Loan Documents ── */}
+        <section className="bg-surface-container-low rounded-2xl overflow-hidden">
+          <div className="px-5 pt-5 pb-2">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
+              Submitted Documents
+            </p>
+          </div>
+          <LoanDocuments loanId={Number(id)} />
+        </section>
+
       </main>
 
       <BottomNav />
