@@ -11,3 +11,4 @@ export const s3 = new S3Client({
 });
 
 export const BUCKET = process.env.RAILWAY_S3_BUCKET!;
+export { s3, BUCKET };

@@ -8,6 +8,8 @@ import mysql, { ResultSetHeader, RowDataPacket } from "mysql2/promise";
 import multer from 'multer';
 import { Upload } from '@aws-sdk/lib-storage';
 import { s3, BUCKET } from './storage';
+import { GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -856,6 +858,22 @@ async function startServer() {
       } catch (err) {
         console.error('[upload/document]', err);
         return res.status(500).json({ success: false, message: 'Upload failed. Please try again.' });
+      }
+    });
+
+    // ── S3: Presigned URL ─────────────────────────────────────────────────────
+    app.get('/api/documents/signed-url', async (req: any, res: any) => {
+      try {
+        const key = String(req.query.key ?? '').trim();
+        if (!key) return res.status(400).json({ success: false, message: 'File key is required.' });
+
+        const command   = new GetObjectCommand({ Bucket: BUCKET, Key: key });
+        const signedUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
+
+        return res.json({ success: true, url: signedUrl });
+      } catch (err) {
+        console.error('[signed-url]', err);
+        return res.status(500).json({ success: false, message: 'Failed to generate signed URL.' });
       }
     });
 
