@@ -864,7 +864,6 @@ async function startServer() {
           `SELECT last_status FROM loan_status_cache WHERE loan_id = ? LIMIT 1`, [loan.loan_id]
         );
         const lastStatus = cached[0] ? String(cached[0].last_status).toLowerCase() : null;
-
         if (!lastStatus) {
           await pool.query(
             `INSERT INTO loan_status_cache (loan_id, last_status) VALUES (?, ?) ON DUPLICATE KEY UPDATE last_status = VALUES(last_status)`,
@@ -872,16 +871,7 @@ async function startServer() {
           );
           continue;
         }
-
         if (lastStatus !== newStatus) {
-          // ── Update cache FIRST before sending email/notification ──────────
-          // This prevents duplicate triggers when the frontend polls rapidly
-          await pool.query(
-            `INSERT INTO loan_status_cache (loan_id, last_status) VALUES (?, ?)
-             ON DUPLICATE KEY UPDATE last_status = VALUES(last_status)`,
-            [loan.loan_id, loan.status]
-          );
-
           const notif = NOTIF_MAP[newStatus];
           if (notif) await insertNotification(Number(customerId), tenantId, notif.title, notif.message(loan.reference_no), notif.type);
 
@@ -902,9 +892,13 @@ async function startServer() {
           } catch (emailErr: any) {
             console.warn('Status change email skipped:', emailErr.message);
           }
+
+          await pool.query(
+            `INSERT INTO loan_status_cache (loan_id, last_status) VALUES (?, ?) ON DUPLICATE KEY UPDATE last_status = VALUES(last_status)`,
+            [loan.loan_id, loan.status]
+          );
         }
       }
-
       res.json(rows.map(({ tenant_id: _tid, ...rest }) => rest));
     } catch (err: any) {
       console.error("Loans error:", err.message);
