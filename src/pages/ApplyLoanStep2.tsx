@@ -57,6 +57,10 @@ interface UploadDoc {
   file:  File;
 }
 
+// ─── API Base URL ─────────────────────────────────────────────────────────────
+
+const API = import.meta.env.VITE_API_URL ?? '';
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function ApplyLoanStep2() {
@@ -171,7 +175,8 @@ export default function ApplyLoanStep2() {
       fd.append('code',        code);
       fd.append('label',       label);
 
-      const res  = await fetch('/api/upload/document', {
+      // ✅ Fixed: use full API URL instead of relative path
+      const res  = await fetch(`${API}/api/upload/document`, {
         method: 'POST',
         body:   fd,
       });
@@ -228,10 +233,8 @@ export default function ApplyLoanStep2() {
         return;
       }
 
-      // ✅ Grab loan_id from result
       const loanId = result.loan?.loan_id;
 
-      // ✅ Combine step1 docs + co-maker docs
       const allDocs: { code: string; label: string; file: File }[] = [
         ...uploadDocs.map(d => ({ code: d.code, label: d.label, file: d.file })),
         ...COMAKER_DOCS
@@ -239,7 +242,6 @@ export default function ApplyLoanStep2() {
           .map(d => ({ code: d.code, label: d.label, file: comakerFiles[d.code]! })),
       ];
 
-      // ✅ Upload each file to Railway S3
       if (loanId && allDocs.length > 0) {
         for (let i = 0; i < allDocs.length; i++) {
           setUploadProgress(`Uploading document ${i + 1} of ${allDocs.length}…`);
