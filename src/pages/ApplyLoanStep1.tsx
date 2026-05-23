@@ -1,9 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { X, ArrowRight, Camera } from 'lucide-react';
+import { X, ArrowRight, Camera, AlertTriangle } from 'lucide-react';
 import { TopBar } from '../components/TopBar';
 import { Button } from '../components/Button';
 import { Input }  from '../components/Input';
+import { loansAPI } from '../lib/api';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -64,6 +65,35 @@ interface Step1Data {
 export default function ApplyLoanStep1() {
   const navigate = useNavigate();
 
+  // ── Block Check ─────────────────────────────────────────────────────────────
+  const [blockCheck, setBlockCheck] = useState<'loading' | 'blocked' | 'allowed'>('loading');
+  const [blockedStatus, setBlockedStatus] = useState('');
+
+  useEffect(() => {
+    let user: any = null;
+    try { user = JSON.parse(localStorage.getItem('user') || 'null'); } catch {}
+    if (!user?.customer_id) {
+      navigate('/login', { replace: true });
+      return;
+    }
+
+    loansAPI.getLoans(user.customer_id).then((data) => {
+      const loans = Array.isArray(data) ? data : [];
+      const blocked = loans.find((l: any) =>
+        ['active', 'pending', 'under_review'].includes(l.status?.toLowerCase())
+      );
+      if (blocked) {
+        setBlockedStatus(blocked.status);
+        setBlockCheck('blocked');
+      } else {
+        setBlockCheck('allowed');
+      }
+    }).catch(() => {
+      setBlockCheck('allowed'); // fail open — don't block if API errors
+    });
+  }, []);
+
+  // ── Form State ───────────────────────────────────────────────────────────────
   const [formData, setFormData] = useState<Step1Data>({
     amount:           '',
     term:             'Monthly',
@@ -88,8 +118,6 @@ export default function ApplyLoanStep1() {
 
     if (!principal || principal <= 0 || !months || months <= 0) return null;
 
-    // Add-on interest: rate % per month × months × principal
-    // e.g. ₱3,000 × 4% × 12 = ₱1,440 interest → ₱4,440 total payable → ₱370/month
     const totalInterest = principal * (termOption.rate / 100) * months;
     const totalPayable  = principal + totalInterest;
     const totalPeriods  = Math.round(months * termOption.periodsPerMonth);
@@ -169,7 +197,7 @@ export default function ApplyLoanStep1() {
           principal_amount:   Number(formData.amount),
           payment_term:       termOption.apiValue,
           payment_term_label: formData.term,
-          interest_rate:      termOption.rate,       // ← hardcoded from TERM_OPTIONS
+          interest_rate:      termOption.rate,
           term_months:        months,
           id_type:            formData.id_type,
           collateral_type:    formData.collateral_type,
@@ -189,7 +217,37 @@ export default function ApplyLoanStep1() {
   const fmt = (n: number) =>
     n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  // ── Render ──────────────────────────────────────────────────────────────────
+  // ── Block States ─────────────────────────────────────────────────────────────
+
+  if (blockCheck === 'loading') return (
+    <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+
+  if (blockCheck === 'blocked') return (
+    <div className="min-h-screen bg-background flex flex-col items-center justify-center px-8 text-center">
+      <div className="w-20 h-20 rounded-full bg-secondary/10 flex items-center justify-center mb-6">
+        <AlertTriangle size={40} className="text-secondary" />
+      </div>
+      <h2 className="font-headline font-bold text-2xl text-on-surface mb-3">
+        Application Not Allowed
+      </h2>
+      <p className="text-on-surface-variant text-sm leading-relaxed mb-8 max-w-xs">
+        You currently have a{' '}
+        <span className="font-bold text-on-surface capitalize">{blockedStatus}</span>{' '}
+        loan that must be settled or resolved before applying for a new one.
+      </p>
+      <button
+        onClick={() => navigate('/dashboard', { replace: true })}
+        className="w-full max-w-xs py-4 rounded-full bg-primary text-on-primary font-bold text-sm active:scale-95 transition-transform"
+      >
+        Back to Dashboard
+      </button>
+    </div>
+  );
+
+  // ── Main Render ──────────────────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen bg-background pb-32">

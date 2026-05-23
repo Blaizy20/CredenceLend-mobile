@@ -1,9 +1,9 @@
 import React from 'react';
-import { Wallet, ReceiptText, ChevronDown } from 'lucide-react';
+import { Wallet, ReceiptText, ChevronDown, AlertTriangle, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
 import { BottomNav } from '../components/BottomNav';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { loansAPI } from '../lib/api';
 
 interface Loan {
@@ -16,16 +16,25 @@ interface Loan {
   created_at: string;
 }
 
+const BLOCKED_STATUSES = ['active', 'pending', 'under_review'];
+
 const statusStyle: Record<string, string> = {
-  paid:    'bg-emerald-500/10 text-emerald-400',
-  active:  'bg-green-500/10 text-green-500',
-  pending: 'bg-blue-500/10 text-blue-500',
-  denied:  'bg-red-500/10 text-red-500',
-  closed:  'bg-outline/10 text-outline',
+  paid:         'bg-emerald-500/10 text-emerald-400',
+  active:       'bg-green-500/10 text-green-500',
+  pending:      'bg-blue-500/10 text-blue-500',
+  denied:       'bg-red-500/10 text-red-500',
+  closed:       'bg-outline/10 text-outline',
+  under_review: 'bg-yellow-500/10 text-yellow-500',
 };
 
 const getStatusStyle = (status: string) =>
   statusStyle[status?.toLowerCase()] ?? 'bg-outline/10 text-outline';
+
+const STATUS_LABEL: Record<string, string> = {
+  active:       'Active Loan',
+  pending:      'Pending Application',
+  under_review: 'Under Review',
+};
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -34,6 +43,7 @@ export default function Dashboard() {
   const [showAllLoans, setShowAllLoans] = React.useState(false);
   const [totalBalance, setTotalBalance] = React.useState(0);
   const [parsedUser, setParsedUser] = React.useState<any>(null);
+  const [blockedLoan, setBlockedLoan] = React.useState<Loan | null>(null);
 
   React.useEffect(() => {
     let user = null;
@@ -73,6 +83,15 @@ export default function Dashboard() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleApplyClick = () => {
+    const blocked = loans.find(l => BLOCKED_STATUSES.includes(l.status?.toLowerCase()));
+    if (blocked) {
+      setBlockedLoan(blocked);
+      return;
+    }
+    navigate('/apply');
   };
 
   if (!parsedUser) return null;
@@ -146,7 +165,7 @@ export default function Dashboard() {
               </p>
             </div>
             <button
-              onClick={() => navigate('/apply')}
+              onClick={handleApplyClick}
               className="w-full py-3 px-6 bg-primary text-on-primary font-headline font-extrabold text-base rounded-full shadow-lg shadow-primary/20 active:scale-95 transition-all duration-200"
             >
               Apply for Loan
@@ -158,8 +177,6 @@ export default function Dashboard() {
         <section>
           <div className="flex justify-between items-center mb-6">
             <h4 className="font-headline text-xl font-bold text-on-surface">My Loans</h4>
-
-            {/* ── Count badge + View All ── */}
             {loans.length > PREVIEW_COUNT && (
               <button
                 onClick={() => setShowAllLoans(!showAllLoans)}
@@ -190,7 +207,6 @@ export default function Dashboard() {
               </div>
             ) : loans.length > 0 ? (
               <>
-                {/* ── Loan rows ── */}
                 <div className="divide-y divide-outline-variant/10">
                   {displayedLoans.map((loan) => (
                     <div
@@ -215,10 +231,8 @@ export default function Dashboard() {
                   ))}
                 </div>
 
-                {/* ── Fade-out hint when there are more loans ── */}
                 {hasMore && (
                   <div className="relative">
-                    {/* Ghost row — blurred/faded preview */}
                     <div className="px-6 py-5 opacity-30 pointer-events-none select-none">
                       <div className="grid grid-cols-3 items-center">
                         <div className="h-3 w-24 bg-on-surface/20 rounded-full" />
@@ -230,11 +244,7 @@ export default function Dashboard() {
                         </div>
                       </div>
                     </div>
-
-                    {/* Gradient fade overlay */}
                     <div className="absolute inset-0 bg-gradient-to-b from-transparent via-surface-container-low/80 to-surface-container-low pointer-events-none" />
-
-                    {/* "X more" pill button */}
                     <div className="absolute bottom-3 left-0 right-0 flex justify-center">
                       <button
                         onClick={() => setShowAllLoans(true)}
@@ -265,6 +275,86 @@ export default function Dashboard() {
       </main>
 
       <BottomNav />
+
+      {/* ── Blocked Loan Modal ── */}
+      <AnimatePresence>
+        {blockedLoan && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              onClick={() => setBlockedLoan(null)}
+              className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, y: 80 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 80 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+              className="fixed bottom-0 left-0 right-0 z-50 bg-surface-container-low rounded-t-[2rem] shadow-2xl border-t border-outline-variant max-w-md mx-auto"
+            >
+              <div className="p-6">
+                <div className="w-10 h-1 bg-outline-variant rounded-full mx-auto mb-6" />
+
+                {/* Icon + Title */}
+                <div className="flex flex-col items-center text-center mb-6">
+                  <div className="w-16 h-16 rounded-full bg-secondary/10 flex items-center justify-center mb-4">
+                    <AlertTriangle size={32} className="text-secondary" />
+                  </div>
+                  <h3 className="font-headline font-bold text-xl text-on-surface">
+                    Application Not Allowed
+                  </h3>
+                  <p className="text-on-surface-variant text-sm mt-2 leading-relaxed">
+                    You currently have a{' '}
+                    <span className="font-bold text-on-surface">
+                      {STATUS_LABEL[blockedLoan.status?.toLowerCase()] ?? blockedLoan.status}
+                    </span>{' '}
+                    that must be settled or resolved before you can apply for a new loan.
+                  </p>
+                </div>
+
+                {/* Loan Info */}
+                <div className="p-4 bg-surface-container-high rounded-2xl space-y-2 mb-6">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-on-surface-variant">Reference No.</span>
+                    <span className="font-bold font-mono text-on-surface">{blockedLoan.reference_no}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-on-surface-variant">Status</span>
+                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full uppercase ${getStatusStyle(blockedLoan.status)}`}>
+                      {blockedLoan.status}
+                    </span>
+                  </div>
+                  {blockedLoan.remaining_balance > 0 && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-on-surface-variant">Remaining Balance</span>
+                      <span className="font-bold text-on-surface">
+                        ₱{Number(blockedLoan.remaining_balance).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Actions */}
+                <div className="flex flex-col gap-3">
+                  <button
+                    onClick={() => {
+                      setBlockedLoan(null);
+                      navigate(`/loan/${blockedLoan.loan_id}`);
+                    }}
+                    className="w-full py-4 rounded-full bg-primary text-on-primary font-bold text-sm active:scale-95 transition-transform"
+                  >
+                    View Existing Loan
+                  </button>
+                  <button
+                    onClick={() => setBlockedLoan(null)}
+                    className="w-full py-4 rounded-full bg-surface-container-highest text-on-surface font-bold text-sm active:scale-95 transition-transform"
+                  >
+                    Go Back
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

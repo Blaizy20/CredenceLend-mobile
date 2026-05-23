@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Percent, Clock, ChevronRight, CheckCircle, Loader2, AlertCircle } from 'lucide-react';
+import { Percent, Clock, ChevronRight, CheckCircle, Loader2, AlertCircle, X, ArrowRight } from 'lucide-react';
 import { TopBar } from '../components/TopBar';
 import { BottomNav } from '../components/BottomNav';
 import { cn } from '@/src/lib/utils';
@@ -33,11 +33,12 @@ export default function LoanDetails() {
   const navigate = useNavigate();
   const { id }   = useParams();
 
-  const [loan, setLoan]                       = useState<any>(null);
-  const [payments, setPayments]               = useState<any[]>([]);
-  const [loading, setLoading]                 = useState(true);
-  const [error, setError]                     = useState('');
-  const [showAllSchedule, setShowAllSchedule] = useState(false);
+  const [loan, setLoan]                         = useState<any>(null);
+  const [payments, setPayments]                 = useState<any[]>([]);
+  const [loading, setLoading]                   = useState(true);
+  const [error, setError]                       = useState('');
+  const [showAllSchedule, setShowAllSchedule]   = useState(false);
+  const [showAllPayments, setShowAllPayments]   = useState(false); // ← NEW
 
   useEffect(() => {
     if (!id) return;
@@ -163,6 +164,13 @@ export default function LoanDetails() {
   const schedule    = generateSchedule();
   const nextPayment = schedule.find(s => s.isUpcoming);
 
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  const fmt = (n: number) =>
+    n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const fmtDate = (dateStr: string) =>
+    new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
   return (
     <div className="min-h-screen bg-background pb-32">
       <TopBar title="Loan Details" onBack={() => navigate('/dashboard')} />
@@ -233,15 +241,13 @@ export default function LoanDetails() {
               </span>
             </div>
             <h2 className="font-headline font-extrabold text-4xl mt-2 tracking-tight">
-              ₱ {remainingBal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              ₱ {fmt(remainingBal)}
             </h2>
           </div>
           <div className="relative z-10 flex items-end justify-between">
             <div>
               <p className="text-on-surface-variant text-xs mb-1">Principal Amount</p>
-              <p className="font-headline font-bold text-lg">
-                ₱ {principal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </p>
+              <p className="font-headline font-bold text-lg">₱ {fmt(principal)}</p>
             </div>
             <div className="text-right">
               <p className="text-on-surface-variant text-xs mb-1">
@@ -316,15 +322,25 @@ export default function LoanDetails() {
             />
           </div>
           <div className="mt-4 flex justify-between text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
-            <span>₱ {paidAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Paid</span>
-            <span>₱ {totalPayable.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Total</span>
+            <span>₱ {fmt(paidAmount)} Paid</span>
+            <span>₱ {fmt(totalPayable)} Total</span>
           </div>
         </section>
 
-        {/* Payment History */}
+        {/* ── Payment History ── */}
         {payments.length > 0 && (
           <section className="space-y-3">
-            <h3 className="font-headline font-bold text-lg tracking-tight px-1">Payment History</h3>
+            <div className="flex items-center justify-between px-1">
+              <h3 className="font-headline font-bold text-lg tracking-tight">Payment History</h3>
+              {payments.length > 3 && (
+                <button
+                  onClick={() => setShowAllPayments(true)}
+                  className="text-primary text-xs font-bold uppercase tracking-widest flex items-center gap-1"
+                >
+                  View All <ArrowRight size={12} />
+                </button>
+              )}
+            </div>
             <div className="bg-surface-container-low rounded-3xl overflow-hidden">
               <table className="w-full text-left border-collapse">
                 <thead>
@@ -335,13 +351,13 @@ export default function LoanDetails() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-surface-bright/10">
-                  {payments.map((p) => (
+                  {payments.slice(0, 3).map((p) => (
                     <tr key={p.payment_id} className="hover:bg-white/5 transition-colors">
                       <td className="px-5 py-4 text-sm font-semibold">
-                        {new Date(p.payment_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        {fmtDate(p.payment_date ?? p.created_at)}
                       </td>
                       <td className="px-5 py-4 text-sm font-headline font-bold text-primary">
-                        ₱ {Number(p.amount).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ₱ {fmt(Number(p.amount))}
                       </td>
                       <td className="px-5 py-4 text-right">
                         <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-surface-container text-on-surface-variant uppercase">
@@ -352,6 +368,14 @@ export default function LoanDetails() {
                   ))}
                 </tbody>
               </table>
+              {payments.length > 3 && (
+                <button
+                  onClick={() => setShowAllPayments(true)}
+                  className="w-full py-3 text-[11px] font-bold text-on-surface-variant uppercase tracking-widest text-center hover:bg-white/5 transition-colors border-t border-surface-bright/10"
+                >
+                  +{payments.length - 3} more payment{payments.length - 3 !== 1 ? 's' : ''} — View All
+                </button>
+              )}
             </div>
           </section>
         )}
@@ -451,7 +475,7 @@ export default function LoanDetails() {
           </section>
         )}
 
-        {/* ── Loan Documents ── */}
+        {/* Loan Documents */}
         <section className="bg-surface-container-low rounded-2xl overflow-hidden">
           <div className="px-5 pt-5 pb-2">
             <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
@@ -464,6 +488,85 @@ export default function LoanDetails() {
       </main>
 
       <BottomNav />
+
+      {/* ── Payment History Bottom Sheet Modal ── */}
+      {showAllPayments && (
+        <div className="fixed inset-0 z-50 flex flex-col justify-end">
+          {/* Backdrop */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => setShowAllPayments(false)}
+          />
+          {/* Sheet */}
+          <motion.div
+            initial={{ y: '100%' }}
+            animate={{ y: 0 }}
+            transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+            className="relative bg-background rounded-t-3xl max-h-[80vh] flex flex-col shadow-2xl"
+          >
+            {/* Handle */}
+            <div className="flex justify-center pt-3 pb-1 shrink-0">
+              <div className="w-10 h-1 rounded-full bg-outline-variant" />
+            </div>
+
+            {/* Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-outline-variant/20 shrink-0">
+              <div>
+                <h3 className="text-base font-headline font-bold text-on-surface">Payment History</h3>
+                <p className="text-xs text-on-surface-variant mt-0.5">
+                  {payments.length} total payment{payments.length !== 1 ? 's' : ''}
+                </p>
+              </div>
+              <button
+                onClick={() => setShowAllPayments(false)}
+                className="w-9 h-9 rounded-full bg-surface-container-high flex items-center justify-center active:scale-90 transition-transform"
+              >
+                <X size={16} className="text-on-surface-variant" />
+              </button>
+            </div>
+
+            {/* Column headers */}
+            <div className="grid grid-cols-3 px-6 py-3 bg-surface-container-low shrink-0">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Date</span>
+              <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant text-center">Amount</span>
+              <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant text-right">Method</span>
+            </div>
+
+            {/* Scrollable list */}
+            <div className="overflow-y-auto flex-1 px-4 py-3 space-y-2">
+              {payments.map((p) => (
+                <div
+                  key={p.payment_id}
+                  className="grid grid-cols-3 py-3 px-4 rounded-2xl bg-surface-container-low items-center"
+                >
+                  <div>
+                    <p className="text-xs font-semibold text-on-surface">
+                      {new Date(p.payment_date ?? p.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    </p>
+                    <p className="text-[10px] text-on-surface-variant">
+                      {new Date(p.payment_date ?? p.created_at).getFullYear()}
+                    </p>
+                  </div>
+                  <p className="text-xs font-headline font-bold text-primary text-center">
+                    ₱ {fmt(Number(p.amount))}
+                  </p>
+                  <div className="flex justify-end">
+                    <span className="text-[10px] font-bold bg-primary/10 text-primary px-2.5 py-1 rounded-full uppercase tracking-wider">
+                      {p.method ?? 'Cash'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Safe area */}
+            <div className="h-6 shrink-0" />
+          </motion.div>
+        </div>
+      )}
+
     </div>
   );
 }

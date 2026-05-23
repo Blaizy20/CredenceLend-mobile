@@ -243,6 +243,74 @@ async function sendPaymentEmail(
   }
 }
 
+// ── NEW: Loan Status Email ─────────────────────────────────────────────────────
+async function sendLoanStatusEmail(
+  toEmail:     string,
+  firstName:   string,
+  status:      string,
+  referenceNo: string,
+  amount:      number
+): Promise<void> {
+  const formattedAmount = amount.toLocaleString('en-PH', { minimumFractionDigits: 2 });
+
+  const TEMPLATES: Record<string, { subject: string; heading: string; color: string; body: string }> = {
+    active: {
+      subject: `✅ Loan Approved – ${referenceNo}`,
+      heading: 'Your Loan Has Been Approved!',
+      color:   '#16a34a',
+      body:    `Great news, <strong>${firstName}</strong>! Your loan application <strong>${referenceNo}</strong> for <strong>₱${formattedAmount}</strong> has been <strong>approved</strong>. Please log in to your CredenceLend app to view your payment schedule.`,
+    },
+    denied: {
+      subject: `❌ Loan Application Update – ${referenceNo}`,
+      heading: 'Loan Application Not Approved',
+      color:   '#dc2626',
+      body:    `Hi <strong>${firstName}</strong>, unfortunately your loan application <strong>${referenceNo}</strong> for <strong>₱${formattedAmount}</strong> was <strong>not approved</strong> at this time. Please contact your cooperative for more information or to discuss your options.`,
+    },
+    closed: {
+      subject: `🎉 Loan Fully Paid – ${referenceNo}`,
+      heading: 'Loan Fully Paid!',
+      color:   '#01696f',
+      body:    `Congratulations, <strong>${firstName}</strong>! Your loan <strong>${referenceNo}</strong> has been marked as <strong>fully paid</strong>. Thank you for settling your account. We hope to serve you again!`,
+    },
+  };
+
+  const template = TEMPLATES[status.toLowerCase()];
+  if (!template) return;
+
+  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'accept':       'application/json',
+      'api-key':      process.env.BREVO_API_KEY ?? '',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      sender: {
+        name:  process.env.BREVO_SENDER_NAME  ?? 'Loan Manager',
+        email: process.env.BREVO_SENDER_EMAIL ?? '',
+      },
+      to: [{ email: toEmail }],
+      subject: template.subject,
+      htmlContent: `
+        <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#f9f8f5;border-radius:8px;">
+          <h2 style="color:${template.color};">${template.heading}</h2>
+          <p>${template.body}</p>
+          <div style="margin:24px 0;padding:16px;background:#fff;border-radius:6px;border-left:4px solid ${template.color};">
+            <p style="margin:0;font-size:0.85rem;color:#374151;">Reference No: <strong>${referenceNo}</strong></p>
+            <p style="margin:4px 0 0;font-size:0.85rem;color:#374151;">Amount: <strong>₱${formattedAmount}</strong></p>
+            <p style="margin:4px 0 0;font-size:0.85rem;color:#374151;">Status: <strong style="color:${template.color};">${status.toUpperCase()}</strong></p>
+          </div>
+          <p style="color:#7a7974;font-size:0.875rem;">This is an automated notification from CredenceLend. Please do not reply to this email.</p>
+        </div>`,
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    console.warn('Loan status email skipped:', err);
+  }
+}
+
 async function startServer() {
   const REQUIRED_ENV = [
     "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD",
@@ -642,710 +710,768 @@ async function startServer() {
     }
   });
 
-    // ── Loans: Apply ──────────────────────────────────────────────────────────
-    app.post("/api/loans/apply", async (req, res) => {
-      try {
-        const {
-          customer_id, tenant_id, principal_amount, payment_term,
-          interest_rate, term_months, id_type, collateral_type, co_maker,
-        } = req.body;
+  // ── Loans: Apply ──────────────────────────────────────────────────────────
+  app.post("/api/loans/apply", async (req, res) => {
+    try {
+      const {
+        customer_id, tenant_id, principal_amount, payment_term,
+        interest_rate, term_months, id_type, collateral_type, co_maker,
+      } = req.body;
 
-        if (!customer_id || !principal_amount || !payment_term || !collateral_type)
-          return res.status(400).json({ success: false, message: "Please complete all required fields." });
+      if (!customer_id || !principal_amount || !payment_term || !collateral_type)
+        return res.status(400).json({ success: false, message: "Please complete all required fields." });
 
-        const amount = Number(principal_amount);
-        if (isNaN(amount) || amount < 1000 || amount > 500000)
-          return res.status(400).json({ success: false, message: "Loan amount must be between ₱1,000 and ₱500,000." });
+      const amount = Number(principal_amount);
+      if (isNaN(amount) || amount < 1000 || amount > 500000)
+        return res.status(400).json({ success: false, message: "Loan amount must be between ₱1,000 and ₱500,000." });
 
-        const [activeLoans] = await pool.query<RowDataPacket[]>(
-          `SELECT loan_id FROM loans
-           WHERE customer_id = ? AND tenant_id = ?
-           AND status NOT IN ('CLOSED', 'DENIED')
-           AND is_active = 1`,
-          [customer_id, tenant_id]
-        );
-        if (activeLoans.length > 0)
-          return res.status(409).json({
-            success:    false,
-            error_code: "UNPAID_LOANS_EXIST",
-            message:    "You already have an active loan. Please settle your current loan before applying for a new one.",
-          });
+      const [activeLoans] = await pool.query<RowDataPacket[]>(
+        `SELECT loan_id FROM loans
+         WHERE customer_id = ? AND tenant_id = ?
+         AND status NOT IN ('CLOSED', 'DENIED')
+         AND is_active = 1`,
+        [customer_id, tenant_id]
+      );
+      if (activeLoans.length > 0)
+        return res.status(409).json({
+          success:    false,
+          error_code: "UNPAID_LOANS_EXIST",
+          message:    "You already have an active loan. Please settle your current loan before applying for a new one.",
+        });
 
-        const year = new Date().getFullYear();
-        const [lastLoanRows] = await pool.query<RowDataPacket[]>(
-          `SELECT reference_no FROM loans WHERE reference_no LIKE ? ORDER BY loan_id DESC LIMIT 1`,
-          [`LOAN-${year}-%`]
-        );
+      const year = new Date().getFullYear();
+      const [lastLoanRows] = await pool.query<RowDataPacket[]>(
+        `SELECT reference_no FROM loans WHERE reference_no LIKE ? ORDER BY loan_id DESC LIMIT 1`,
+        [`LOAN-${year}-%`]
+      );
 
-        const reference_no     = getNextReferenceNo(lastLoanRows[0]?.reference_no ?? null, year);
-        const rate             = Number(interest_rate) || 0;
-        const months           = Number(term_months)   || 1;
-        const resolvedTenantId = Number(tenant_id      ?? FALLBACK_TENANT_ID);
+      const reference_no     = getNextReferenceNo(lastLoanRows[0]?.reference_no ?? null, year);
+      const rate             = Number(interest_rate) || 0;
+      const months           = Number(term_months)   || 1;
+      const resolvedTenantId = Number(tenant_id      ?? FALLBACK_TENANT_ID);
 
-        const totalInterest   = amount * (rate / 100) * months;
-        const total_payable   = Number((amount + totalInterest).toFixed(2));
-        const termCount       = getTermCount(payment_term, months);
-        const amount_per_term = Number((total_payable / termCount).toFixed(2));
+      const totalInterest   = amount * (rate / 100) * months;
+      const total_payable   = Number((amount + totalInterest).toFixed(2));
+      const termCount       = getTermCount(payment_term, months);
+      const amount_per_term = Number((total_payable / termCount).toFixed(2));
 
-        const [loanResult] = await pool.query<ResultSetHeader>(
-          `INSERT INTO loans (tenant_id, customer_id, reference_no, principal_amount, interest_rate, payment_term, term_months, total_payable, amount_per_term, remaining_balance, id_type, collateral_type, status, is_active)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 1)`,
-          [resolvedTenantId, customer_id, reference_no, amount, rate, payment_term, months, total_payable, amount_per_term, total_payable, id_type ?? null, collateral_type]
-        );
-        const loan_id = loanResult.insertId;
+      const [loanResult] = await pool.query<ResultSetHeader>(
+        `INSERT INTO loans (tenant_id, customer_id, reference_no, principal_amount, interest_rate, payment_term, term_months, total_payable, amount_per_term, remaining_balance, id_type, collateral_type, status, is_active)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 1)`,
+        [resolvedTenantId, customer_id, reference_no, amount, rate, payment_term, months, total_payable, amount_per_term, total_payable, id_type ?? null, collateral_type]
+      );
+      const loan_id = loanResult.insertId;
 
-        if (co_maker?.first_name && co_maker?.last_name) {
-          try {
-            await pool.query(
-              `INSERT INTO co_makers (loan_id, customer_id, first_name, last_name, contact_no, email, province, city, barangay, street)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-              [loan_id, customer_id, String(co_maker.first_name).trim(), String(co_maker.last_name).trim(),
-               co_maker.contact_no || null, co_maker.email || null, co_maker.province || null,
-               co_maker.city || null, co_maker.barangay || null, co_maker.street || null]
-            );
-          } catch (coMakerErr: any) { console.warn("Co-maker insert skipped:", coMakerErr.message); }
-        }
-
-        await insertNotification(
-          customer_id, resolvedTenantId,
-          "Loan Application Received",
-          `Your application (${reference_no}) for ₱${amount.toLocaleString()} has been submitted and is pending review.`,
-          "general"
-        );
-
+      if (co_maker?.first_name && co_maker?.last_name) {
         try {
           await pool.query(
-            `INSERT INTO loan_status_cache (loan_id, last_status) VALUES (?, 'PENDING')
-             ON DUPLICATE KEY UPDATE last_status = 'PENDING'`,
-            [loan_id]
+            `INSERT INTO co_makers (loan_id, customer_id, first_name, last_name, contact_no, email, province, city, barangay, street)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [loan_id, customer_id, String(co_maker.first_name).trim(), String(co_maker.last_name).trim(),
+             co_maker.contact_no || null, co_maker.email || null, co_maker.province || null,
+             co_maker.city || null, co_maker.barangay || null, co_maker.street || null]
           );
-        } catch (cacheErr: any) { console.warn("Status cache seed skipped:", cacheErr.message); }
-
-        res.status(201).json({
-          success: true,
-          message: "Your loan application has been submitted successfully.",
-          loan:    { loan_id, reference_no, total_payable, amount_per_term, status: "PENDING" },
-        });
-      } catch (err: any) {
-        console.error("Loan apply error:", err);
-        res.status(500).json({ success: false, message: "Failed to submit loan application.", error: err.message });
+        } catch (coMakerErr: any) { console.warn("Co-maker insert skipped:", coMakerErr.message); }
       }
-    });
 
-    // ── Loans: List by Customer ───────────────────────────────────────────────
-    app.get("/api/loans/:customerId", async (req, res) => {
+      await insertNotification(
+        customer_id, resolvedTenantId,
+        "Loan Application Received",
+        `Your application (${reference_no}) for ₱${amount.toLocaleString()} has been submitted and is pending review.`,
+        "general"
+      );
+
+      // ✅ Send email on loan application
       try {
-        const customerId = req.params.customerId;
-        const [rows] = await pool.query<RowDataPacket[]>(
-          `SELECT l.loan_id, l.reference_no, l.principal_amount, l.interest_rate,
-                  l.payment_term, l.term_months, l.total_payable, l.amount_per_term,
-                  l.remaining_balance, l.status, l.due_date, l.activated_at,
-                  l.created_at, l.is_active, c.tenant_id
-           FROM loans l JOIN customers c ON c.customer_id = l.customer_id
-           WHERE l.customer_id = ? AND l.is_active = 1 ORDER BY l.created_at DESC`,
-          [customerId]
+        const [custRows] = await pool.query<RowDataPacket[]>(
+          `SELECT first_name, email FROM customers WHERE customer_id = ? LIMIT 1`,
+          [customer_id]
         );
-
-        const NOTIF_MAP: Record<string, { title: string; message: (ref: string) => string; type: string }> = {
-          active: { title: "Loan Approved",           message: (ref) => `Your loan (${ref}) has been approved. View your payment schedule now.`, type: "approved" },
-          denied: { title: "Loan Application Denied", message: (ref) => `Your loan application (${ref}) was not approved. Please contact your cooperative.`, type: "denied" },
-          closed: { title: "Loan Fully Paid",          message: (ref) => `Congratulations! Your loan (${ref}) has been fully paid.`, type: "payment" },
-        };
-
-        for (const loan of rows) {
-          const newStatus  = String(loan.status ?? "").toLowerCase();
-          const tenantId   = loan.tenant_id ?? FALLBACK_TENANT_ID;
-          const [cached]   = await pool.query<RowDataPacket[]>(
-            `SELECT last_status FROM loan_status_cache WHERE loan_id = ? LIMIT 1`, [loan.loan_id]
-          );
-          const lastStatus = cached[0] ? String(cached[0].last_status).toLowerCase() : null;
-          if (!lastStatus) {
-            await pool.query(
-              `INSERT INTO loan_status_cache (loan_id, last_status) VALUES (?, ?) ON DUPLICATE KEY UPDATE last_status = VALUES(last_status)`,
-              [loan.loan_id, loan.status]
-            );
-            continue;
-          }
-          if (lastStatus !== newStatus) {
-            const notif = NOTIF_MAP[newStatus];
-            if (notif) await insertNotification(Number(customerId), tenantId, notif.title, notif.message(loan.reference_no), notif.type);
-            await pool.query(
-              `INSERT INTO loan_status_cache (loan_id, last_status) VALUES (?, ?) ON DUPLICATE KEY UPDATE last_status = VALUES(last_status)`,
-              [loan.loan_id, loan.status]
-            );
-          }
-        }
-        res.json(rows.map(({ tenant_id: _tid, ...rest }) => rest));
-      } catch (err: any) {
-        console.error("Loans error:", err.message);
-        res.status(500).json({ success: false, message: "Unable to retrieve loan records." });
-      }
-    });
-
-    // ── Loans: Single Loan ────────────────────────────────────────────────────
-    app.get("/api/loan/:loanId", async (req, res) => {
-      try {
-        const [rows] = await pool.query<RowDataPacket[]>(
-          `SELECT loan_id, reference_no, principal_amount, interest_rate, payment_term,
-                  term_months, total_payable, amount_per_term, remaining_balance,
-                  status, due_date, denial_reason, notes, activated_at, created_at, is_active
-           FROM loans WHERE loan_id = ? LIMIT 1`,
-          [req.params.loanId]
-        );
-        if (rows.length === 0) return res.status(404).json({ success: false, message: "Loan not found." });
-        res.json(rows[0]);
-      } catch { res.status(500).json({ success: false, message: "Unable to retrieve loan details." }); }
-    });
-
-    // ── Loan Documents: Get by Loan ───────────────────────────────────────────
-    app.get("/api/loan/:loanId/documents", async (req, res) => {
-      try {
-        const [rows] = await pool.query<RowDataPacket[]>(
-          `SELECT document_id, loan_id, code, label, file_url, file_key, uploaded_at
-           FROM loan_documents WHERE loan_id = ? ORDER BY uploaded_at ASC`,
-          [req.params.loanId]
-        );
-        res.json(rows);
-      } catch (err: any) {
-        console.error("Loan documents error:", err.message);
-        res.status(500).json({ success: false, message: "Unable to retrieve loan documents." });
-      }
-    });
-
-    // ── Upload: Document to Railway S3 ────────────────────────────────────────
-    app.post('/api/upload/document', upload.single('file'), async (req: any, res: any) => {
-      try {
-        const file = req.file;
-        if (!file) return res.status(400).json({ success: false, message: 'No file provided.' });
-
-        const tenant_id   = req.body.tenant_id   ?? 'unknown';
-        const customer_id = req.body.customer_id ?? 'unknown';
-        const folder      = req.body.folder      ?? 'documents';
-        const code        = req.body.code        ?? 'DOCUMENT';
-        const label       = req.body.label       ?? file.originalname;
-
-        const key = `${tenant_id}/${customer_id}/${folder}/${Date.now()}-${file.originalname}`;
-
-        const uploader = new Upload({
-          client: s3,
-          params: {
-            Bucket:      BUCKET,
-            Key:         key,
-            Body:        file.buffer,
-            ContentType: file.mimetype,
-          },
-        });
-
-        await uploader.done();
-
-        const fileUrl = `https://${BUCKET}.t3.storageapi.dev/${key}`;
-
-        // ✅ Save to loan_documents if loan_id is provided
-        const loanIdRaw = req.body.loan_id;
-        if (loanIdRaw && !isNaN(Number(loanIdRaw))) {
-          try {
-            // Fetch customer_no and reference_no
-            const [metaRows]: any = await pool.query(
-              `SELECT c.customer_no, l.reference_no
-               FROM loans l
-               JOIN customers c ON c.customer_id = l.customer_id
-               WHERE l.loan_id = ? LIMIT 1`,
-              [Number(loanIdRaw)]
-            );
-            const customer_no  = metaRows[0]?.customer_no  ?? null;
-            const reference_no = metaRows[0]?.reference_no ?? null;
-
-            await pool.query(
-              `INSERT INTO loan_documents (loan_id, tenant_id, customer_id, customer_no, reference_no, code, label, file_url, file_key)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-              [Number(loanIdRaw), tenant_id, customer_id, customer_no, reference_no, code, label, fileUrl, key]
-            );
-          } catch (dbErr: any) {
-            console.warn('[upload] DB insert skipped:', dbErr.message);
-          }
-        }
-
-        return res.json({ success: true, url: fileUrl, key });
-      } catch (err) {
-        console.error('[upload/document]', err);
-        return res.status(500).json({ success: false, message: 'Upload failed. Please try again.' });
-      }
-    });
-
-    // ── S3: Presigned URL ─────────────────────────────────────────────────────
-    app.get('/api/documents/signed-url', async (req: any, res: any) => {
-      try {
-        const key = String(req.query.key ?? '').trim();
-        if (!key) return res.status(400).json({ success: false, message: 'File key is required.' });
-
-        const command   = new GetObjectCommand({ Bucket: BUCKET, Key: key });
-        const signedUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
-
-        return res.json({ success: true, url: signedUrl });
-      } catch (err) {
-        console.error('[signed-url]', err);
-        return res.status(500).json({ success: false, message: 'Failed to generate signed URL.' });
-      }
-    });
-
-    // ── Payments: List by Loan ────────────────────────────────────────────────
-    app.get("/api/payments/:loanId", async (req, res) => {
-      try {
-        const [rows] = await pool.query<RowDataPacket[]>(
-          `SELECT payment_id, loan_id, amount, payment_date, method, or_no, notes,
-                  COALESCE(created_at, payment_date) AS created_at
-           FROM payments WHERE loan_id = ?
-           ORDER BY COALESCE(created_at, payment_date) DESC, payment_id DESC`,
-          [req.params.loanId]
-        );
-        res.json(rows);
-      } catch { res.status(500).json({ success: false, message: "Unable to retrieve payment records." }); }
-    });
-
-    // ── Payments: All by Customer ─────────────────────────────────────────────
-    app.get("/api/payments/customer/:customerId", async (req, res) => {
-      try {
-        const tenant_id = Number(req.query.tenant_id || 0);
-        if (!tenant_id) return res.status(400).json({ success: false, message: "Cooperative is required." });
-
-        const [rows] = await pool.query<RowDataPacket[]>(
-          `SELECT p.payment_id, p.loan_id, p.amount, p.method, p.or_no,
-                  p.notes, l.reference_no,
-                  COALESCE(p.created_at, p.payment_date) AS created_at
-           FROM payments p
-           JOIN loans l ON l.loan_id = p.loan_id
-           JOIN customers c ON c.customer_id = l.customer_id
-           WHERE l.customer_id = ? AND c.tenant_id = ?
-           ORDER BY COALESCE(p.created_at, p.payment_date) DESC, p.payment_id DESC
-           LIMIT 50`,
-          [req.params.customerId, tenant_id]
-        );
-        res.json(rows);
-      } catch (err: any) {
-        console.error("Customer payments error:", err.message);
-        res.status(500).json({ success: false, message: "Unable to retrieve payment records." });
-      }
-    });
-
-    // ── Notifications: List ───────────────────────────────────────────────────
-    app.get("/api/notifications/:customerId", async (req, res) => {
-      try {
-        const [rows] = await pool.query<RowDataPacket[]>(
-          `SELECT notification_id, title, message, type, is_read, created_at
-           FROM notifications WHERE customer_id = ? ORDER BY created_at DESC LIMIT 50`,
-          [req.params.customerId]
-        );
-        res.json(rows);
-      } catch { res.status(500).json({ success: false, message: "Unable to retrieve notifications." }); }
-    });
-
-    // ── Notifications: Mark All Read ──────────────────────────────────────────
-    app.patch("/api/notifications/:customerId/read-all", async (req, res) => {
-      try {
-        await pool.query(
-          `UPDATE notifications SET is_read = 1 WHERE customer_id = ? AND is_read = 0`,
-          [req.params.customerId]
-        );
-        res.json({ success: true });
-      } catch { res.status(500).json({ success: false, message: "Unable to update notifications." }); }
-    });
-
-    // ── Transactions ──────────────────────────────────────────────────────────
-    app.get("/api/transactions/:customerId", async (req, res) => {
-      try {
-        const [rows] = await pool.query<RowDataPacket[]>(
-          `SELECT id, loan_id, type, amount, date, status FROM transactions WHERE customer_id = ? ORDER BY date DESC`,
-          [req.params.customerId]
-        );
-        res.json(rows);
-      } catch { res.status(500).json({ success: false, message: "Unable to retrieve transactions." }); }
-    });
-
-    // ── PayMongo: Create Checkout Session ─────────────────────────────────────
-    app.post("/api/paymongo/checkout", async (req, res) => {
-      try {
-        const { amount, description, reference_no, success_url, cancel_url, billing_name, billing_email, billing_phone } = req.body;
-        if (!amount || !success_url || !cancel_url)
-          return res.status(400).json({ success: false, message: "amount, success_url and cancel_url are required." });
-
-        const desc = description || "Loan Payment";
-        const response = await fetch("https://api.paymongo.com/v1/checkout_sessions", {
-          method: "POST",
-          headers: PAYMONGO_HEADERS,
-          body: JSON.stringify({
-            data: {
-              attributes: {
-                send_email_receipt:   false,
-                show_description:     true,
-                show_line_items:      true,
-                line_items: [{
-                  currency:    "PHP",
-                  amount:      Math.round(Number(amount) * 100),
-                  name:        desc,
-                  description: desc,
-                  quantity:    1,
-                }],
-                payment_method_types: [
-                  "card", "gcash", "paymaya", "qrph",
-                  "grab_pay", "dob", "dob_ubp",
-                  "brankas_bdo", "brankas_landbank", "brankas_metrobank",
-                ],
-                description:      desc,
-                reference_number: reference_no || "",
-                success_url,
-                cancel_url,
-                ...(billing_name || billing_email || billing_phone
-                  ? { billing: { name: billing_name || "", email: billing_email || "", phone: billing_phone || "" } }
-                  : {}),
-              },
+        if (custRows.length > 0 && custRows[0].email) {
+          const formattedAmount = amount.toLocaleString('en-PH', { minimumFractionDigits: 2 });
+          await fetch('https://api.brevo.com/v3/smtp/email', {
+            method: 'POST',
+            headers: {
+              'accept':       'application/json',
+              'api-key':      process.env.BREVO_API_KEY ?? '',
+              'content-type': 'application/json',
             },
-          }),
-        });
-
-        const data = await response.json();
-        if (!response.ok)
-          return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to create checkout session." });
-
-        res.json({ success: true, checkout_url: data.data.attributes.checkout_url, session_id: data.data.id });
-      } catch (err: any) {
-        console.error("PayMongo checkout error:", err.message);
-        res.status(500).json({ success: false, message: "Payment service unavailable. Please try again." });
-      }
-    });
-
-    // ── PayMongo: Get Checkout Session Status ─────────────────────────────────
-    app.get("/api/paymongo/checkout-status/:sessionId", async (req, res) => {
-      try {
-        const response = await fetch(
-          `https://api.paymongo.com/v1/checkout_sessions/${req.params.sessionId}`,
-          { headers: PAYMONGO_HEADERS }
-        );
-        const data = await response.json();
-        if (!response.ok)
-          return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to retrieve session." });
-
-        const attrs                = data.data.attributes;
-        const sessionPaymentStatus = attrs.payment_status ?? "unpaid";
-        const payment              = attrs.payments?.[0];
-        const rawMethod            = payment?.attributes?.payment_method_type
-          ?? payment?.attributes?.source?.type
-          ?? payment?.payment_method_type
-          ?? attrs.payment_method_type
-          ?? "other";
-        const normalizedMethod = normalizeMethod(rawMethod);
-
-        const lineItemsTotal = Array.isArray(attrs.line_items)
-          ? attrs.line_items.reduce((sum: number, item: any) => sum + (item.amount ?? 0), 0) / 100
-          : null;
-        const paymentAmount  = payment?.attributes?.amount
-          ? payment.attributes.amount / 100
-          : payment?.amount ? payment.amount / 100 : null;
-        const resolvedAmount = lineItemsTotal ?? paymentAmount;
-
-        res.json({
-          success:             true,
-          payment_status:      sessionPaymentStatus,
-          session_status:      attrs.status,
-          payment_method_type: rawMethod,
-          method:              normalizedMethod,
-          payment_id:          payment?.id ?? null,
-          amount:              resolvedAmount,
-        });
-      } catch (err: any) {
-        console.error("Checkout status error:", err.message);
-        res.status(500).json({ success: false, message: "Payment service unavailable." });
-      }
-    });
-
-    // ── PayMongo: Create Source (GCash QR in-app) ─────────────────────────────
-    app.post("/api/paymongo/source", async (req, res) => {
-      try {
-        const { amount, type, reference_no, billing_name, billing_email, billing_phone, redirect_success, redirect_failed } = req.body;
-        if (!amount || !type)
-          return res.status(400).json({ success: false, message: "amount and type are required." });
-
-        const response = await fetch("https://api.paymongo.com/v1/sources", {
-          method: "POST",
-          headers: PAYMONGO_HEADERS,
-          body: JSON.stringify({
-            data: {
-              attributes: {
-                amount:   Math.round(Number(amount) * 100),
-                currency: "PHP",
-                type,
-                redirect: {
-                  success: redirect_success || "https://credencelend-mobile.up.railway.app/payment-success",
-                  failed:  redirect_failed  || "https://credencelend-mobile.up.railway.app/payment-failed",
-                },
-                billing: {
-                  name:  billing_name  || "",
-                  email: billing_email || "",
-                  phone: billing_phone || "",
-                },
-              },
-            },
-          }),
-        });
-
-        const data = await response.json();
-        if (!response.ok)
-          return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to create source." });
-
-        res.json({ success: true, source: data.data });
-      } catch (err: any) {
-        console.error("PayMongo source error:", err.message);
-        res.status(500).json({ success: false, message: "Payment service unavailable." });
-      }
-    });
-
-    // ── PayMongo: Get Source Status ───────────────────────────────────────────
-    app.get("/api/paymongo/source/:sourceId", async (req, res) => {
-      try {
-        const response = await fetch(
-          `https://api.paymongo.com/v1/sources/${req.params.sourceId}`,
-          { headers: PAYMONGO_HEADERS }
-        );
-        const data = await response.json();
-        if (!response.ok)
-          return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to retrieve source." });
-        res.json({ success: true, source: data.data });
-      } catch (err: any) {
-        console.error("PayMongo source status error:", err.message);
-        res.status(500).json({ success: false, message: "Payment service unavailable." });
-      }
-    });
-
-    // ── PayMongo: Create Payment Intent (Card) ────────────────────────────────
-    app.post("/api/paymongo/intent", async (req, res) => {
-      try {
-        const { amount, description } = req.body;
-        if (!amount)
-          return res.status(400).json({ success: false, message: "amount is required." });
-
-        const response = await fetch("https://api.paymongo.com/v1/payment_intents", {
-          method: "POST",
-          headers: PAYMONGO_HEADERS,
-          body: JSON.stringify({
-            data: {
-              attributes: {
-                amount:                 Math.round(Number(amount) * 100),
-                currency:               "PHP",
-                payment_method_allowed: ["card"],
-                description:            description || "Loan Payment",
-                capture_type:           "automatic",
-              },
-            },
-          }),
-        });
-
-        const data = await response.json();
-        if (!response.ok)
-          return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to create payment intent." });
-
-        res.json({ success: true, intent: data.data });
-      } catch (err: any) {
-        console.error("PayMongo intent error:", err.message);
-        res.status(500).json({ success: false, message: "Payment service unavailable." });
-      }
-    });
-
-    // ── PayMongo: Create Payment Method (Card) ────────────────────────────────
-    app.post("/api/paymongo/payment-method", async (req, res) => {
-      try {
-        const { card_number, exp_month, exp_year, cvc, name } = req.body;
-        if (!card_number || !exp_month || !exp_year || !cvc)
-          return res.status(400).json({ success: false, message: "Card details are required." });
-
-        const response = await fetch("https://api.paymongo.com/v1/payment_methods", {
-          method: "POST",
-          headers: PAYMONGO_HEADERS,
-          body: JSON.stringify({
-            data: {
-              attributes: {
-                type: "card",
-                details: {
-                  card_number: String(card_number).replace(/\s/g, ""),
-                  exp_month:   Number(exp_month),
-                  exp_year:    Number(exp_year),
-                  cvc:         String(cvc),
-                },
-                billing: { name: name || "" },
-              },
-            },
-          }),
-        });
-
-        const data = await response.json();
-        if (!response.ok)
-          return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to create payment method." });
-
-        res.json({ success: true, payment_method: data.data });
-      } catch (err: any) {
-        console.error("PayMongo payment method error:", err.message);
-        res.status(500).json({ success: false, message: "Payment service unavailable." });
-      }
-    });
-
-    // ── PayMongo: Attach Payment Method to Intent ─────────────────────────────
-    app.post("/api/paymongo/attach", async (req, res) => {
-      try {
-        const { intent_id, payment_method_id, client_key, return_url } = req.body;
-        if (!intent_id || !payment_method_id)
-          return res.status(400).json({ success: false, message: "intent_id and payment_method_id are required." });
-
-        const response = await fetch(
-          `https://api.paymongo.com/v1/payment_intents/${intent_id}/attach`,
-          {
-            method: "POST",
-            headers: PAYMONGO_HEADERS,
             body: JSON.stringify({
-              data: {
-                attributes: {
-                  payment_method: payment_method_id,
-                  client_key:     client_key || "",
-                  return_url:     return_url || "https://credencelend-mobile.up.railway.app/payment-success",
-                },
+              sender: {
+                name:  process.env.BREVO_SENDER_NAME  ?? 'Loan Manager',
+                email: process.env.BREVO_SENDER_EMAIL ?? '',
               },
+              to: [{ email: custRows[0].email }],
+              subject: `📋 Loan Application Received – ${reference_no}`,
+              htmlContent: `
+                <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#f9f8f5;border-radius:8px;">
+                  <h2 style="color:#01696f;">Application Received</h2>
+                  <p>Hi <strong>${custRows[0].first_name}</strong>, we have received your loan application. Here are your details:</p>
+                  <div style="margin:24px 0;padding:16px;background:#fff;border-radius:6px;border-left:4px solid #01696f;">
+                    <p style="margin:0;font-size:0.85rem;color:#374151;">Reference No: <strong>${reference_no}</strong></p>
+                    <p style="margin:4px 0 0;font-size:0.85rem;color:#374151;">Amount: <strong>₱${formattedAmount}</strong></p>
+                    <p style="margin:4px 0 0;font-size:0.85rem;color:#374151;">Status: <strong style="color:#2563eb;">PENDING REVIEW</strong></p>
+                  </div>
+                  <p style="color:#7a7974;font-size:0.875rem;">You will receive another email once your application has been reviewed. This is an automated notification from CredenceLend.</p>
+                </div>`,
             }),
-          }
-        );
-
-        const data = await response.json();
-        if (!response.ok)
-          return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to attach payment method." });
-
-        res.json({ success: true, intent: data.data });
-      } catch (err: any) {
-        console.error("PayMongo attach error:", err.message);
-        res.status(500).json({ success: false, message: "Payment service unavailable." });
+          });
+        }
+      } catch (emailErr: any) {
+        console.warn('Application email skipped:', emailErr.message);
       }
-    });
 
-    // ── PayMongo: Record Payment ──────────────────────────────────────────────
-    app.post("/api/paymongo/record-payment", async (req, res) => {
       try {
-        const {
-          loan_id, amount, method,
-          paymongo_source_id, paymongo_intent_id,
-          paymongo_session_id, paymongo_method_type,
-          paymongo_payment_id,
-        } = req.body;
-
-        if (!loan_id || !amount || !method)
-          return res.status(400).json({ success: false, message: "Missing required fields." });
-
-        const rawType          = paymongo_method_type ?? method;
-        const normalizedMethod = normalizeMethod(String(rawType));
-
-        const pmId  = paymongo_session_id ?? paymongo_source_id ?? paymongo_intent_id;
-        const or_no = pmId ? `OR-PM-${String(pmId).slice(-8).toUpperCase()}` : `OR-${Date.now()}`;
-
-        for (const pmRef of [paymongo_session_id, paymongo_source_id, paymongo_intent_id, paymongo_payment_id].filter(Boolean)) {
-          const [existing] = await pool.query<RowDataPacket[]>(
-            `SELECT payment_id FROM payments WHERE notes LIKE ? LIMIT 1`, [`%${pmRef}%`]
-          );
-          if (existing.length > 0)
-            return res.json({ success: true, payment_id: existing[0].payment_id, message: "Payment already recorded." });
-        }
-
-        const [loanRows] = await pool.query<RowDataPacket[]>(
-          `SELECT l.loan_id, l.customer_id, l.remaining_balance, l.amount_per_term,
-                  COALESCE(l.tenant_id, c.tenant_id, ?) AS tenant_id
-           FROM loans l JOIN customers c ON c.customer_id = l.customer_id
-           WHERE l.loan_id = ? LIMIT 1`,
-          [FALLBACK_TENANT_ID, loan_id]
-        );
-        if (loanRows.length === 0)
-          return res.status(404).json({ success: false, message: "Loan not found." });
-
-        const loan        = loanRows[0];
-        const payAmount   = Number(amount);
-        const newBalance  = Math.max(0, Number(loan.remaining_balance) - payAmount);
-        const isFullyPaid = newBalance <= 0;
-
-        const isGcashMethod      = normalizedMethod === "GCASH";
-        const pmRef              = paymongo_payment_id ?? paymongo_session_id ?? paymongo_source_id ?? paymongo_intent_id ?? null;
-        const gcash_reference_no = isGcashMethod ? pmRef : null;
-        const bank_reference_no  = isGcashMethod ? null  : pmRef;
-        const notes              = `Online Payment via PayMongo (${normalizedMethod})`;
-
-        const [payResult] = await pool.query<ResultSetHeader>(
-          `INSERT INTO payments (loan_id, amount, payment_date, method, status, notes, tenant_id, or_no, gcash_reference_no, bank_reference_no)
-           VALUES (?, ?, CURDATE(), ?, 'Paid', ?, ?, ?, ?, ?)`,
-          [loan_id, payAmount, normalizedMethod, notes, loan.tenant_id, or_no, gcash_reference_no, bank_reference_no]
-        );
-
         await pool.query(
-          `UPDATE loans
-           SET remaining_balance = ?,
-               status    = IF(? <= 0, 'CLOSED', status),
-               closed_at = IF(? <= 0, NOW(), closed_at)
-           WHERE loan_id = ?`,
-          [newBalance, newBalance, newBalance, loan_id]
+          `INSERT INTO loan_status_cache (loan_id, last_status) VALUES (?, 'PENDING')
+           ON DUPLICATE KEY UPDATE last_status = 'PENDING'`,
+          [loan_id]
         );
+      } catch (cacheErr: any) { console.warn("Status cache seed skipped:", cacheErr.message); }
 
-        await insertNotification(
-          loan.customer_id, Number(loan.tenant_id) || FALLBACK_TENANT_ID,
-          isFullyPaid ? "Loan Fully Paid" : "Payment Received",
-          isFullyPaid
-            ? "Congratulations! Your loan has been fully paid. Thank you!"
-            : `Your payment of ₱${payAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })} has been received and is being processed.`,
-          "payment"
-        );
-
-        try {
-          const [customerRows] = await pool.query<RowDataPacket[]>(
-            `SELECT first_name, email FROM customers WHERE customer_id = ? LIMIT 1`,
-            [loan.customer_id]
-          );
-          if (customerRows.length > 0 && customerRows[0].email) {
-            await sendPaymentEmail(
-              customerRows[0].email,
-              customerRows[0].first_name,
-              payAmount,
-              newBalance,
-              or_no,
-              normalizedMethod,
-              isFullyPaid
-            );
-          }
-        } catch (emailErr: any) {
-          console.warn("Payment email skipped:", emailErr.message);
-        }
-
-        res.json({
-          success:         true,
-          payment_id:      payResult.insertId,
-          pm_payment_id:   paymongo_payment_id ?? null,
-          new_balance:     newBalance,
-          fully_paid:      isFullyPaid,
-          method:          normalizedMethod,
-          or_no,
-          amount_per_term: Number(loan.amount_per_term) || null,
-          message:         isFullyPaid ? "Loan fully paid!" : "Payment recorded successfully.",
-        });
-      } catch (err: any) {
-        console.error("Record payment error:", err.message);
-        res.status(500).json({ success: false, message: "Failed to record payment. Please contact support." });
-      }
-    });
-
-    // ── Static / Vite ─────────────────────────────────────────────────────────
-    if (process.env.NODE_ENV !== "production") {
-      const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" });
-      app.use(vite.middlewares);
-    } else {
-      const distPath = path.join(process.cwd(), "dist");
-      app.use(express.static(distPath));
-      app.get("*", (_req, res) => res.sendFile(path.join(distPath, "index.html")));
+      res.status(201).json({
+        success: true,
+        message: "Your loan application has been submitted successfully.",
+        loan:    { loan_id, reference_no, total_payable, amount_per_term, status: "PENDING" },
+      });
+    } catch (err: any) {
+      console.error("Loan apply error:", err);
+      res.status(500).json({ success: false, message: "Failed to submit loan application.", error: err.message });
     }
+  });
 
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`[server] Running on http://localhost:${PORT} (${process.env.NODE_ENV ?? "development"})`);
-    });
+  // ── Loans: List by Customer ───────────────────────────────────────────────
+  app.get("/api/loans/:customerId", async (req, res) => {
+    try {
+      const customerId = req.params.customerId;
+      const [rows] = await pool.query<RowDataPacket[]>(
+        `SELECT l.loan_id, l.reference_no, l.principal_amount, l.interest_rate,
+                l.payment_term, l.term_months, l.total_payable, l.amount_per_term,
+                l.remaining_balance, l.status, l.due_date, l.activated_at,
+                l.created_at, l.is_active, c.tenant_id
+         FROM loans l JOIN customers c ON c.customer_id = l.customer_id
+         WHERE l.customer_id = ? AND l.is_active = 1 ORDER BY l.created_at DESC`,
+        [customerId]
+      );
+
+      const NOTIF_MAP: Record<string, { title: string; message: (ref: string) => string; type: string }> = {
+        active: { title: "Loan Approved",           message: (ref) => `Your loan (${ref}) has been approved. View your payment schedule now.`, type: "approved" },
+        denied: { title: "Loan Application Denied", message: (ref) => `Your loan application (${ref}) was not approved. Please contact your cooperative.`, type: "denied" },
+        closed: { title: "Loan Fully Paid",          message: (ref) => `Congratulations! Your loan (${ref}) has been fully paid.`, type: "payment" },
+      };
+
+      for (const loan of rows) {
+        const newStatus  = String(loan.status ?? "").toLowerCase();
+        const tenantId   = loan.tenant_id ?? FALLBACK_TENANT_ID;
+        const [cached]   = await pool.query<RowDataPacket[]>(
+          `SELECT last_status FROM loan_status_cache WHERE loan_id = ? LIMIT 1`, [loan.loan_id]
+        );
+        const lastStatus = cached[0] ? String(cached[0].last_status).toLowerCase() : null;
+        if (!lastStatus) {
+          await pool.query(
+            `INSERT INTO loan_status_cache (loan_id, last_status) VALUES (?, ?) ON DUPLICATE KEY UPDATE last_status = VALUES(last_status)`,
+            [loan.loan_id, loan.status]
+          );
+          continue;
+        }
+        if (lastStatus !== newStatus) {
+          const notif = NOTIF_MAP[newStatus];
+          if (notif) await insertNotification(Number(customerId), tenantId, notif.title, notif.message(loan.reference_no), notif.type);
+
+          // ✅ Send email on status change
+          try {
+            const [custRows] = await pool.query<RowDataPacket[]>(
+              `SELECT first_name, email FROM customers WHERE customer_id = ? LIMIT 1`,
+              [customerId]
+            );
+            if (custRows.length > 0 && custRows[0].email) {
+              await sendLoanStatusEmail(
+                custRows[0].email,
+                custRows[0].first_name,
+                newStatus,
+                loan.reference_no,
+                Number(loan.principal_amount)
+              );
+            }
+          } catch (emailErr: any) {
+            console.warn('Status change email skipped:', emailErr.message);
+          }
+
+          await pool.query(
+            `INSERT INTO loan_status_cache (loan_id, last_status) VALUES (?, ?) ON DUPLICATE KEY UPDATE last_status = VALUES(last_status)`,
+            [loan.loan_id, loan.status]
+          );
+        }
+      }
+      res.json(rows.map(({ tenant_id: _tid, ...rest }) => rest));
+    } catch (err: any) {
+      console.error("Loans error:", err.message);
+      res.status(500).json({ success: false, message: "Unable to retrieve loan records." });
+    }
+  });
+
+  // ── Loans: Single Loan ────────────────────────────────────────────────────
+  app.get("/api/loan/:loanId", async (req, res) => {
+    try {
+      const [rows] = await pool.query<RowDataPacket[]>(
+        `SELECT loan_id, reference_no, principal_amount, interest_rate, payment_term,
+                term_months, total_payable, amount_per_term, remaining_balance,
+                status, due_date, denial_reason, notes, activated_at, created_at, is_active
+         FROM loans WHERE loan_id = ? LIMIT 1`,
+        [req.params.loanId]
+      );
+      if (rows.length === 0) return res.status(404).json({ success: false, message: "Loan not found." });
+      res.json(rows[0]);
+    } catch { res.status(500).json({ success: false, message: "Unable to retrieve loan details." }); }
+  });
+
+  // ── Loan Documents: Get by Loan ───────────────────────────────────────────
+  app.get("/api/loan/:loanId/documents", async (req, res) => {
+    try {
+      const [rows] = await pool.query<RowDataPacket[]>(
+        `SELECT document_id, loan_id, code, label, file_url, file_key, uploaded_at
+         FROM loan_documents WHERE loan_id = ? ORDER BY uploaded_at ASC`,
+        [req.params.loanId]
+      );
+      res.json(rows);
+    } catch (err: any) {
+      console.error("Loan documents error:", err.message);
+      res.status(500).json({ success: false, message: "Unable to retrieve loan documents." });
+    }
+  });
+
+  // ── Upload: Document to Railway S3 ────────────────────────────────────────
+  app.post('/api/upload/document', upload.single('file'), async (req: any, res: any) => {
+    try {
+      const file = req.file;
+      if (!file) return res.status(400).json({ success: false, message: 'No file provided.' });
+
+      const tenant_id   = req.body.tenant_id   ?? 'unknown';
+      const customer_id = req.body.customer_id ?? 'unknown';
+      const folder      = req.body.folder      ?? 'documents';
+      const code        = req.body.code        ?? 'DOCUMENT';
+      const label       = req.body.label       ?? file.originalname;
+
+      const key = `${tenant_id}/${customer_id}/${folder}/${Date.now()}-${file.originalname}`;
+
+      const uploader = new Upload({
+        client: s3,
+        params: {
+          Bucket:      BUCKET,
+          Key:         key,
+          Body:        file.buffer,
+          ContentType: file.mimetype,
+        },
+      });
+
+      await uploader.done();
+
+      const fileUrl = `https://${BUCKET}.t3.storageapi.dev/${key}`;
+
+      const loanIdRaw = req.body.loan_id;
+      if (loanIdRaw && !isNaN(Number(loanIdRaw))) {
+        try {
+          const [metaRows]: any = await pool.query(
+            `SELECT c.customer_no, l.reference_no
+             FROM loans l
+             JOIN customers c ON c.customer_id = l.customer_id
+             WHERE l.loan_id = ? LIMIT 1`,
+            [Number(loanIdRaw)]
+          );
+          const customer_no  = metaRows[0]?.customer_no  ?? null;
+          const reference_no = metaRows[0]?.reference_no ?? null;
+
+          await pool.query(
+            `INSERT INTO loan_documents (loan_id, tenant_id, customer_id, customer_no, reference_no, code, label, file_url, file_key)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [Number(loanIdRaw), tenant_id, customer_id, customer_no, reference_no, code, label, fileUrl, key]
+          );
+        } catch (dbErr: any) {
+          console.warn('[upload] DB insert skipped:', dbErr.message);
+        }
+      }
+
+      return res.json({ success: true, url: fileUrl, key });
+    } catch (err) {
+      console.error('[upload/document]', err);
+      return res.status(500).json({ success: false, message: 'Upload failed. Please try again.' });
+    }
+  });
+
+  // ── S3: Presigned URL ─────────────────────────────────────────────────────
+  app.get('/api/documents/signed-url', async (req: any, res: any) => {
+    try {
+      const key = String(req.query.key ?? '').trim();
+      if (!key) return res.status(400).json({ success: false, message: 'File key is required.' });
+
+      const command   = new GetObjectCommand({ Bucket: BUCKET, Key: key });
+      const signedUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
+
+      return res.json({ success: true, url: signedUrl });
+    } catch (err) {
+      console.error('[signed-url]', err);
+      return res.status(500).json({ success: false, message: 'Failed to generate signed URL.' });
+    }
+  });
+
+  // ── Payments: List by Loan ────────────────────────────────────────────────
+  app.get("/api/payments/:loanId", async (req, res) => {
+    try {
+      const [rows] = await pool.query<RowDataPacket[]>(
+        `SELECT payment_id, loan_id, amount, payment_date, method, or_no, notes,
+                COALESCE(created_at, payment_date) AS created_at
+         FROM payments WHERE loan_id = ?
+         ORDER BY COALESCE(created_at, payment_date) DESC, payment_id DESC`,
+        [req.params.loanId]
+      );
+      res.json(rows);
+    } catch { res.status(500).json({ success: false, message: "Unable to retrieve payment records." }); }
+  });
+
+  // ── Payments: All by Customer ─────────────────────────────────────────────
+  app.get("/api/payments/customer/:customerId", async (req, res) => {
+    try {
+      const tenant_id = Number(req.query.tenant_id || 0);
+      if (!tenant_id) return res.status(400).json({ success: false, message: "Cooperative is required." });
+
+      const [rows] = await pool.query<RowDataPacket[]>(
+        `SELECT p.payment_id, p.loan_id, p.amount, p.method, p.or_no,
+                p.notes, l.reference_no,
+                COALESCE(p.created_at, p.payment_date) AS created_at
+         FROM payments p
+         JOIN loans l ON l.loan_id = p.loan_id
+         JOIN customers c ON c.customer_id = l.customer_id
+         WHERE l.customer_id = ? AND c.tenant_id = ?
+         ORDER BY COALESCE(p.created_at, p.payment_date) DESC, p.payment_id DESC
+         LIMIT 50`,
+        [req.params.customerId, tenant_id]
+      );
+      res.json(rows);
+    } catch (err: any) {
+      console.error("Customer payments error:", err.message);
+      res.status(500).json({ success: false, message: "Unable to retrieve payment records." });
+    }
+  });
+
+  // ── Notifications: List ───────────────────────────────────────────────────
+  app.get("/api/notifications/:customerId", async (req, res) => {
+    try {
+      const [rows] = await pool.query<RowDataPacket[]>(
+        `SELECT notification_id, title, message, type, is_read, created_at
+         FROM notifications WHERE customer_id = ? ORDER BY created_at DESC LIMIT 50`,
+        [req.params.customerId]
+      );
+      res.json(rows);
+    } catch { res.status(500).json({ success: false, message: "Unable to retrieve notifications." }); }
+  });
+
+  // ── Notifications: Mark All Read ──────────────────────────────────────────
+  app.patch("/api/notifications/:customerId/read-all", async (req, res) => {
+    try {
+      await pool.query(
+        `UPDATE notifications SET is_read = 1 WHERE customer_id = ? AND is_read = 0`,
+        [req.params.customerId]
+      );
+      res.json({ success: true });
+    } catch { res.status(500).json({ success: false, message: "Unable to update notifications." }); }
+  });
+
+  // ── Transactions ──────────────────────────────────────────────────────────
+  app.get("/api/transactions/:customerId", async (req, res) => {
+    try {
+      const [rows] = await pool.query<RowDataPacket[]>(
+        `SELECT id, loan_id, type, amount, date, status FROM transactions WHERE customer_id = ? ORDER BY date DESC`,
+        [req.params.customerId]
+      );
+      res.json(rows);
+    } catch { res.status(500).json({ success: false, message: "Unable to retrieve transactions." }); }
+  });
+
+  // ── PayMongo: Create Checkout Session ─────────────────────────────────────
+  app.post("/api/paymongo/checkout", async (req, res) => {
+    try {
+      const { amount, description, reference_no, success_url, cancel_url, billing_name, billing_email, billing_phone } = req.body;
+      if (!amount || !success_url || !cancel_url)
+        return res.status(400).json({ success: false, message: "amount, success_url and cancel_url are required." });
+
+      const desc = description || "Loan Payment";
+      const response = await fetch("https://api.paymongo.com/v1/checkout_sessions", {
+        method: "POST",
+        headers: PAYMONGO_HEADERS,
+        body: JSON.stringify({
+          data: {
+            attributes: {
+              send_email_receipt:   false,
+              show_description:     true,
+              show_line_items:      true,
+              line_items: [{
+                currency:    "PHP",
+                amount:      Math.round(Number(amount) * 100),
+                name:        desc,
+                description: desc,
+                quantity:    1,
+              }],
+              payment_method_types: [
+                "card", "gcash", "paymaya", "qrph",
+                "grab_pay", "dob", "dob_ubp",
+                "brankas_bdo", "brankas_landbank", "brankas_metrobank",
+              ],
+              description:      desc,
+              reference_number: reference_no || "",
+              success_url,
+              cancel_url,
+              ...(billing_name || billing_email || billing_phone
+                ? { billing: { name: billing_name || "", email: billing_email || "", phone: billing_phone || "" } }
+                : {}),
+            },
+          },
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok)
+        return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to create checkout session." });
+
+      res.json({ success: true, checkout_url: data.data.attributes.checkout_url, session_id: data.data.id });
+    } catch (err: any) {
+      console.error("PayMongo checkout error:", err.message);
+      res.status(500).json({ success: false, message: "Payment service unavailable. Please try again." });
+    }
+  });
+
+  // ── PayMongo: Get Checkout Session Status ─────────────────────────────────
+  app.get("/api/paymongo/checkout-status/:sessionId", async (req, res) => {
+    try {
+      const response = await fetch(
+        `https://api.paymongo.com/v1/checkout_sessions/${req.params.sessionId}`,
+        { headers: PAYMONGO_HEADERS }
+      );
+      const data = await response.json();
+      if (!response.ok)
+        return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to retrieve session." });
+
+      const attrs                = data.data.attributes;
+      const sessionPaymentStatus = attrs.payment_status ?? "unpaid";
+      const payment              = attrs.payments?.[0];
+      const rawMethod            = payment?.attributes?.payment_method_type
+        ?? payment?.attributes?.source?.type
+        ?? payment?.payment_method_type
+        ?? attrs.payment_method_type
+        ?? "other";
+      const normalizedMethod = normalizeMethod(rawMethod);
+
+      const lineItemsTotal = Array.isArray(attrs.line_items)
+        ? attrs.line_items.reduce((sum: number, item: any) => sum + (item.amount ?? 0), 0) / 100
+        : null;
+      const paymentAmount  = payment?.attributes?.amount
+        ? payment.attributes.amount / 100
+        : payment?.amount ? payment.amount / 100 : null;
+      const resolvedAmount = lineItemsTotal ?? paymentAmount;
+
+      res.json({
+        success:             true,
+        payment_status:      sessionPaymentStatus,
+        session_status:      attrs.status,
+        payment_method_type: rawMethod,
+        method:              normalizedMethod,
+        payment_id:          payment?.id ?? null,
+        amount:              resolvedAmount,
+      });
+    } catch (err: any) {
+      console.error("Checkout status error:", err.message);
+      res.status(500).json({ success: false, message: "Payment service unavailable." });
+    }
+  });
+
+  // ── PayMongo: Create Source (GCash QR in-app) ─────────────────────────────
+  app.post("/api/paymongo/source", async (req, res) => {
+    try {
+      const { amount, type, reference_no, billing_name, billing_email, billing_phone, redirect_success, redirect_failed } = req.body;
+      if (!amount || !type)
+        return res.status(400).json({ success: false, message: "amount and type are required." });
+
+      const response = await fetch("https://api.paymongo.com/v1/sources", {
+        method: "POST",
+        headers: PAYMONGO_HEADERS,
+        body: JSON.stringify({
+          data: {
+            attributes: {
+              amount:   Math.round(Number(amount) * 100),
+              currency: "PHP",
+              type,
+              redirect: {
+                success: redirect_success || "https://credencelend-mobile.up.railway.app/payment-success",
+                failed:  redirect_failed  || "https://credencelend-mobile.up.railway.app/payment-failed",
+              },
+              billing: {
+                name:  billing_name  || "",
+                email: billing_email || "",
+                phone: billing_phone || "",
+              },
+            },
+          },
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok)
+        return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to create source." });
+
+      res.json({ success: true, source: data.data });
+    } catch (err: any) {
+      console.error("PayMongo source error:", err.message);
+      res.status(500).json({ success: false, message: "Payment service unavailable." });
+    }
+  });
+
+  // ── PayMongo: Get Source Status ───────────────────────────────────────────
+  app.get("/api/paymongo/source/:sourceId", async (req, res) => {
+    try {
+      const response = await fetch(
+        `https://api.paymongo.com/v1/sources/${req.params.sourceId}`,
+        { headers: PAYMONGO_HEADERS }
+      );
+      const data = await response.json();
+      if (!response.ok)
+        return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to retrieve source." });
+      res.json({ success: true, source: data.data });
+    } catch (err: any) {
+      console.error("PayMongo source status error:", err.message);
+      res.status(500).json({ success: false, message: "Payment service unavailable." });
+    }
+  });
+
+  // ── PayMongo: Create Payment Intent (Card) ────────────────────────────────
+  app.post("/api/paymongo/intent", async (req, res) => {
+    try {
+      const { amount, description } = req.body;
+      if (!amount)
+        return res.status(400).json({ success: false, message: "amount is required." });
+
+      const response = await fetch("https://api.paymongo.com/v1/payment_intents", {
+        method: "POST",
+        headers: PAYMONGO_HEADERS,
+        body: JSON.stringify({
+          data: {
+            attributes: {
+              amount:                 Math.round(Number(amount) * 100),
+              currency:               "PHP",
+              payment_method_allowed: ["card"],
+              description:            description || "Loan Payment",
+              capture_type:           "automatic",
+            },
+          },
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok)
+        return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to create payment intent." });
+
+      res.json({ success: true, intent: data.data });
+    } catch (err: any) {
+      console.error("PayMongo intent error:", err.message);
+      res.status(500).json({ success: false, message: "Payment service unavailable." });
+    }
+  });
+
+  // ── PayMongo: Create Payment Method (Card) ────────────────────────────────
+  app.post("/api/paymongo/payment-method", async (req, res) => {
+    try {
+      const { card_number, exp_month, exp_year, cvc, name } = req.body;
+      if (!card_number || !exp_month || !exp_year || !cvc)
+        return res.status(400).json({ success: false, message: "Card details are required." });
+
+      const response = await fetch("https://api.paymongo.com/v1/payment_methods", {
+        method: "POST",
+        headers: PAYMONGO_HEADERS,
+        body: JSON.stringify({
+          data: {
+            attributes: {
+              type: "card",
+              details: {
+                card_number: String(card_number).replace(/\s/g, ""),
+                exp_month:   Number(exp_month),
+                exp_year:    Number(exp_year),
+                cvc:         String(cvc),
+              },
+              billing: { name: name || "" },
+            },
+          },
+        }),
+      });
+
+      const data = await response.json();
+      if (!response.ok)
+        return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to create payment method." });
+
+      res.json({ success: true, payment_method: data.data });
+    } catch (err: any) {
+      console.error("PayMongo payment method error:", err.message);
+      res.status(500).json({ success: false, message: "Payment service unavailable." });
+    }
+  });
+
+  // ── PayMongo: Attach Payment Method to Intent ─────────────────────────────
+  app.post("/api/paymongo/attach", async (req, res) => {
+    try {
+      const { intent_id, payment_method_id, client_key, return_url } = req.body;
+      if (!intent_id || !payment_method_id)
+        return res.status(400).json({ success: false, message: "intent_id and payment_method_id are required." });
+
+      const response = await fetch(
+        `https://api.paymongo.com/v1/payment_intents/${intent_id}/attach`,
+        {
+          method: "POST",
+          headers: PAYMONGO_HEADERS,
+          body: JSON.stringify({
+            data: {
+              attributes: {
+                payment_method: payment_method_id,
+                client_key:     client_key || "",
+                return_url:     return_url || "https://credencelend-mobile.up.railway.app/payment-success",
+              },
+            },
+          }),
+        }
+      );
+
+      const data = await response.json();
+      if (!response.ok)
+        return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to attach payment method." });
+
+      res.json({ success: true, intent: data.data });
+    } catch (err: any) {
+      console.error("PayMongo attach error:", err.message);
+      res.status(500).json({ success: false, message: "Payment service unavailable." });
+    }
+  });
+
+  // ── PayMongo: Record Payment ──────────────────────────────────────────────
+  app.post("/api/paymongo/record-payment", async (req, res) => {
+    try {
+      const {
+        loan_id, amount, method,
+        paymongo_source_id, paymongo_intent_id,
+        paymongo_session_id, paymongo_method_type,
+        paymongo_payment_id,
+      } = req.body;
+
+      if (!loan_id || !amount || !method)
+        return res.status(400).json({ success: false, message: "Missing required fields." });
+
+      const rawType          = paymongo_method_type ?? method;
+      const normalizedMethod = normalizeMethod(String(rawType));
+
+      const pmId  = paymongo_session_id ?? paymongo_source_id ?? paymongo_intent_id;
+      const or_no = pmId ? `OR-PM-${String(pmId).slice(-8).toUpperCase()}` : `OR-${Date.now()}`;
+
+      for (const pmRef of [paymongo_session_id, paymongo_source_id, paymongo_intent_id, paymongo_payment_id].filter(Boolean)) {
+        const [existing] = await pool.query<RowDataPacket[]>(
+          `SELECT payment_id FROM payments WHERE notes LIKE ? LIMIT 1`, [`%${pmRef}%`]
+        );
+        if (existing.length > 0)
+          return res.json({ success: true, payment_id: existing[0].payment_id, message: "Payment already recorded." });
+      }
+
+      const [loanRows] = await pool.query<RowDataPacket[]>(
+        `SELECT l.loan_id, l.customer_id, l.remaining_balance, l.amount_per_term,
+                COALESCE(l.tenant_id, c.tenant_id, ?) AS tenant_id
+         FROM loans l JOIN customers c ON c.customer_id = l.customer_id
+         WHERE l.loan_id = ? LIMIT 1`,
+        [FALLBACK_TENANT_ID, loan_id]
+      );
+      if (loanRows.length === 0)
+        return res.status(404).json({ success: false, message: "Loan not found." });
+
+      const loan        = loanRows[0];
+      const payAmount   = Number(amount);
+      const newBalance  = Math.max(0, Number(loan.remaining_balance) - payAmount);
+      const isFullyPaid = newBalance <= 0;
+
+      const isGcashMethod      = normalizedMethod === "GCASH";
+      const pmRef              = paymongo_payment_id ?? paymongo_session_id ?? paymongo_source_id ?? paymongo_intent_id ?? null;
+      const gcash_reference_no = isGcashMethod ? pmRef : null;
+      const bank_reference_no  = isGcashMethod ? null  : pmRef;
+      const notes              = `Online Payment via PayMongo (${normalizedMethod})`;
+
+      const [payResult] = await pool.query<ResultSetHeader>(
+        `INSERT INTO payments (loan_id, amount, payment_date, method, status, notes, tenant_id, or_no, gcash_reference_no, bank_reference_no)
+         VALUES (?, ?, CURDATE(), ?, 'Paid', ?, ?, ?, ?, ?)`,
+        [loan_id, payAmount, normalizedMethod, notes, loan.tenant_id, or_no, gcash_reference_no, bank_reference_no]
+      );
+
+      await pool.query(
+        `UPDATE loans
+         SET remaining_balance = ?,
+             status    = IF(? <= 0, 'CLOSED', status),
+             closed_at = IF(? <= 0, NOW(), closed_at)
+         WHERE loan_id = ?`,
+        [newBalance, newBalance, newBalance, loan_id]
+      );
+
+      await insertNotification(
+        loan.customer_id, Number(loan.tenant_id) || FALLBACK_TENANT_ID,
+        isFullyPaid ? "Loan Fully Paid" : "Payment Received",
+        isFullyPaid
+          ? "Congratulations! Your loan has been fully paid. Thank you!"
+          : `Your payment of ₱${payAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })} has been received and is being processed.`,
+        "payment"
+      );
+
+      try {
+        const [customerRows] = await pool.query<RowDataPacket[]>(
+          `SELECT first_name, email FROM customers WHERE customer_id = ? LIMIT 1`,
+          [loan.customer_id]
+        );
+        if (customerRows.length > 0 && customerRows[0].email) {
+          await sendPaymentEmail(
+            customerRows[0].email,
+            customerRows[0].first_name,
+            payAmount,
+            newBalance,
+            or_no,
+            normalizedMethod,
+            isFullyPaid
+          );
+        }
+      } catch (emailErr: any) {
+        console.warn("Payment email skipped:", emailErr.message);
+      }
+
+      res.json({
+        success:         true,
+        payment_id:      payResult.insertId,
+        pm_payment_id:   paymongo_payment_id ?? null,
+        new_balance:     newBalance,
+        fully_paid:      isFullyPaid,
+        method:          normalizedMethod,
+        or_no,
+        amount_per_term: Number(loan.amount_per_term) || null,
+        message:         isFullyPaid ? "Loan fully paid!" : "Payment recorded successfully.",
+      });
+    } catch (err: any) {
+      console.error("Record payment error:", err.message);
+      res.status(500).json({ success: false, message: "Failed to record payment. Please contact support." });
+    }
+  });
+
+  // ── Static / Vite ─────────────────────────────────────────────────────────
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), "dist");
+    app.use(express.static(distPath));
+    app.get("*", (_req, res) => res.sendFile(path.join(distPath, "index.html")));
   }
 
-  startServer().catch((err) => {
-    console.error("Fatal startup error:", err);
-    process.exit(1);
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`[server] Running on http://localhost:${PORT} (${process.env.NODE_ENV ?? "development"})`);
   });
+}
+
+startServer().catch((err) => {
+  console.error("Fatal startup error:", err);
+  process.exit(1);
+});
