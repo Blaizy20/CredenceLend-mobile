@@ -1362,6 +1362,13 @@ async function startServer() {
       const pmId  = paymongo_session_id ?? paymongo_source_id ?? paymongo_intent_id;
       const or_no = pmId ? `OR-PM-${String(pmId).slice(-8).toUpperCase()}` : `OR-${Date.now()}`;
 
+      // ── Strong idempotency: check or_no first, then all PayMongo refs ─────
+      const [existingByOrNo] = await pool.query<RowDataPacket[]>(
+        `SELECT payment_id FROM payments WHERE or_no = ? LIMIT 1`, [or_no]
+      );
+      if (existingByOrNo.length > 0)
+        return res.json({ success: true, payment_id: existingByOrNo[0].payment_id, message: "Payment already recorded." });
+
       for (const pmRef of [paymongo_session_id, paymongo_source_id, paymongo_intent_id, paymongo_payment_id].filter(Boolean)) {
         const [existing] = await pool.query<RowDataPacket[]>(
           `SELECT payment_id FROM payments WHERE notes LIKE ? LIMIT 1`, [`%${pmRef}%`]
