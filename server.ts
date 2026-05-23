@@ -49,7 +49,6 @@ type CustomerRow = RowDataPacket & {
   is_active:    number;
 };
 
-// ── Payment method normalization ──────────────────────────────────────────────
 const METHOD_MAP: Record<string, string> = {
   walkin:            "CASH",
   cash:              "CASH",
@@ -243,7 +242,6 @@ async function sendPaymentEmail(
   }
 }
 
-// ── NEW: Loan Status Email ─────────────────────────────────────────────────────
 async function sendLoanStatusEmail(
   toEmail:     string,
   firstName:   string,
@@ -781,7 +779,6 @@ async function startServer() {
         "general"
       );
 
-      // ✅ Send email on loan application
       try {
         const [custRows] = await pool.query<RowDataPacket[]>(
           `SELECT first_name, email FROM customers WHERE customer_id = ? LIMIT 1`,
@@ -878,7 +875,6 @@ async function startServer() {
           const notif = NOTIF_MAP[newStatus];
           if (notif) await insertNotification(Number(customerId), tenantId, notif.title, notif.message(loan.reference_no), notif.type);
 
-          // ✅ Send email on status change
           try {
             const [custRows] = await pool.query<RowDataPacket[]>(
               `SELECT first_name, email FROM customers WHERE customer_id = ? LIMIT 1`,
@@ -1419,24 +1415,28 @@ async function startServer() {
         "payment"
       );
 
-      try {
-        const [customerRows] = await pool.query<RowDataPacket[]>(
-          `SELECT first_name, email FROM customers WHERE customer_id = ? LIMIT 1`,
-          [loan.customer_id]
-        );
-        if (customerRows.length > 0 && customerRows[0].email) {
-          await sendPaymentEmail(
-            customerRows[0].email,
-            customerRows[0].first_name,
-            payAmount,
-            newBalance,
-            or_no,
-            normalizedMethod,
-            isFullyPaid
+      // ── Only send payment email for partial payments ──────────────────────
+      // Fully paid email is handled by sendLoanStatusEmail on status change
+      if (!isFullyPaid) {
+        try {
+          const [customerRows] = await pool.query<RowDataPacket[]>(
+            `SELECT first_name, email FROM customers WHERE customer_id = ? LIMIT 1`,
+            [loan.customer_id]
           );
+          if (customerRows.length > 0 && customerRows[0].email) {
+            await sendPaymentEmail(
+              customerRows[0].email,
+              customerRows[0].first_name,
+              payAmount,
+              newBalance,
+              or_no,
+              normalizedMethod,
+              false
+            );
+          }
+        } catch (emailErr: any) {
+          console.warn("Payment email skipped:", emailErr.message);
         }
-      } catch (emailErr: any) {
-        console.warn("Payment email skipped:", emailErr.message);
       }
 
       res.json({
