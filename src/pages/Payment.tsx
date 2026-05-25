@@ -190,6 +190,9 @@ export default function Payment() {
       const origin  = 'https://credencelend-mobile.up.railway.app';
       const billing = getCustomerBilling();
 
+      // Step 1: create the checkout session
+      // success_url uses a placeholder — we replace it with the real
+      // session_id after the response, since we don't have it yet
       const res = await fetch(`${API_BASE}/api/paymongo/checkout`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -197,7 +200,7 @@ export default function Payment() {
           amount,
           description:   `Loan payment – ${loan.reference_no}`,
           reference_no:  loan.reference_no,
-          success_url:   `${origin}/loan/${id}/pay/success?amount=${amount}`,
+          success_url:   `${origin}/loan/${id}/pay/success?amount=${amount}&session_id=PENDING`,
           cancel_url:    `${origin}/loan/${id}/pay?amount=${amount}&type=${paymentType}`,
           billing_name:  billing.name,
           billing_email: billing.email,
@@ -213,9 +216,12 @@ export default function Payment() {
         return;
       }
 
+      // ✅ FIX: store real session_id from response
+      const realSessionId = data.session_id ?? '';
+
       try {
         localStorage.setItem(SS_PENDING_KEY, JSON.stringify({
-          session_id:   data.session_id   ?? '',
+          session_id:   realSessionId,
           loan_id:      id,
           amount,
           payment_type: paymentType,
@@ -232,8 +238,10 @@ export default function Payment() {
             const raw = localStorage.getItem(SS_PENDING_KEY);
             if (raw) {
               const pending = JSON.parse(raw);
-              if (pending.loan_id === id) {
-                window.location.href = `/loan/${id}/pay/success?amount=${amount}`;
+              if (pending.loan_id === id && pending.session_id) {
+                // ✅ FIX: always include session_id in the redirect URL
+                // so PaymentSuccess can verify + record even from external browser
+                window.location.href = `/loan/${id}/pay/success?amount=${amount}&session_id=${pending.session_id}`;
                 return;
               }
             }
@@ -242,6 +250,8 @@ export default function Payment() {
         });
         await Browser.open({ url: data.checkout_url, presentationStyle: 'fullscreen' });
       } else {
+        // Web browser: PayMongo redirects back to success_url (with PENDING placeholder)
+        // PaymentSuccess will still read session_id from localStorage as fallback
         window.location.href = data.checkout_url;
       }
     } catch (err: any) {
@@ -281,7 +291,7 @@ export default function Payment() {
     );
   }
 
-  // ── overlay screens (unchanged) ───────────────────────────────────────
+  // ── overlay screens ───────────────────────────────────────────────────
   if (payStatus === 'redirecting') {
     return (
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
@@ -406,7 +416,6 @@ export default function Payment() {
   }
 
   // ── derived values ────────────────────────────────────────────────────
-  // ✅ Term-aware — replaces the old hardcoded monthly calculation
   const term         = normalizePaymentTerm(loan.payment_term ?? '');
   const termMonths   = Number(loan.term_months) || 1;
   const total        = Number(loan.total_payable)     || 0;
@@ -451,14 +460,13 @@ export default function Payment() {
             </div>
           </div>
 
-          {/* ✅ Breakdown rows — term-aware label + amount */}
           <div className="px-5 py-4 space-y-2.5">
             {[
-              { label: 'Principal Amount',                       value: `₱${fmt(Number(loan.principal_amount))}` },
-              { label: 'Total Payable',                          value: `₱${fmt(total)}` },
-              { label: `${TERM_LABEL[term]} Installment`,        value: `₱${fmt(amtPerTerm)}` }, // ✅ fixed
-              { label: 'Paid So Far',                            value: `₱${fmt(paidSoFar)}` },
-              { label: 'Current Balance',                        value: `₱${fmt(remaining)}`, bold: true },
+              { label: 'Principal Amount',                value: `₱${fmt(Number(loan.principal_amount))}` },
+              { label: 'Total Payable',                   value: `₱${fmt(total)}` },
+              { label: `${TERM_LABEL[term]} Installment`, value: `₱${fmt(amtPerTerm)}` },
+              { label: 'Paid So Far',                     value: `₱${fmt(paidSoFar)}` },
+              { label: 'Current Balance',                 value: `₱${fmt(remaining)}`, bold: true },
             ].map(({ label, value, bold }) => (
               <div key={label} className="flex justify-between items-center">
                 <p className={cn('text-xs', bold ? 'font-semibold text-on-surface' : 'text-on-surface-variant')}>{label}</p>
@@ -679,7 +687,7 @@ export default function Payment() {
                 {[
                   { label: 'Amount',        value: `₱${fmt(dueAmount)}`,                                                              accent: true  },
                   { label: 'Method',        value: payMode === 'online' ? 'PayMongo Checkout' : MANUAL_INSTRUCTIONS[manualType].label               },
-                  { label: 'Frequency',     value: TERM_LABEL[term]                                                                                  }, // ✅ added
+                  { label: 'Frequency',     value: TERM_LABEL[term]                                                                                  },
                   { label: 'Reference',     value: loan.reference_no                                                                                 },
                   { label: 'After Payment', value: isFullPay ? '₱0.00 (Fully Paid 🎉)' : `₱${fmt(newBalance)} remaining`                            },
                 ].map(({ label, value, accent }) => (
