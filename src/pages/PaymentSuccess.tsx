@@ -59,12 +59,34 @@ export default function PaymentSuccess() {
     if (hasRun.current) return;
     hasRun.current = true;
 
-    // ✅ Detect external browser — no logged-in user means PayMongo redirected
-    // here from an external browser tab opened by Capacitor
     let user: any = null;
     try { user = JSON.parse(localStorage.getItem('user') || 'null'); } catch {}
 
+    // ✅ FIX: read session_id from URL — Payment.tsx now always puts it here
+    const urlSessionId = searchParams.get('session_id') ?? '';
+
+    // Seed localStorage with the URL session_id so handleSuccess() can find it
+    // This covers the external browser tab case where localStorage was empty
+    if (urlSessionId && urlSessionId !== 'PENDING') {
+      try {
+        const existing = JSON.parse(localStorage.getItem(SS_PENDING_KEY) || '{}');
+        if (!existing.session_id) {
+          localStorage.setItem(SS_PENDING_KEY, JSON.stringify({
+            ...existing,
+            session_id: urlSessionId,
+          }));
+        }
+      } catch {}
+    }
+
     if (!user?.customer_id) {
+      // External browser tab — Capacitor opened PayMongo in the system browser
+      if (urlSessionId && urlSessionId !== 'PENDING') {
+        // ✅ FIX: we have a real session_id from the URL, proceed to verify + record
+        handleSuccess();
+        return;
+      }
+      // Truly no session data — show the close-tab screen
       setStatus('external');
       return;
     }
@@ -74,7 +96,10 @@ export default function PaymentSuccess() {
 
   async function handleSuccess() {
     try {
-      let sessionId = '';
+      // ✅ FIX: read session_id from URL first, then fall back to localStorage
+      let sessionId = searchParams.get('session_id') ?? '';
+      if (sessionId === 'PENDING') sessionId = ''; // ignore placeholder
+
       let sourceId  = searchParams.get('id')                ?? '';
       let intentId  = searchParams.get('payment_intent_id') ?? '';
       let amount    = Number(searchParams.get('amount') ?? 0);
@@ -83,8 +108,9 @@ export default function PaymentSuccess() {
         const storedRaw = localStorage.getItem(SS_PENDING_KEY);
         if (storedRaw) {
           const stored = JSON.parse(storedRaw);
-          if (stored.session_id)        sessionId = stored.session_id;
-          if (!amount && stored.amount) amount    = Number(stored.amount);
+          // ✅ FIX: only fall back to stored session_id if URL didn't have one
+          if (!sessionId && stored.session_id) sessionId = stored.session_id;
+          if (!amount && stored.amount)         amount    = Number(stored.amount);
         }
       } catch {}
 
@@ -258,7 +284,6 @@ export default function PaymentSuccess() {
               and return to <span className="text-primary font-semibold">CredenceLend</span> to view your updated loan balance.
             </p>
           </div>
-          {/* Close tab button — works on most mobile browsers */}
           <button
             onClick={() => window.close()}
             className="w-full flex items-center justify-center gap-2 py-3 rounded-full bg-surface-container-highest text-on-surface-variant text-xs font-bold active:scale-95 transition-transform"
