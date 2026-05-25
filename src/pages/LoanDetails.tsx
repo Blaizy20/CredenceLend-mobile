@@ -14,6 +14,7 @@ const statusStyle: Record<string, string> = {
   paid:    'bg-primary/10 text-primary border-primary/20',
   denied:  'bg-red-500/10 text-red-500 border-red-500/20',
   closed:  'bg-outline/10 text-outline border-outline/20',
+  overdue: 'bg-orange-500/10 text-orange-500 border-orange-500/20',
 };
 
 const getStatusStyle = (status: string) =>
@@ -33,12 +34,12 @@ export default function LoanDetails() {
   const navigate = useNavigate();
   const { id }   = useParams();
 
-  const [loan, setLoan]                         = useState<any>(null);
-  const [payments, setPayments]                 = useState<any[]>([]);
-  const [loading, setLoading]                   = useState(true);
-  const [error, setError]                       = useState('');
-  const [showAllSchedule, setShowAllSchedule]   = useState(false);
-  const [showAllPayments, setShowAllPayments]   = useState(false); // ← NEW
+  const [loan, setLoan]                       = useState<any>(null);
+  const [payments, setPayments]               = useState<any[]>([]);
+  const [loading, setLoading]                 = useState(true);
+  const [error, setError]                     = useState('');
+  const [showAllSchedule, setShowAllSchedule] = useState(false);
+  const [showAllPayments, setShowAllPayments] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -101,6 +102,7 @@ export default function LoanDetails() {
   const paidAmount   = totalPayable - remainingBal;
   const progress     = totalPayable > 0 ? (paidAmount / totalPayable) * 100 : 0;
   const isFullyPaid  = loan.status?.toLowerCase() === 'closed' || remainingBal <= 0;
+  const isOverdue    = loan.status?.toLowerCase() === 'overdue';
   const paymentTerm  = loan.payment_term ?? '';
 
   const totalTermCount = getTermCount(paymentTerm, termMonths);
@@ -111,6 +113,30 @@ export default function LoanDetails() {
     if (totalTermCount > 0 && totalPayable > 0)
       return Number((totalPayable / totalTermCount).toFixed(2));
     return totalPayable;
+  })();
+
+  // ✅ Late fee — calculated client-side using the same formula as the web app
+  const lateFee = (() => {
+    if (!isOverdue || !loan.due_date) return 0;
+
+    const DAILY_RATES: Record<string, number> = {
+      daily:        0.005,
+      weekly:       0.0075 / 7,
+      semi_monthly: 0.01   / 15,
+      monthly:      0.0125 / 30,
+    };
+
+    const term      = (loan.payment_term ?? '').toLowerCase().replace(/-/g, '_');
+    const dailyRate = DAILY_RATES[term] ?? DAILY_RATES['monthly'];
+
+    const dueDate  = new Date(loan.due_date);
+    const today    = new Date();
+    const msPerDay = 1000 * 60 * 60 * 24;
+    const daysLate = Math.max(0, Math.floor((today.getTime() - dueDate.getTime()) / msPerDay));
+
+    if (daysLate === 0) return 0;
+
+    return Number((remainingBal * dailyRate * daysLate).toFixed(2));
   })();
 
   // ── Schedule generator ────────────────────────────────────────────────────
@@ -193,6 +219,27 @@ export default function LoanDetails() {
           </motion.div>
         )}
 
+        {/* Overdue Warning Banner */}
+        {isOverdue && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-orange-500/10 border border-orange-500/20 p-4 rounded-2xl flex items-start gap-3"
+          >
+            <div className="bg-orange-500 rounded-full p-1 shrink-0 mt-0.5">
+              <AlertCircle size={16} className="text-white" />
+            </div>
+            <div>
+              <p className="text-orange-500 font-headline font-bold text-sm tracking-tight">
+                This loan is overdue
+              </p>
+              <p className="text-orange-400 text-xs mt-1 leading-relaxed">
+                A late fee has been added to your remaining balance. Please settle your payment as soon as possible to avoid further charges.
+              </p>
+            </div>
+          </motion.div>
+        )}
+
         {/* Denial Reason */}
         {loan.status?.toLowerCase() === 'denied' && loan.denial_reason && (
           <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-2xl flex items-start gap-3">
@@ -204,8 +251,8 @@ export default function LoanDetails() {
           </div>
         )}
 
-        {/* Pay Button */}
-        {loan.status?.toLowerCase() === 'active' && !isFullyPaid && (
+        {/* Pay Button — ACTIVE and OVERDUE */}
+        {(loan.status?.toLowerCase() === 'active' || isOverdue) && !isFullyPaid && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -213,9 +260,14 @@ export default function LoanDetails() {
           >
             <button
               onClick={() => navigate(`/loan/${id}/pay`)}
-              className="w-full py-4 rounded-2xl bg-primary text-on-primary font-headline font-extrabold text-base flex items-center justify-center gap-2 shadow-lg shadow-primary/20 active:scale-95 transition-transform"
+              className={cn(
+                "w-full py-4 rounded-2xl font-headline font-extrabold text-base flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-transform",
+                isOverdue
+                  ? "bg-orange-500 text-white shadow-orange-500/20"
+                  : "bg-primary text-on-primary shadow-primary/20"
+              )}
             >
-              Make a Payment
+              {isOverdue ? 'Pay Now (Overdue)' : 'Make a Payment'}
               <ChevronRight size={20} />
             </button>
           </motion.div>
@@ -243,6 +295,12 @@ export default function LoanDetails() {
             <h2 className="font-headline font-extrabold text-4xl mt-2 tracking-tight">
               ₱ {fmt(remainingBal)}
             </h2>
+            {/* Late fee sub-label — only when overdue and lateFee > 0 */}
+            {isOverdue && lateFee > 0 && (
+              <p className="text-orange-400 text-xs mt-1 font-semibold">
+                Includes ₱{fmt(lateFee)} late fee
+              </p>
+            )}
           </div>
           <div className="relative z-10 flex items-end justify-between">
             <div>
@@ -263,7 +321,7 @@ export default function LoanDetails() {
           </div>
         </motion.section>
 
-        {/* Reference & Term Info */}
+        {/* Loan Information */}
         <section className="bg-surface-container-low p-5 rounded-2xl space-y-3">
           <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-2">
             Loan Information
@@ -273,14 +331,24 @@ export default function LoanDetails() {
             { label: 'Payment Term',   value: paymentTerm          || '—' },
             { label: 'Collateral',     value: loan.collateral_type ?? '—' },
             { label: 'ID Type',        value: loan.id_type         ?? '—' },
-            { label: 'Applied On',     value: loan.created_at
+            // Late fee row — only when overdue and lateFee > 0
+            ...(isOverdue && lateFee > 0
+              ? [{ label: 'Late Fee Added', value: `+ ₱${fmt(lateFee)}` }]
+              : []
+            ),
+            { label: 'Applied On', value: loan.created_at
                 ? new Date(loan.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
                 : '—'
             },
           ].map(({ label, value }) => (
             <div key={label} className="flex justify-between text-sm">
               <span className="text-on-surface-variant">{label}</span>
-              <span className="font-semibold text-on-surface text-right max-w-[60%] truncate">{value}</span>
+              <span className={cn(
+                "font-semibold text-right max-w-[60%] truncate",
+                label === 'Late Fee Added' ? "text-orange-500" : "text-on-surface"
+              )}>
+                {value}
+              </span>
             </div>
           ))}
         </section>
@@ -327,7 +395,7 @@ export default function LoanDetails() {
           </div>
         </section>
 
-        {/* ── Payment History ── */}
+        {/* Payment History */}
         {payments.length > 0 && (
           <section className="space-y-3">
             <div className="flex items-center justify-between px-1">
@@ -380,8 +448,8 @@ export default function LoanDetails() {
           </section>
         )}
 
-        {/* Loan Schedule */}
-        {loan.status?.toLowerCase() === 'active' && schedule.length > 0 && (
+        {/* Loan Schedule — ACTIVE and OVERDUE */}
+        {(loan.status?.toLowerCase() === 'active' || isOverdue) && schedule.length > 0 && (
           <section className="space-y-4">
             <div className="flex items-center justify-between px-2">
               <h3 className="font-headline font-bold text-lg tracking-tight">Loan Schedule</h3>
@@ -412,9 +480,11 @@ export default function LoanDetails() {
                         'transition-colors',
                         item.status === 'PAID'
                           ? 'bg-green-500/5 opacity-60'
-                          : item.isUpcoming
-                            ? 'bg-primary/5'
-                            : 'hover:bg-white/5'
+                          : item.isUpcoming && isOverdue
+                            ? 'bg-orange-500/5'
+                            : item.isUpcoming
+                              ? 'bg-primary/5'
+                              : 'hover:bg-white/5'
                       )}
                     >
                       <td className="px-5 py-4">
@@ -427,8 +497,11 @@ export default function LoanDetails() {
                           {item.date}
                         </p>
                         {item.isUpcoming && (
-                          <p className="text-[9px] text-primary font-bold uppercase tracking-widest mt-1">
-                            Upcoming
+                          <p className={cn(
+                            "text-[9px] font-bold uppercase tracking-widest mt-1",
+                            isOverdue ? "text-orange-500" : "text-primary"
+                          )}>
+                            {isOverdue ? 'Overdue' : 'Upcoming'}
                           </p>
                         )}
                       </td>
@@ -437,9 +510,11 @@ export default function LoanDetails() {
                           'text-sm font-headline font-bold tabular-nums',
                           item.status === 'PAID'
                             ? 'line-through text-on-surface-variant'
-                            : item.isUpcoming
-                              ? 'text-primary'
-                              : 'text-on-surface'
+                            : item.isUpcoming && isOverdue
+                              ? 'text-orange-500'
+                              : item.isUpcoming
+                                ? 'text-primary'
+                                : 'text-on-surface'
                         )}>
                           {item.amount}
                         </p>
@@ -449,14 +524,16 @@ export default function LoanDetails() {
                           'inline-flex items-center gap-1.5 text-[10px] font-bold px-2.5 py-1 rounded-full border tracking-widest uppercase',
                           item.status === 'PAID'
                             ? 'text-green-600 bg-green-500/10 border-green-500/20'
-                            : item.isUpcoming
-                              ? 'text-primary bg-primary/10 border-primary/20'
-                              : 'text-outline bg-transparent border-outline/20'
+                            : item.isUpcoming && isOverdue
+                              ? 'text-orange-500 bg-orange-500/10 border-orange-500/20'
+                              : item.isUpcoming
+                                ? 'text-primary bg-primary/10 border-primary/20'
+                                : 'text-outline bg-transparent border-outline/20'
                         )}>
                           {item.status === 'PAID' && (
                             <CheckCircle size={11} fill="currentColor" className="text-green-600" />
                           )}
-                          {item.status}
+                          {item.isUpcoming && isOverdue ? 'OVERDUE' : item.status}
                         </span>
                       </td>
                     </tr>
@@ -489,29 +566,24 @@ export default function LoanDetails() {
 
       <BottomNav />
 
-      {/* ── Payment History Bottom Sheet Modal ── */}
+      {/* Payment History Bottom Sheet Modal */}
       {showAllPayments && (
         <div className="fixed inset-0 z-50 flex flex-col justify-end">
-          {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             className="absolute inset-0 bg-black/50 backdrop-blur-sm"
             onClick={() => setShowAllPayments(false)}
           />
-          {/* Sheet */}
           <motion.div
             initial={{ y: '100%' }}
             animate={{ y: 0 }}
             transition={{ type: 'spring', damping: 25, stiffness: 300 }}
             className="relative bg-background rounded-t-3xl max-h-[80vh] flex flex-col shadow-2xl"
           >
-            {/* Handle */}
             <div className="flex justify-center pt-3 pb-1 shrink-0">
               <div className="w-10 h-1 rounded-full bg-outline-variant" />
             </div>
-
-            {/* Header */}
             <div className="flex items-center justify-between px-6 py-4 border-b border-outline-variant/20 shrink-0">
               <div>
                 <h3 className="text-base font-headline font-bold text-on-surface">Payment History</h3>
@@ -526,15 +598,11 @@ export default function LoanDetails() {
                 <X size={16} className="text-on-surface-variant" />
               </button>
             </div>
-
-            {/* Column headers */}
             <div className="grid grid-cols-3 px-6 py-3 bg-surface-container-low shrink-0">
               <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">Date</span>
               <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant text-center">Amount</span>
               <span className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant text-right">Method</span>
             </div>
-
-            {/* Scrollable list */}
             <div className="overflow-y-auto flex-1 px-4 py-3 space-y-2">
               {payments.map((p) => (
                 <div
@@ -560,8 +628,6 @@ export default function LoanDetails() {
                 </div>
               ))}
             </div>
-
-            {/* Safe area */}
             <div className="h-6 shrink-0" />
           </motion.div>
         </div>
