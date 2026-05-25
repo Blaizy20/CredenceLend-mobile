@@ -1,10 +1,11 @@
 import React from 'react';
-import { Wallet, ReceiptText, ChevronDown, AlertTriangle, X } from 'lucide-react';
+import { Wallet, ReceiptText, ChevronDown, AlertTriangle, X, TrendingUp, Clock } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
 import { BottomNav } from '../components/BottomNav';
 import { motion, AnimatePresence } from 'motion/react';
 import { loansAPI } from '../lib/api';
+import { cn } from '@/src/lib/utils';
 
 interface Loan {
   loan_id: number;
@@ -16,24 +17,29 @@ interface Loan {
   created_at: string;
 }
 
-const BLOCKED_STATUSES = ['active', 'pending', 'under_review'];
+const BLOCKED_STATUSES = ['active', 'pending', 'under_review', 'overdue'];
 
-const statusStyle: Record<string, string> = {
-  paid:         'bg-emerald-500/10 text-emerald-400',
-  active:       'bg-green-500/10 text-green-500',
-  pending:      'bg-blue-500/10 text-blue-500',
-  denied:       'bg-red-500/10 text-red-500',
-  closed:       'bg-outline/10 text-outline',
-  under_review: 'bg-yellow-500/10 text-yellow-500',
+const statusStyle: Record<string, { badge: string; dot: string }> = {
+  paid:         { badge: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20',  dot: 'bg-emerald-400' },
+  active:       { badge: 'bg-green-500/15 text-green-500 border border-green-500/20',        dot: 'bg-green-500' },
+  pending:      { badge: 'bg-blue-500/15 text-blue-400 border border-blue-500/20',           dot: 'bg-blue-400' },
+  denied:       { badge: 'bg-red-500/15 text-red-400 border border-red-500/20',              dot: 'bg-red-400' },
+  closed:       { badge: 'bg-outline/10 text-outline border border-outline/20',              dot: 'bg-outline' },
+  under_review: { badge: 'bg-yellow-500/15 text-yellow-400 border border-yellow-500/20',    dot: 'bg-yellow-400' },
+  overdue:      { badge: 'bg-orange-500/15 text-orange-400 border border-orange-500/20',    dot: 'bg-orange-400' }, // ✅ ADDED
 };
 
 const getStatusStyle = (status: string) =>
-  statusStyle[status?.toLowerCase()] ?? 'bg-outline/10 text-outline';
+  statusStyle[status?.toLowerCase()]?.badge ?? 'bg-outline/10 text-outline border border-outline/20';
+
+const getDotStyle = (status: string) =>
+  statusStyle[status?.toLowerCase()]?.dot ?? 'bg-outline';
 
 const STATUS_LABEL: Record<string, string> = {
   active:       'Active Loan',
   pending:      'Pending Application',
   under_review: 'Under Review',
+  overdue:      'Overdue Loan',
 };
 
 export default function Dashboard() {
@@ -74,7 +80,7 @@ export default function Dashboard() {
       setLoans(loanList);
 
       const total = loanList
-        .filter((l: Loan) => l.status?.toLowerCase() === 'active')
+        .filter((l: Loan) => ['active', 'overdue'].includes(l.status?.toLowerCase()))
         .reduce((sum: number, l: Loan) => sum + Number(l.remaining_balance ?? 0), 0);
       setTotalBalance(total);
     } catch {
@@ -96,86 +102,189 @@ export default function Dashboard() {
 
   if (!parsedUser) return null;
 
+  // ── Sort: overdue first, then active, then others, paid last
   const sortedLoans = [...loans].sort((a, b) => {
-    const aPaid = a.status?.toLowerCase() === 'paid';
-    const bPaid = b.status?.toLowerCase() === 'paid';
-    if (aPaid && !bPaid) return 1;
-    if (!aPaid && bPaid) return -1;
-    return 0;
+    const order: Record<string, number> = { overdue: 0, active: 1, under_review: 2, pending: 3, denied: 4, closed: 5, paid: 6 };
+    const aOrder = order[a.status?.toLowerCase()] ?? 4;
+    const bOrder = order[b.status?.toLowerCase()] ?? 4;
+    return aOrder - bOrder;
   });
 
+  const overdueLoans  = loans.filter(l => l.status?.toLowerCase() === 'overdue');
+  const activeLoans   = loans.filter(l => l.status?.toLowerCase() === 'active');
+  const hasOverdue    = overdueLoans.length > 0;
+
   const PREVIEW_COUNT = 3;
-  const hiddenCount = sortedLoans.length - PREVIEW_COUNT;
-  const hasMore = !showAllLoans && hiddenCount > 0;
+  const hiddenCount   = sortedLoans.length - PREVIEW_COUNT;
+  const hasMore       = !showAllLoans && hiddenCount > 0;
   const displayedLoans = showAllLoans ? sortedLoans : sortedLoans.slice(0, PREVIEW_COUNT);
+
+  const fmt = (n: number) =>
+    n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
     <div className="min-h-screen bg-background pb-32">
       <TopBar title="Loan Manager" showBack={false} />
-      <main className="mt-20 px-6 max-w-md mx-auto w-full">
 
-        {/* Welcome */}
+      <main className="mt-20 px-6 max-w-md mx-auto w-full space-y-6">
+
+        {/* ── Welcome ── */}
         <motion.section
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
-          className="mb-4"
         >
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             <p className="text-primary font-headline text-sm font-bold tracking-widest uppercase">
-              WELCOME, {parsedUser?.first_name?.toUpperCase()} {parsedUser?.last_name?.toUpperCase()}.
+              Welcome back,
             </p>
-            <p className="text-on-surface-variant text-sm font-headline">
-              Customer No: <span className="text-primary">{parsedUser?.customer_no || 'N/A'}</span>
+            <p className="text-on-surface font-headline text-xl font-extrabold tracking-tight">
+              {parsedUser?.first_name} {parsedUser?.last_name}
+            </p>
+            <p className="text-on-surface-variant text-xs font-headline pt-0.5">
+              Customer No:{' '}
+              <span className="text-primary font-bold">{parsedUser?.customer_no || 'N/A'}</span>
             </p>
           </div>
         </motion.section>
 
-        {/* Outstanding Balance */}
+        {/* ── Overdue Alert Banner ── */}
+        <AnimatePresence>
+          {hasOverdue && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              className="bg-orange-500/10 border border-orange-500/20 rounded-2xl p-4 flex items-start gap-3"
+            >
+              <div className="bg-orange-500 rounded-full p-1 shrink-0 mt-0.5">
+                <AlertTriangle size={14} className="text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-orange-500 font-headline font-bold text-sm">
+                  {overdueLoans.length} overdue loan{overdueLoans.length > 1 ? 's' : ''} require attention
+                </p>
+                <p className="text-orange-400 text-xs mt-0.5 leading-relaxed">
+                  Late fees are accumulating daily. Tap a loan below to pay now.
+                </p>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ── Balance + Stats Row ── */}
         <motion.section
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.05 }}
-          className="mb-8"
         >
-          <div className="flex flex-col items-center mb-2">
-            <span className="text-on-surface-variant text-xs font-bold uppercase tracking-widest mb-1">
-              Outstanding Balance
-            </span>
-            <span className="font-headline font-extrabold text-5xl text-primary tracking-tight">
-              ₱{totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </span>
+          {/* Main balance card */}
+          <div className={cn(
+            "relative overflow-hidden rounded-3xl p-6 shadow-xl mb-4",
+            hasOverdue
+              ? "bg-gradient-to-br from-orange-500/20 via-surface-container-high to-surface-container-high border border-orange-500/20"
+              : "bg-gradient-to-br from-primary/10 via-surface-container-high to-surface-container-high border border-primary/10"
+          )}>
+            <div className={cn(
+              "absolute top-0 right-0 -mr-8 -mt-8 w-40 h-40 rounded-full blur-[60px]",
+              hasOverdue ? "bg-orange-500/20" : "bg-primary/15"
+            )} />
+            <div className="relative z-10">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-on-surface-variant text-[10px] font-bold uppercase tracking-widest">
+                  Outstanding Balance
+                </span>
+                <div className={cn(
+                  "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
+                  hasOverdue
+                    ? "bg-orange-500/15 text-orange-400 border border-orange-500/20"
+                    : "bg-primary/10 text-primary border border-primary/20"
+                )}>
+                  {hasOverdue ? (
+                    <><Clock size={10} /> {overdueLoans.length} Overdue</>
+                  ) : (
+                    <><TrendingUp size={10} /> {activeLoans.length} Active</>
+                  )}
+                </div>
+              </div>
+              <p className={cn(
+                "font-headline font-extrabold text-5xl tracking-tight",
+                hasOverdue ? "text-orange-400" : "text-primary"
+              )}>
+                ₱{fmt(totalBalance)}
+              </p>
+              {hasOverdue && (
+                <p className="text-orange-400/70 text-xs mt-1.5 font-medium">
+                  Includes late fees on overdue loans
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Quick stat pills */}
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              {
+                label: 'Total Loans',
+                value: loans.length,
+                color: 'text-on-surface',
+                bg: 'bg-surface-container',
+              },
+              {
+                label: 'Active',
+                value: activeLoans.length,
+                color: 'text-green-500',
+                bg: 'bg-green-500/10',
+              },
+              {
+                label: 'Overdue',
+                value: overdueLoans.length,
+                color: overdueLoans.length > 0 ? 'text-orange-400' : 'text-on-surface-variant',
+                bg: overdueLoans.length > 0 ? 'bg-orange-500/10' : 'bg-surface-container',
+              },
+            ].map(({ label, value, color, bg }) => (
+              <div key={label} className={cn("rounded-2xl p-3 flex flex-col items-center gap-1", bg)}>
+                <span className={cn("font-headline font-extrabold text-2xl tabular-nums", color)}>
+                  {value}
+                </span>
+                <span className="text-on-surface-variant text-[10px] font-bold uppercase tracking-widest text-center">
+                  {label}
+                </span>
+              </div>
+            ))}
           </div>
         </motion.section>
 
-        {/* Apply Card */}
+        {/* ── Apply Card ── */}
         <motion.section
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ delay: 0.1 }}
-          className="mb-8"
         >
-          <div className="relative overflow-hidden rounded-2xl bg-surface-container-high p-4 shadow-xl flex flex-col items-center text-center">
-            <div className="w-14 h-14 rounded-full bg-primary/20 flex items-center justify-center mb-4">
-              <Wallet className="text-primary" size={28} />
+          <div className="relative overflow-hidden rounded-2xl bg-surface-container-high p-5 shadow-xl flex items-center gap-4">
+            <div className="absolute inset-0 bg-gradient-to-r from-primary/5 to-transparent pointer-events-none" />
+            <div className="w-12 h-12 rounded-2xl bg-primary/20 flex items-center justify-center shrink-0">
+              <Wallet className="text-primary" size={24} />
             </div>
-            <div className="space-y-2 mb-4">
-              <h3 className="font-headline text-lg font-bold text-on-surface">Need a funding boost?</h3>
-              <p className="text-on-surface-variant max-w-xs mx-auto text-xs leading-relaxed">
-                Access competitive rates and flexible repayment plans tailored to your needs.
+            <div className="flex-1 min-w-0 relative z-10">
+              <h3 className="font-headline text-base font-bold text-on-surface leading-tight">
+                Need a funding boost?
+              </h3>
+              <p className="text-on-surface-variant text-xs leading-relaxed mt-0.5">
+                Competitive rates, flexible repayment plans.
               </p>
             </div>
             <button
               onClick={handleApplyClick}
-              className="w-full py-3 px-6 bg-primary text-on-primary font-headline font-extrabold text-base rounded-full shadow-lg shadow-primary/20 active:scale-95 transition-all duration-200"
+              className="relative z-10 shrink-0 py-2.5 px-5 bg-primary text-on-primary font-headline font-extrabold text-sm rounded-full shadow-lg shadow-primary/20 active:scale-95 transition-all duration-200"
             >
-              Apply for Loan
+              Apply
             </button>
           </div>
         </motion.section>
 
-        {/* Loans List */}
+        {/* ── Loans List ── */}
         <section>
-          <div className="flex justify-between items-center mb-6">
+          <div className="flex justify-between items-center mb-4">
             <h4 className="font-headline text-xl font-bold text-on-surface">My Loans</h4>
             {loans.length > PREVIEW_COUNT && (
               <button
@@ -195,45 +304,78 @@ export default function Dashboard() {
           </div>
 
           <div className="bg-surface-container-low rounded-2xl overflow-hidden border border-outline-variant/10">
-            <div className="grid grid-cols-3 px-6 py-4 bg-surface-container-highest/20">
-              <span className="text-[10px] font-headline font-bold uppercase tracking-widest text-outline">REFERENCE NO</span>
-              <span className="text-[10px] font-headline font-bold uppercase tracking-widest text-outline text-center">STATUS</span>
-              <span className="text-[10px] font-headline font-bold uppercase tracking-widest text-outline text-right">DATE</span>
+            {/* Table header */}
+            <div className="grid grid-cols-3 px-5 py-3.5 bg-surface-container-highest/20 border-b border-outline-variant/10">
+              <span className="text-[10px] font-headline font-bold uppercase tracking-widest text-outline">Reference</span>
+              <span className="text-[10px] font-headline font-bold uppercase tracking-widest text-outline text-center">Status</span>
+              <span className="text-[10px] font-headline font-bold uppercase tracking-widest text-outline text-right">Date</span>
             </div>
 
             {loading ? (
               <div className="py-12 flex justify-center">
-                <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin"></div>
+                <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
               </div>
             ) : loans.length > 0 ? (
               <>
                 <div className="divide-y divide-outline-variant/10">
-                  {displayedLoans.map((loan) => (
-                    <div
-                      key={loan.loan_id}
-                      className="px-6 py-5 hover:bg-surface-container-highest/10 transition-colors cursor-pointer"
-                      onClick={() => navigate(`/loan/${loan.loan_id}`)}
-                    >
-                      <div className="grid grid-cols-3 items-center mb-3">
-                        <span className="text-xs font-mono font-bold text-on-surface truncate pr-2">
-                          {loan.reference_no}
-                        </span>
-                        <div className="flex justify-center">
-                          <span className={`text-[10px] font-bold px-2 py-1 rounded-full uppercase tracking-tighter ${getStatusStyle(loan.status)}`}>
-                            {loan.status}
+                  {displayedLoans.map((loan, index) => {
+                    const isOverdueRow = loan.status?.toLowerCase() === 'overdue';
+                    return (
+                      <motion.div
+                        key={loan.loan_id}
+                        initial={{ opacity: 0, y: 6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: index * 0.04 }}
+                        className={cn(
+                          "px-5 py-4 transition-colors cursor-pointer",
+                          isOverdueRow
+                            ? "hover:bg-orange-500/5 bg-orange-500/[0.03]"
+                            : "hover:bg-surface-container-highest/10"
+                        )}
+                        onClick={() => navigate(`/loan/${loan.loan_id}`)}
+                      >
+                        <div className="grid grid-cols-3 items-center">
+                          {/* Reference */}
+                          <div className="flex items-center gap-2 pr-2 min-w-0">
+                            <div className={cn("w-1.5 h-1.5 rounded-full shrink-0", getDotStyle(loan.status))} />
+                            <span className="text-xs font-mono font-bold text-on-surface truncate">
+                              {loan.reference_no}
+                            </span>
+                          </div>
+
+                          {/* Status badge */}
+                          <div className="flex justify-center">
+                            <span className={cn(
+                              "text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-tighter",
+                              getStatusStyle(loan.status)
+                            )}>
+                              {loan.status}
+                            </span>
+                          </div>
+
+                          {/* Date */}
+                          <span className="text-xs text-on-surface-variant text-right">
+                            {new Date(loan.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                           </span>
                         </div>
-                        <span className="text-xs text-on-surface-variant text-right">
-                          {new Date(loan.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+
+                        {/* Overdue sub-row — remaining balance */}
+                        {isOverdueRow && (
+                          <div className="mt-2 ml-3.5 flex items-center gap-1.5">
+                            <span className="text-orange-400/70 text-[10px] font-medium">Balance due:</span>
+                            <span className="text-orange-400 text-[11px] font-headline font-bold tabular-nums">
+                              ₱{fmt(Number(loan.remaining_balance))}
+                            </span>
+                          </div>
+                        )}
+                      </motion.div>
+                    );
+                  })}
                 </div>
 
                 {hasMore && (
                   <div className="relative">
-                    <div className="px-6 py-5 opacity-30 pointer-events-none select-none">
+                    <div className="px-5 py-4 opacity-30 pointer-events-none select-none">
                       <div className="grid grid-cols-3 items-center">
                         <div className="h-3 w-24 bg-on-surface/20 rounded-full" />
                         <div className="flex justify-center">
@@ -272,6 +414,7 @@ export default function Dashboard() {
             )}
           </div>
         </section>
+
       </main>
 
       <BottomNav />
@@ -295,8 +438,17 @@ export default function Dashboard() {
 
                 {/* Icon + Title */}
                 <div className="flex flex-col items-center text-center mb-6">
-                  <div className="w-16 h-16 rounded-full bg-secondary/10 flex items-center justify-center mb-4">
-                    <AlertTriangle size={32} className="text-secondary" />
+                  <div className={cn(
+                    "w-16 h-16 rounded-full flex items-center justify-center mb-4",
+                    blockedLoan.status?.toLowerCase() === 'overdue'
+                      ? "bg-orange-500/10"
+                      : "bg-secondary/10"
+                  )}>
+                    <AlertTriangle size={32} className={
+                      blockedLoan.status?.toLowerCase() === 'overdue'
+                        ? "text-orange-400"
+                        : "text-secondary"
+                    } />
                   </div>
                   <h3 className="font-headline font-bold text-xl text-on-surface">
                     Application Not Allowed
@@ -318,14 +470,22 @@ export default function Dashboard() {
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-on-surface-variant">Status</span>
-                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full uppercase ${getStatusStyle(blockedLoan.status)}`}>
+                    <span className={cn(
+                      "text-[11px] font-bold px-2 py-0.5 rounded-full uppercase",
+                      getStatusStyle(blockedLoan.status)
+                    )}>
                       {blockedLoan.status}
                     </span>
                   </div>
                   {blockedLoan.remaining_balance > 0 && (
                     <div className="flex justify-between text-sm">
                       <span className="text-on-surface-variant">Remaining Balance</span>
-                      <span className="font-bold text-on-surface">
+                      <span className={cn(
+                        "font-bold",
+                        blockedLoan.status?.toLowerCase() === 'overdue'
+                          ? "text-orange-400"
+                          : "text-on-surface"
+                      )}>
                         ₱{Number(blockedLoan.remaining_balance).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
                       </span>
                     </div>
@@ -339,9 +499,14 @@ export default function Dashboard() {
                       setBlockedLoan(null);
                       navigate(`/loan/${blockedLoan.loan_id}`);
                     }}
-                    className="w-full py-4 rounded-full bg-primary text-on-primary font-bold text-sm active:scale-95 transition-transform"
+                    className={cn(
+                      "w-full py-4 rounded-full font-bold text-sm active:scale-95 transition-transform",
+                      blockedLoan.status?.toLowerCase() === 'overdue'
+                        ? "bg-orange-500 text-white"
+                        : "bg-primary text-on-primary"
+                    )}
                   >
-                    View Existing Loan
+                    {blockedLoan.status?.toLowerCase() === 'overdue' ? 'Pay Now (Overdue)' : 'View Existing Loan'}
                   </button>
                   <button
                     onClick={() => setBlockedLoan(null)}

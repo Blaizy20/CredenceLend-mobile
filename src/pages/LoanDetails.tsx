@@ -115,7 +115,9 @@ export default function LoanDetails() {
     return totalPayable;
   })();
 
-  // ✅ Late fee — calculated client-side using the same formula as the web app
+  // ✅ Late fee — principal × daily_rate × days_late
+  // Mirrors the web app's loan_late_payment_daily_rates formula.
+  // The backend already sums this into total_payable when the loan goes overdue.
   const lateFee = (() => {
     if (!isOverdue || !loan.due_date) return 0;
 
@@ -136,7 +138,8 @@ export default function LoanDetails() {
 
     if (daysLate === 0) return 0;
 
-    return Number((remainingBal * dailyRate * daysLate).toFixed(2));
+    // ✅ Uses principal — NOT remainingBal or totalPayable
+    return Number((principal * dailyRate * daysLate).toFixed(2));
   })();
 
   // ── Schedule generator ────────────────────────────────────────────────────
