@@ -713,7 +713,9 @@ async function startServer() {
     try {
       const {
         customer_id, tenant_id, principal_amount, payment_term,
-        interest_rate, term_months, id_type, collateral_type, co_maker,
+        interest_rate, term_months, id_type, collateral_type,
+        collateral_notes, notes,
+        comakers, // ✅ changed from co_maker to comakers (array from frontend)
       } = req.body;
 
       if (!customer_id || !principal_amount || !payment_term || !collateral_type)
@@ -760,16 +762,29 @@ async function startServer() {
       );
       const loan_id = loanResult.insertId;
 
-      if (co_maker?.first_name && co_maker?.last_name) {
-        try {
-          await pool.query(
-            `INSERT INTO co_makers (loan_id, customer_id, first_name, last_name, contact_no, email, province, city, barangay, street)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [loan_id, customer_id, String(co_maker.first_name).trim(), String(co_maker.last_name).trim(),
-             co_maker.contact_no || null, co_maker.email || null, co_maker.province || null,
-             co_maker.city || null, co_maker.barangay || null, co_maker.street || null]
-          );
-        } catch (coMakerErr: any) { console.warn("Co-maker insert skipped:", coMakerErr.message); }
+      // ✅ FIXED: Now inserts into loan_comakers using the correct schema
+      if (Array.isArray(comakers) && comakers.length > 0) {
+        for (const cm of comakers) {
+          try {
+            await pool.query(
+              `INSERT INTO loan_comakers
+                 (tenant_id, loan_id, full_name, phone_number, relationship_to_borrower, email, address, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                resolvedTenantId,
+                loan_id,
+                String(cm.full_name  ?? '').trim()       || null,
+                String(cm.phone_number ?? '').trim()     || null,
+                String(cm.relationship ?? 'Co-maker').trim(),
+                cm.email   ? String(cm.email).trim()     : null,
+                cm.address ? String(cm.address).trim()   : null,
+                null, // notes not collected in form
+              ]
+            );
+          } catch (coMakerErr: any) {
+            console.warn("Co-maker insert skipped:", coMakerErr.message);
+          }
+        }
       }
 
       await insertNotification(
