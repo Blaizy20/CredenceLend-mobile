@@ -29,7 +29,7 @@ const pool = mysql.createPool({
   connectionLimit:    10,
   queueLimit:         0,
   ssl:                { rejectUnauthorized: false },
-  timezone:           '+08:00',
+  timezone:           '+30:00',
 });
 
 pool.on('connection', (connection) => {
