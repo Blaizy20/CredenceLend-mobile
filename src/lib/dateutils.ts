@@ -6,12 +6,23 @@ const PH_LOCALE = 'en-PH';
 const PH_TZ     = 'Asia/Manila';
 
 /**
+ * Safely parses a date string.
+ * DATE-only strings like "2026-05-27" are treated as local midnight
+ * to prevent JS from parsing them as UTC and showing the wrong day in PHT.
+ */
+function toDate(raw: string): Date {
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw)
+    ? new Date(raw + 'T00:00:00')
+    : new Date(raw);
+}
+
+/**
  * "May 26, 2026, 07:33 AM"
  * Use for payment timestamps, transaction dates, notification times.
  */
 export function formatDateTime(raw: string | null | undefined): string {
   if (!raw) return '—';
-  return new Date(raw).toLocaleString(PH_LOCALE, {
+  return toDate(raw).toLocaleString(PH_LOCALE, {
     timeZone: PH_TZ,
     year:     'numeric',
     month:    'short',
@@ -28,11 +39,26 @@ export function formatDateTime(raw: string | null | undefined): string {
  */
 export function formatDate(raw: string | null | undefined): string {
   if (!raw) return '—';
-  return new Date(raw).toLocaleDateString(PH_LOCALE, {
+  return toDate(raw).toLocaleDateString(PH_LOCALE, {
     timeZone: PH_TZ,
     year:     'numeric',
     month:    'short',
     day:      'numeric',
+  });
+}
+
+/**
+ * "Wednesday, May 27, 2026"
+ * Use for Payment Details sheet date row.
+ */
+export function formatFullDate(raw: string | null | undefined): string {
+  if (!raw) return '—';
+  return toDate(raw).toLocaleDateString(PH_LOCALE, {
+    timeZone: PH_TZ,
+    weekday:  'long',
+    month:    'long',
+    day:      'numeric',
+    year:     'numeric',
   });
 }
 
@@ -42,10 +68,25 @@ export function formatDate(raw: string | null | undefined): string {
  */
 export function formatTime(raw: string | null | undefined): string {
   if (!raw) return '—';
-  return new Date(raw).toLocaleTimeString(PH_LOCALE, {
+  return toDate(raw).toLocaleTimeString(PH_LOCALE, {
     timeZone: PH_TZ,
     hour:     '2-digit',
     minute:   '2-digit',
+    hour12:   true,
+  });
+}
+
+/**
+ * "07:33:59 AM"
+ * Use for Payment Details sheet time row (includes seconds).
+ */
+export function formatFullTime(raw: string | null | undefined): string {
+  if (!raw) return '—';
+  return toDate(raw).toLocaleTimeString(PH_LOCALE, {
+    timeZone: PH_TZ,
+    hour:     '2-digit',
+    minute:   '2-digit',
+    second:   '2-digit',
     hour12:   true,
   });
 }
@@ -56,7 +97,7 @@ export function formatTime(raw: string | null | undefined): string {
  */
 export function formatRelative(raw: string | null | undefined): string {
   if (!raw) return '—';
-  const diff = Date.now() - new Date(raw).getTime();
+  const diff = Date.now() - toDate(raw).getTime();
   const mins = Math.floor(diff / 60_000);
   const hrs  = Math.floor(diff / 3_600_000);
   const days = Math.floor(diff / 86_400_000);
@@ -73,7 +114,7 @@ export function formatRelative(raw: string | null | undefined): string {
  */
 export function formatShortDate(raw: string | null | undefined): string {
   if (!raw) return '—';
-  return new Date(raw).toLocaleDateString(PH_LOCALE, {
+  return toDate(raw).toLocaleDateString(PH_LOCALE, {
     timeZone: PH_TZ,
     weekday:  'short',
     month:    'short',
@@ -87,7 +128,7 @@ export function formatShortDate(raw: string | null | undefined): string {
  */
 export function formatMonthYear(raw: string | null | undefined): string {
   if (!raw) return '—';
-  return new Date(raw).toLocaleDateString(PH_LOCALE, {
+  return toDate(raw).toLocaleDateString(PH_LOCALE, {
     timeZone: PH_TZ,
     month:    'long',
     year:     'numeric',
