@@ -1043,7 +1043,7 @@ async function startServer() {
     try {
       const [rows] = await pool.query<RowDataPacket[]>(
         `SELECT payment_id, loan_id, amount, payment_date, method, or_no, notes,
-                COALESCE(created_at, payment_date) AS created_at
+                CONVERT_TZ(COALESCE(created_at, payment_date), '+00:00', '+08:00') AS created_at
          FROM payments WHERE loan_id = ?
          ORDER BY COALESCE(created_at, payment_date) DESC, payment_id DESC`,
         [req.params.loanId]
@@ -1061,7 +1061,7 @@ async function startServer() {
       const [rows] = await pool.query<RowDataPacket[]>(
         `SELECT p.payment_id, p.loan_id, p.amount, p.method, p.or_no,
                 p.notes, l.reference_no,
-                COALESCE(p.created_at, p.payment_date) AS created_at
+                CONVERT_TZ(COALESCE(p.created_at, p.payment_date), '+00:00', '+08:00') AS created_at
          FROM payments p
          JOIN loans l ON l.loan_id = p.loan_id
          JOIN customers c ON c.customer_id = l.customer_id
