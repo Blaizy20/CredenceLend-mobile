@@ -10,6 +10,7 @@ import { Upload } from '@aws-sdk/lib-storage';
 import { s3, BUCKET } from './storage';
 import { GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { formatRelative } from '@/src/lib/dateutils';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -1065,10 +1066,10 @@ async function startServer() {
          JOIN loans l ON l.loan_id = p.loan_id
          JOIN customers c ON c.customer_id = l.customer_id
          WHERE l.customer_id = ? AND c.tenant_id = ?
-         ORDER BY COALESCE(p.created_at, p.payment_date) DESC, p.payment_id DESC
-         LIMIT 50`,
+         ORDER BY COALESCE(p.created_at, p.payment_date) DESC, p.payment_id DESC`,
         [req.params.customerId, tenant_id]
       );
+
       res.json(rows);
     } catch (err: any) {
       console.error("Customer payments error:", err.message);
@@ -1079,35 +1080,29 @@ async function startServer() {
   // ── Notifications: List ───────────────────────────────────────────────────
   app.get("/api/notifications/:customerId", async (req, res) => {
     try {
+      // Auto-clean old READ notifications only
+      await pool.query(
+        `DELETE FROM notifications
+         WHERE customer_id = ?
+           AND is_read = 1
+           AND created_at < NOW() - INTERVAL 60 DAY`,
+        [req.params.customerId]
+      );
+
       const [rows] = await pool.query<RowDataPacket[]>(
         `SELECT notification_id, title, message, type, is_read, created_at
-         FROM notifications WHERE customer_id = ? ORDER BY created_at DESC LIMIT 50`,
+         FROM notifications
+         WHERE customer_id = ?
+         ORDER BY created_at DESC
+         LIMIT 100`,
         [req.params.customerId]
       );
-      res.json(rows);
-    } catch { res.status(500).json({ success: false, message: "Unable to retrieve notifications." }); }
-  });
 
-  // ── Notifications: Mark All Read ──────────────────────────────────────────
-  app.patch("/api/notifications/:customerId/read-all", async (req, res) => {
-    try {
-      await pool.query(
-        `UPDATE notifications SET is_read = 1 WHERE customer_id = ? AND is_read = 0`,
-        [req.params.customerId]
-      );
-      res.json({ success: true });
-    } catch { res.status(500).json({ success: false, message: "Unable to update notifications." }); }
-  });
-
-  // ── Transactions ──────────────────────────────────────────────────────────
-  app.get("/api/transactions/:customerId", async (req, res) => {
-    try {
-      const [rows] = await pool.query<RowDataPacket[]>(
-        `SELECT id, loan_id, type, amount, date, status FROM transactions WHERE customer_id = ? ORDER BY date DESC`,
-        [req.params.customerId]
-      );
       res.json(rows);
-    } catch { res.status(500).json({ success: false, message: "Unable to retrieve transactions." }); }
+    } catch (err: any) {
+      console.error("Notifications error:", err.message);
+      res.status(500).json({ success: false, message: "Unable to retrieve notifications." });
+    }
   });
 
   // ── PayMongo: Create Checkout Session ─────────────────────────────────────
