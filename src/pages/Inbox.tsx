@@ -5,7 +5,7 @@ import { TopBar } from '../components/TopBar';
 import { BottomNav } from '../components/BottomNav';
 import { Inbox as InboxIcon, Bell, CheckCircle2, XCircle, Clock, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 import { motion } from 'motion/react';
-import { formatRelative } from '../lib/dateUtils';
+import { formatRelative } from '../lib/dateutils';
 
 interface Notification {
   notification_id: number;
