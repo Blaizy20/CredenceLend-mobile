@@ -5,6 +5,7 @@ import { TopBar } from '../components/TopBar';
 import { BottomNav } from '../components/BottomNav';
 import { Inbox as InboxIcon, Bell, CheckCircle2, XCircle, Clock, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 import { motion } from 'motion/react';
+import { formatRelative } from '@/src/lib/dateUtils';
 
 interface Notification {
   notification_id: number;
@@ -162,7 +163,7 @@ export default function Inbox() {
                       <p className="text-sm font-bold text-on-surface leading-tight">{notif.title}</p>
                       <div className="flex items-center gap-1 text-on-surface-variant shrink-0">
                         <Clock size={10} />
-                        <span className="text-[10px]">{formatTime(notif.created_at)}</span>
+                        <span className="text-[10px]">{formatRelative(notif.created_at)}</span>
                       </div>
                     </div>
                     <p className="text-xs text-on-surface-variant leading-relaxed">{notif.message}</p>
