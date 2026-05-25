@@ -5,7 +5,7 @@ import { TopBar } from '../components/TopBar';
 import { BottomNav } from '../components/BottomNav';
 import { Inbox as InboxIcon, Bell, CheckCircle2, XCircle, Clock, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 import { motion } from 'motion/react';
-import { formatRelative } from '../src/lib/dateUtils';
+import { formatRelative } from '../lib/dateUtils';
 
 interface Notification {
   notification_id: number;
@@ -70,18 +70,6 @@ export default function Inbox() {
     let user: any = null;
     try { user = JSON.parse(localStorage.getItem('user') || 'null'); } catch {}
     if (user?.customer_id) loadNotifications(user.customer_id);
-  };
-
-  const formatTime = (dateStr: string) => {
-    const date = new Date(dateStr);
-    const now  = new Date();
-    const diff = Math.floor((now.getTime() - date.getTime()) / 1000);
-
-    if (diff < 60)     return 'Just now';
-    if (diff < 3600)   return `${Math.floor(diff / 60)}m ago`;
-    if (diff < 86400)  return `${Math.floor(diff / 3600)}h ago`;
-    if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
   return (
