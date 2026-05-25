@@ -10,6 +10,7 @@ import { Upload } from '@aws-sdk/lib-storage';
 import { s3, BUCKET } from './storage';
 import { GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { formatRelative } from '@/src/lib/dateUtils';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -29,6 +30,10 @@ const pool = mysql.createPool({
   queueLimit:         0,
   ssl:                { rejectUnauthorized: false },
   timezone:           '+08:00',
+});
+
+pool.on('connection', (connection) => {
+  connection.query("SET time_zone = '+08:00'");
 });
 
 type CustomerRow = RowDataPacket & {
