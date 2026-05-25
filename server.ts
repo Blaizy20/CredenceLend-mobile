@@ -918,7 +918,8 @@ async function startServer() {
       const [rows] = await pool.query<RowDataPacket[]>(
         `SELECT loan_id, reference_no, principal_amount, interest_rate, payment_term,
                 term_months, total_payable, amount_per_term, remaining_balance,
-                status, due_date, denial_reason, notes, activated_at, created_at, is_active
+                status, due_date, denial_reason, notes, activated_at, created_at, is_active,
+                collateral_type, id_type
          FROM loans WHERE loan_id = ? LIMIT 1`,
         [req.params.loanId]
       );
