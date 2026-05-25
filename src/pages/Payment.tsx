@@ -36,8 +36,43 @@ function getCustomerBilling() {
   }
 }
 
+// ── payment term helpers ──────────────────────────────────────────────────
+type PaymentTerm = 'daily' | 'weekly' | 'semi_monthly' | 'monthly';
+
+function normalizePaymentTerm(raw: string): PaymentTerm {
+  const t = (raw ?? '').toLowerCase().replace(/-/g, '_').replace(/\s/g, '_');
+  if (t.includes('daily'))  return 'daily';
+  if (t.includes('weekly')) return 'weekly';
+  if (t.includes('semi'))   return 'semi_monthly';
+  return 'monthly';
+}
+
+const TERM_LABEL: Record<PaymentTerm, string> = {
+  daily:        'Daily',
+  weekly:       'Weekly',
+  semi_monthly: 'Semi-Monthly',
+  monthly:      'Monthly',
+};
+
+function getTermCount(term: PaymentTerm, termMonths: number): number {
+  switch (term) {
+    case 'daily':        return termMonths * 30;
+    case 'weekly':       return termMonths * 4;
+    case 'semi_monthly': return termMonths * 2;
+    default:             return termMonths;
+  }
+}
+
+function getAmountPerTerm(loan: any, term: PaymentTerm): number {
+  const stored = Number(loan.amount_per_term ?? 0);
+  if (stored > 0) return stored;
+  const total      = Number(loan.total_payable) || 0;
+  const termMonths = Number(loan.term_months)   || 1;
+  const count      = getTermCount(term, termMonths);
+  return count > 0 ? parseFloat((total / count).toFixed(2)) : total;
+}
+
 // ── constants ─────────────────────────────────────────────────────────────
-// KEY: must match PaymentSuccess.tsx
 const SS_PENDING_KEY = 'paymongo_pending';
 
 // ── payment mode ──────────────────────────────────────────────────────────
@@ -106,10 +141,11 @@ export default function Payment() {
 
   const query       = new URLSearchParams(location.search);
   const dueAmount   = safeAmount(Number(query.get('amount') ?? 0));
-  const paymentType = (query.get('type') ?? 'installment') as 'installment' | 'full' | 'custom';
+  const paymentType = (query.get('type') ?? 'installment') as 'installment' | 'full' | 'custom' | 'advance';
 
   const PAYMENT_TYPE_LABEL: Record<string, string> = {
     installment: 'Installment Payment',
+    advance:     'Advance Payment',
     full:        'Full Settlement',
     custom:      'Custom Payment',
   };
@@ -177,7 +213,6 @@ export default function Payment() {
         return;
       }
 
-      // Save payment details to localStorage — survives in-app browser redirect
       try {
         localStorage.setItem(SS_PENDING_KEY, JSON.stringify({
           session_id:   data.session_id   ?? '',
@@ -188,14 +223,11 @@ export default function Payment() {
         }));
       } catch { /* ignore */ }
 
-      // Detect if running inside Capacitor (Android/iOS)
       const isCapacitor = !!(window as any).Capacitor?.isNativePlatform?.();
 
       if (isCapacitor) {
-        // Listen for the success_url redirect back into the app
         const finishedListener = await Browser.addListener('browserFinished', async () => {
           await finishedListener.remove();
-
           try {
             const raw = localStorage.getItem(SS_PENDING_KEY);
             if (raw) {
@@ -206,14 +238,10 @@ export default function Payment() {
               }
             }
           } catch {}
-
           setPayStatus('idle');
         });
-
-        // Open PayMongo in Capacitor in-app browser (not external browser)
         await Browser.open({ url: data.checkout_url, presentationStyle: 'fullscreen' });
       } else {
-        // Browser fallback — standard redirect
         window.location.href = data.checkout_url;
       }
     } catch (err: any) {
@@ -253,7 +281,7 @@ export default function Payment() {
     );
   }
 
-  // ── overlay screens ───────────────────────────────────────────────────
+  // ── overlay screens (unchanged) ───────────────────────────────────────
   if (payStatus === 'redirecting') {
     return (
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
@@ -378,13 +406,15 @@ export default function Payment() {
   }
 
   // ── derived values ────────────────────────────────────────────────────
-  const total      = Number(loan.total_payable)     || 0;
-  const remaining  = Number(loan.remaining_balance) || 0;
-  const months     = Number(loan.term_months)       || 1;
-  const monthly    = parseFloat((total / months).toFixed(2));
-  const paidSoFar  = parseFloat((total - remaining).toFixed(2));
-  const newBalance = Math.max(0, safeAmount(remaining - dueAmount));
-  const isFullPay  = newBalance <= 0;
+  // ✅ Term-aware — replaces the old hardcoded monthly calculation
+  const term         = normalizePaymentTerm(loan.payment_term ?? '');
+  const termMonths   = Number(loan.term_months) || 1;
+  const total        = Number(loan.total_payable)     || 0;
+  const remaining    = Number(loan.remaining_balance) || 0;
+  const amtPerTerm   = getAmountPerTerm(loan, term);
+  const paidSoFar    = parseFloat((total - remaining).toFixed(2));
+  const newBalance   = Math.max(0, safeAmount(remaining - dueAmount));
+  const isFullPay    = newBalance <= 0;
   const progressNow   = total > 0 ? Math.min((paidSoFar / total) * 100, 100) : 0;
   const progressAfter = total > 0 ? Math.min(((paidSoFar + dueAmount) / total) * 100, 100) : 0;
 
@@ -403,7 +433,7 @@ export default function Payment() {
             <div className="flex justify-between items-start">
               <div>
                 <p className="text-on-surface-variant text-[10px] uppercase tracking-widest mb-0.5">
-                  {PAYMENT_TYPE_LABEL[paymentType]}
+                  {PAYMENT_TYPE_LABEL[paymentType] ?? 'Payment'}
                 </p>
                 <h2 className="font-headline font-extrabold text-3xl text-primary tracking-tight">
                   ₱{fmt(dueAmount)}
@@ -421,13 +451,14 @@ export default function Payment() {
             </div>
           </div>
 
+          {/* ✅ Breakdown rows — term-aware label + amount */}
           <div className="px-5 py-4 space-y-2.5">
             {[
-              { label: 'Principal Amount',    value: `₱${fmt(Number(loan.principal_amount))}` },
-              { label: 'Total Payable',       value: `₱${fmt(total)}` },
-              { label: 'Monthly Installment', value: `₱${fmt(monthly)}` },
-              { label: 'Paid So Far',         value: `₱${fmt(paidSoFar)}` },
-              { label: 'Current Balance',     value: `₱${fmt(remaining)}`, bold: true },
+              { label: 'Principal Amount',                       value: `₱${fmt(Number(loan.principal_amount))}` },
+              { label: 'Total Payable',                          value: `₱${fmt(total)}` },
+              { label: `${TERM_LABEL[term]} Installment`,        value: `₱${fmt(amtPerTerm)}` }, // ✅ fixed
+              { label: 'Paid So Far',                            value: `₱${fmt(paidSoFar)}` },
+              { label: 'Current Balance',                        value: `₱${fmt(remaining)}`, bold: true },
             ].map(({ label, value, bold }) => (
               <div key={label} className="flex justify-between items-center">
                 <p className={cn('text-xs', bold ? 'font-semibold text-on-surface' : 'text-on-surface-variant')}>{label}</p>
@@ -648,6 +679,7 @@ export default function Payment() {
                 {[
                   { label: 'Amount',        value: `₱${fmt(dueAmount)}`,                                                              accent: true  },
                   { label: 'Method',        value: payMode === 'online' ? 'PayMongo Checkout' : MANUAL_INSTRUCTIONS[manualType].label               },
+                  { label: 'Frequency',     value: TERM_LABEL[term]                                                                                  }, // ✅ added
                   { label: 'Reference',     value: loan.reference_no                                                                                 },
                   { label: 'After Payment', value: isFullPay ? '₱0.00 (Fully Paid 🎉)' : `₱${fmt(newBalance)} remaining`                            },
                 ].map(({ label, value, accent }) => (

@@ -15,35 +15,95 @@ function fmt(n: number) {
   return n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-/**
- * Computes how much is still owed for the CURRENT unpaid period.
- * Returns 0 if the current period is already fully paid.
- */
-function computeInstallmentDue(loan: any): number {
-  const total     = Number(loan.total_payable)     || 0;
-  const remaining = Number(loan.remaining_balance) || 0;
-  const months    = Number(loan.term_months)       || 1;
+// ── payment term helpers (mirrors LoanDetails.tsx) ─────────────────────────
+type PaymentTerm = 'daily' | 'weekly' | 'semi_monthly' | 'monthly';
 
-  if (remaining <= 0) return 0;
+function normalizePaymentTerm(raw: string): PaymentTerm {
+  const t = (raw ?? '').toLowerCase().replace(/-/g, '_').replace(/\s/g, '_');
+  if (t.includes('daily'))              return 'daily';
+  if (t.includes('weekly'))            return 'weekly';
+  if (t.includes('semi'))              return 'semi_monthly';
+  return 'monthly';
+}
 
-  const monthly      = parseFloat((total / months).toFixed(2));
-  const paidSoFar    = parseFloat((total - remaining).toFixed(2));
-  const periodsPaid  = monthly > 0 ? Math.floor(paidSoFar / monthly) : 0;
-  const partialCredit = parseFloat((paidSoFar - periodsPaid * monthly).toFixed(2));
-  const currentDue   = parseFloat((monthly - partialCredit).toFixed(2));
+/** Human-readable label for a payment term */
+const TERM_LABEL: Record<PaymentTerm, string> = {
+  daily:        'Daily',
+  weekly:       'Weekly',
+  semi_monthly: 'Semi-Monthly',
+  monthly:      'Monthly',
+};
 
-  return Math.min(Math.max(currentDue, 0), remaining);
+/** Short label used in stats grid */
+const TERM_SHORT: Record<PaymentTerm, string> = {
+  daily:        'Daily',
+  weekly:       'Weekly',
+  semi_monthly: 'Semi-Mo.',
+  monthly:      'Monthly',
+};
+
+/** Total number of payment periods for the term */
+function getTermCount(term: PaymentTerm, termMonths: number): number {
+  switch (term) {
+    case 'daily':        return termMonths * 30;
+    case 'weekly':       return termMonths * 4;
+    case 'semi_monthly': return termMonths * 2;
+    case 'monthly':
+    default:             return termMonths;
+  }
+}
+
+/** Term duration display for the stats grid */
+function getTermDuration(term: PaymentTerm, termMonths: number): string {
+  switch (term) {
+    case 'daily':        return `${termMonths * 30} days`;
+    case 'weekly':       return `${termMonths * 4} wks`;
+    case 'semi_monthly': return `${termMonths * 2} periods`;
+    case 'monthly':
+    default:             return `${termMonths} mo${termMonths > 1 ? 's' : ''}`;
+  }
 }
 
 /**
- * How many full periods have been paid already?
+ * Amount due per single payment period.
+ * Uses loan.amount_per_term if stored; falls back to total / termCount.
  */
-function computePeriodsPaid(loan: any): number {
-  const total   = Number(loan.total_payable) || 0;
-  const months  = Number(loan.term_months)   || 1;
-  const monthly = total / months;
-  const paid    = total - (Number(loan.remaining_balance) || 0);
-  return monthly > 0 ? Math.floor(paid / monthly) : 0;
+function getAmountPerTerm(loan: any, term: PaymentTerm): number {
+  const stored = Number(loan.amount_per_term ?? 0);
+  if (stored > 0) return stored;
+
+  const total      = Number(loan.total_payable) || 0;
+  const termMonths = Number(loan.term_months)   || 1;
+  const count      = getTermCount(term, termMonths);
+  return count > 0 ? parseFloat((total / count).toFixed(2)) : total;
+}
+
+/**
+ * How many full periods have been paid.
+ */
+function computePeriodsPaid(loan: any, term: PaymentTerm): number {
+  const total       = Number(loan.total_payable)     || 0;
+  const remaining   = Number(loan.remaining_balance) || 0;
+  const amtPerTerm  = getAmountPerTerm(loan, term);
+  const paidSoFar   = parseFloat((total - remaining).toFixed(2));
+  return amtPerTerm > 0 ? Math.floor(paidSoFar / amtPerTerm) : 0;
+}
+
+/**
+ * Amount still owed for the CURRENT unpaid period (0 if already fully paid).
+ */
+function computeInstallmentDue(loan: any, term: PaymentTerm): number {
+  const total      = Number(loan.total_payable)     || 0;
+  const remaining  = Number(loan.remaining_balance) || 0;
+  if (remaining <= 0) return 0;
+
+  const amtPerTerm    = getAmountPerTerm(loan, term);
+  const paidSoFar     = parseFloat((total - remaining).toFixed(2));
+  const periodsPaid   = amtPerTerm > 0 ? Math.floor(paidSoFar / amtPerTerm) : 0;
+  const partialCredit = parseFloat((paidSoFar - periodsPaid * amtPerTerm).toFixed(2));
+  const currentDue    = parseFloat((amtPerTerm - partialCredit).toFixed(2));
+
+  return Math.min(Math.max(currentDue, 0), remaining);
 }
 
 type Option = 'installment' | 'advance' | 'full' | 'custom';
@@ -77,7 +137,7 @@ export default function PaymentOptions() {
     })();
   }, [id]);
 
-  // ── guards ────────────────────────────────────────────────────────────
+  // ── guards ─────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -101,28 +161,24 @@ export default function PaymentOptions() {
     );
   }
 
-  // ── derived values ────────────────────────────────────────────────────
+  // ── derived values ─────────────────────────────────────────────────────
+  const term           = normalizePaymentTerm(loan.payment_term ?? '');
+  const termMonths     = Number(loan.term_months) || 1;
   const total          = Number(loan.total_payable)     || 0;
   const remaining      = Number(loan.remaining_balance) || 0;
-  const months         = Number(loan.term_months)       || 1;
-  const monthly        = parseFloat((total / months).toFixed(2));
+  const amtPerTerm     = getAmountPerTerm(loan, term);
+  const termCount      = getTermCount(term, termMonths);
   const paidSoFar      = parseFloat((total - remaining).toFixed(2));
   const progress       = total > 0 ? Math.min((paidSoFar / total) * 100, 100) : 0;
-  const installmentDue = computeInstallmentDue(loan);
-  const periodsPaid    = computePeriodsPaid(loan);
+  const installmentDue = computeInstallmentDue(loan, term);
+  const periodsPaid    = computePeriodsPaid(loan, term);
 
-  // Is the current period fully paid?
   const currentPeriodPaid = installmentDue <= 0;
+  const advanceAmount     = Math.min(amtPerTerm, remaining);
+  const advancePeriodNo   = periodsPaid + (currentPeriodPaid ? 2 : 1);
+  const customValue       = parseFloat(customAmt) || 0;
 
-  // Advance payment = next period's monthly due (capped at remaining balance)
-  const advanceAmount = Math.min(monthly, remaining);
-
-  // Which period number would the advance cover?
-  const advancePeriodNo = periodsPaid + (currentPeriodPaid ? 2 : 1);
-
-  const customValue = parseFloat(customAmt) || 0;
-
-  // Build OPTIONS dynamically — swap installment ↔ advance based on state
+  // ── options ─────────────────────────────────────────────────────────────
   const OPTIONS: {
     id: Option;
     icon: any;
@@ -136,8 +192,8 @@ export default function PaymentOptions() {
       ? {
           id:         'advance',
           icon:       FastForward,
-          label:      'Advance Next Payment',
-          sub:        `Pay ahead for period ${advancePeriodNo}`,
+          label:      `Advance ${TERM_LABEL[term]} Payment`,
+          sub:        `Pay ahead for period ${advancePeriodNo} of ${termCount}`,
           amount:     advanceAmount,
           badge:      'Advance',
           badgeClass: 'bg-purple-500/10 text-purple-500',
@@ -145,8 +201,8 @@ export default function PaymentOptions() {
       : {
           id:         'installment',
           icon:       SplitSquareHorizontal,
-          label:      'Pay Installment',
-          sub:        `Period ${periodsPaid + 1} — current due`,
+          label:      `Pay ${TERM_LABEL[term]} Installment`,
+          sub:        `Period ${periodsPaid + 1} of ${termCount} — current due`,
           amount:     installmentDue,
           badge:      'Due Now',
           badgeClass: 'bg-orange-500/10 text-orange-500',
@@ -167,11 +223,9 @@ export default function PaymentOptions() {
     },
   ];
 
-  // Sync default selection when period status changes
-  const defaultOption = currentPeriodPaid ? 'advance' : 'installment';
   const effectiveSelected =
-    selected === 'installment' && currentPeriodPaid ? 'advance' :
-    selected === 'advance' && !currentPeriodPaid    ? 'installment' :
+    selected === 'installment' && currentPeriodPaid  ? 'advance'      :
+    selected === 'advance'     && !currentPeriodPaid ? 'installment'  :
     selected;
 
   const AMOUNT_FOR: Record<string, number> = {
@@ -195,9 +249,9 @@ export default function PaymentOptions() {
       }
     }
     const type =
-      effectiveSelected === 'full'    ? 'full'    :
-      effectiveSelected === 'custom'  ? 'custom'  :
-      effectiveSelected === 'advance' ? 'advance' :
+      effectiveSelected === 'full'    ? 'full'        :
+      effectiveSelected === 'custom'  ? 'custom'      :
+      effectiveSelected === 'advance' ? 'advance'     :
       'installment';
 
     navigate(`/loan/${id}/pay/confirm?amount=${finalAmount}&type=${type}`);
@@ -209,7 +263,7 @@ export default function PaymentOptions() {
 
       <main className="w-full max-w-md px-6 pt-24 pb-36 flex-1 space-y-6">
 
-        {/* ── Loan summary card ── */}
+        {/* ── Loan Summary Card ── */}
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -225,7 +279,9 @@ export default function PaymentOptions() {
               'text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full',
               loan.status?.toLowerCase() === 'active'
                 ? 'bg-green-500/10 text-green-500'
-                : 'bg-primary/10 text-primary'
+                : loan.status?.toLowerCase() === 'overdue'
+                  ? 'bg-orange-500/10 text-orange-400'
+                  : 'bg-primary/10 text-primary'
             )}>
               {loan.status}
             </span>
@@ -245,21 +301,37 @@ export default function PaymentOptions() {
                 className="h-full rounded-full bg-primary"
               />
             </div>
-            <p className="text-[10px] text-on-surface-variant mt-1 text-right">{progress.toFixed(1)}% complete</p>
+            <p className="text-[10px] text-on-surface-variant mt-1 text-right">
+              {progress.toFixed(1)}% complete · {periodsPaid} of {termCount} periods paid
+            </p>
           </div>
 
-          {/* Stats grid */}
+          {/* Stats grid — now term-aware */}
           <div className="grid grid-cols-3 gap-3 pt-1 border-t border-outline-variant/10">
             {[
-              { label: 'Principal',   value: `₱${fmt(Number(loan.principal_amount))}` },
-              { label: 'Monthly Due', value: `₱${fmt(monthly)}` },
-              { label: 'Term',        value: `${months} mo${months > 1 ? 's' : ''}` },
+              { label: 'Principal',                value: `₱${fmt(Number(loan.principal_amount))}` },
+              { label: `${TERM_SHORT[term]} Due`,  value: `₱${fmt(amtPerTerm)}` },
+              { label: 'Term',                     value: getTermDuration(term, termMonths) },
             ].map(({ label, value }) => (
               <div key={label} className="text-center">
                 <p className="text-[9px] uppercase tracking-wider text-on-surface-variant mb-0.5">{label}</p>
                 <p className="text-xs font-bold text-on-surface">{value}</p>
               </div>
             ))}
+          </div>
+
+          {/* Payment frequency badge */}
+          <div className="flex items-center justify-between pt-1 border-t border-outline-variant/10">
+            <p className="text-[10px] text-on-surface-variant uppercase tracking-wider">Payment Frequency</p>
+            <span className={cn(
+              'text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wide',
+              term === 'daily'        ? 'bg-blue-500/10 text-blue-400'    :
+              term === 'weekly'       ? 'bg-purple-500/10 text-purple-400':
+              term === 'semi_monthly' ? 'bg-teal-500/10 text-teal-400'    :
+              'bg-primary/10 text-primary'
+            )}>
+              {TERM_LABEL[term]}
+            </span>
           </div>
 
           {/* "Current period paid" banner */}
@@ -384,11 +456,16 @@ export default function PaymentOptions() {
             >
               <div>
                 <p className="text-sm font-semibold text-on-surface">You will pay</p>
-                {effectiveSelected === 'advance' && (
-                  <p className="text-[10px] text-on-surface-variant mt-0.5">
-                    Advance payment for period {advancePeriodNo}
-                  </p>
-                )}
+                <p className="text-[10px] text-on-surface-variant mt-0.5">
+                  {effectiveSelected === 'advance'
+                    ? `Advance payment for period ${advancePeriodNo} of ${termCount}`
+                    : effectiveSelected === 'installment'
+                      ? `Period ${periodsPaid + 1} of ${termCount} · ${TERM_LABEL[term]} installment`
+                      : effectiveSelected === 'full'
+                        ? 'Full loan settlement'
+                        : 'Custom payment amount'
+                  }
+                </p>
               </div>
               <p className="font-headline font-extrabold text-2xl text-primary tabular-nums">
                 ₱{fmt(finalAmount)}
