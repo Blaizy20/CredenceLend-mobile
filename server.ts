@@ -1422,7 +1422,7 @@ async function startServer() {
 
       const [payResult] = await pool.query<ResultSetHeader>(
         `INSERT INTO payments (loan_id, amount, payment_date, method, status, notes, tenant_id, or_no, gcash_reference_no, bank_reference_no)
-         VALUES (?, ?, CURDATE(), ?, 'Paid', ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, DATE(CONVERT_TZ(NOW(), '+00:00', '+08:00')), ?, 'Paid', ?, ?, ?, ?, ?)`,
         [loan_id, payAmount, normalizedMethod, notes, loan.tenant_id, or_no, gcash_reference_no, bank_reference_no]
       );
 
