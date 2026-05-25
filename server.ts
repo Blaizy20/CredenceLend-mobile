@@ -10,7 +10,7 @@ import { Upload } from '@aws-sdk/lib-storage';
 import { s3, BUCKET } from './storage';
 import { GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { formatRelative } from '@/src/lib/dateUtils';
+import { formatRelative } from '@/src/lib/dateutils';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
