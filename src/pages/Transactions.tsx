@@ -9,7 +9,12 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { API_BASE } from '../lib/api';
-import { formatRelative } from '../lib/dateutils';
+import {
+  formatRelative,
+  formatDate,
+  formatFullDate,
+  formatFullTime,
+} from '../lib/dateutils';
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
 interface Transaction {
@@ -50,19 +55,11 @@ const getMethodConfig = (method: string): MethodConfig =>
   METHOD_CONFIG[method?.toUpperCase()] ?? METHOD_CONFIG.OTHER;
 
 /* ─── Helpers ────────────────────────────────────────────────────────── */
-const formatDate = (s: string) =>
-  new Date(s).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
-
-const formatFullDate = (s: string) =>
-  new Date(s).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
-
-const formatFullTime = (s: string) =>
-  new Date(s).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-
+// Groups by PHT-correct date label (e.g. "May 27, 2026")
 const groupByDate = (txs: Transaction[]) => {
   const groups: Record<string, Transaction[]> = {};
   txs.forEach(tx => {
-    const key = formatDate(tx.created_at);
+    const key = formatDate(tx.created_at); // ✅ PHT-aware via dateUtils
     if (!groups[key]) groups[key] = [];
     groups[key].push(tx);
   });
@@ -88,7 +85,6 @@ function DetailRow({ icon, label, value, mono = false }: {
 
 /* ─── Detail Sheet ───────────────────────────────────────────────────── */
 function DetailSheet({ tx, onClose }: { tx: Transaction | null; onClose: () => void }) {
-  // Close on back-swipe / escape
   React.useEffect(() => {
     if (!tx) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -158,7 +154,7 @@ function DetailSheet({ tx, onClose }: { tx: Transaction | null; onClose: () => v
               </div>
             </div>
 
-            {/* Info rows */}
+            {/* Info rows — all using PHT-correct dateUtils functions */}
             <div className="px-6 pb-8 divide-y divide-outline-variant/10">
               <DetailRow icon={<Calendar  size={13} />} label="Date"         value={formatFullDate(tx.created_at)} />
               <DetailRow icon={<BookOpen  size={13} />} label="Time"         value={formatFullTime(tx.created_at)} />
