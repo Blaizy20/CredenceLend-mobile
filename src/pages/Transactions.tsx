@@ -207,14 +207,6 @@ export default function Transactions() {
       const res  = await fetch(`${API_BASE}/api/payments/customer/${customerId}?tenant_id=${tenantId}`);
       const data = await res.json();
       if (!res.ok) { setError(data?.message || 'Failed to load transactions.'); return; }
-      // ── DEBUG: remove once timezone is confirmed correct ──────────────
-          if (Array.isArray(data) && data.length > 0) {
-            console.log('[TZ DEBUG] raw created_at  :', data[0].created_at);
-            console.log('[TZ DEBUG] new Date()       :', new Date(data[0].created_at).toString());
-            console.log('[TZ DEBUG] toISOString()    :', new Date(data[0].created_at).toISOString());
-            console.log('[TZ DEBUG] PHT formatted    :', new Date(data[0].created_at).toLocaleString('en-PH', { timeZone: 'Asia/Manila' }));
-          }
-          // ─────────────────────────────────────────────────────────────────
       setTransactions(Array.isArray(data) ? data : []);
     } catch {
       setError('Unable to load transactions. Check your connection and try again.');
