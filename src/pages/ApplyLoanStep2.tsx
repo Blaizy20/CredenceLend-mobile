@@ -89,6 +89,7 @@ export default function ApplyLoanStep2() {
   const [showConfirm, setShowConfirm]       = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
   const [successStep, setSuccessStep]       = useState<'idle' | 'loading' | 'done'>('idle');
+  const [submittedLoanId, setSubmittedLoanId] = useState<number | null>(null); // ← NEW
 
   const [successData, setSuccessData] = useState<{
     instant_reason:       string;
@@ -175,7 +176,6 @@ export default function ApplyLoanStep2() {
       fd.append('code',        code);
       fd.append('label',       label);
 
-      // ✅ Fixed: use full API URL instead of relative path
       const res  = await fetch(`${API}/api/upload/document`, {
         method: 'POST',
         body:   fd,
@@ -234,6 +234,7 @@ export default function ApplyLoanStep2() {
       }
 
       const loanId = result.loan?.loan_id;
+      if (loanId) setSubmittedLoanId(loanId); // ← NEW
 
       const allDocs: { code: string; label: string; file: File }[] = [
         ...uploadDocs.map(d => ({ code: d.code, label: d.label, file: d.file })),
@@ -631,6 +632,7 @@ export default function ApplyLoanStep2() {
                   </motion.div>
                 )}
 
+                {/* ── Action Buttons ── */}
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}
                   className="w-full flex flex-col gap-3 pt-2">
                   <button
@@ -639,10 +641,12 @@ export default function ApplyLoanStep2() {
                     <LayoutDashboard size={18} />
                     Go to Dashboard
                   </button>
+                  {/* ── Fixed: navigate to the actual submitted loan ── */}
                   <button
-                    onClick={() => navigate('/loans', { replace: true })}
-                    className="w-full py-4 rounded-full bg-surface-container-highest text-on-surface font-bold text-sm active:scale-95 transition-transform">
-                    View My Loans
+                    onClick={() => navigate(`/loan/${submittedLoanId}`, { replace: true })}
+                    disabled={!submittedLoanId}
+                    className="w-full py-4 rounded-full bg-surface-container-highest text-on-surface font-bold text-sm active:scale-95 transition-transform disabled:opacity-40">
+                    View My Loan
                   </button>
                 </motion.div>
               </motion.div>
