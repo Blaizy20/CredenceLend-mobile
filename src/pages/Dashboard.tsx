@@ -1,5 +1,8 @@
 import React from 'react';
-import { Wallet, ReceiptText, ChevronDown, AlertTriangle, X, TrendingUp, Clock } from 'lucide-react';
+import {
+  Wallet, ReceiptText, ChevronDown, AlertTriangle,
+  TrendingUp, Clock, X, CheckCircle2, Ban,
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { TopBar } from '../components/TopBar';
 import { BottomNav } from '../components/BottomNav';
@@ -8,32 +11,62 @@ import { loansAPI } from '../lib/api';
 import { cn } from '@/src/lib/utils';
 
 interface Loan {
-  loan_id: number;
-  reference_no: string;
-  principal_amount: number;
+  loan_id:           number;
+  reference_no:      string;
+  principal_amount:  number;
   remaining_balance: number;
-  status: string;
-  due_date: string;
-  created_at: string;
+  status:            string;
+  due_date:          string;
+  created_at:        string;
 }
 
 const BLOCKED_STATUSES = ['active', 'pending', 'under_review', 'overdue'];
 
-const statusStyle: Record<string, { badge: string; dot: string }> = {
-  paid:         { badge: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20',  dot: 'bg-emerald-400' },
-  active:       { badge: 'bg-green-500/15 text-green-500 border border-green-500/20',        dot: 'bg-green-500' },
-  pending:      { badge: 'bg-blue-500/15 text-blue-400 border border-blue-500/20',           dot: 'bg-blue-400' },
-  denied:       { badge: 'bg-red-500/15 text-red-400 border border-red-500/20',              dot: 'bg-red-400' },
-  closed:       { badge: 'bg-outline/10 text-outline border border-outline/20',              dot: 'bg-outline' },
-  under_review: { badge: 'bg-yellow-500/15 text-yellow-400 border border-yellow-500/20',    dot: 'bg-yellow-400' },
-  overdue:      { badge: 'bg-orange-500/15 text-orange-400 border border-orange-500/20',    dot: 'bg-orange-400' }, // ✅ ADDED
+// ── Status config ─────────────────────────────────────────────────────────────
+const STATUS_CONFIG: Record<string, {
+  badge: string;
+  dot:   string;
+  row:   string;
+}> = {
+  active:       {
+    badge: 'bg-green-500/12 text-green-600 border border-green-500/30',
+    dot:   'bg-green-500',
+    row:   'hover:bg-green-500/[0.03]',
+  },
+  pending:      {
+    badge: 'bg-blue-500/12 text-blue-600 border border-blue-500/30',
+    dot:   'bg-blue-500',
+    row:   'hover:bg-blue-500/[0.03]',
+  },
+  under_review: {
+    badge: 'bg-yellow-500/12 text-yellow-600 border border-yellow-500/30',
+    dot:   'bg-yellow-500',
+    row:   'hover:bg-yellow-500/[0.03]',
+  },
+  overdue:      {
+    badge: 'bg-orange-500/12 text-orange-600 border border-orange-500/30',
+    dot:   'bg-orange-500',
+    row:   'bg-orange-500/[0.03] hover:bg-orange-500/[0.06]',
+  },
+  closed:       {
+    badge: 'bg-surface-container-highest text-on-surface-variant border border-outline/25',
+    dot:   'bg-outline',
+    row:   'hover:bg-surface-container-highest/30',
+  },
+  denied:       {
+    badge: 'bg-red-500/12 text-red-500 border border-red-500/30',
+    dot:   'bg-red-400',
+    row:   'hover:bg-red-500/[0.03]',
+  },
+  paid:         {
+    badge: 'bg-emerald-500/12 text-emerald-600 border border-emerald-500/30',
+    dot:   'bg-emerald-500',
+    row:   'hover:bg-emerald-500/[0.03]',
+  },
 };
 
-const getStatusStyle = (status: string) =>
-  statusStyle[status?.toLowerCase()]?.badge ?? 'bg-outline/10 text-outline border border-outline/20';
-
-const getDotStyle = (status: string) =>
-  statusStyle[status?.toLowerCase()]?.dot ?? 'bg-outline';
+const getStatusConfig = (status: string) =>
+  STATUS_CONFIG[status?.toLowerCase()] ?? STATUS_CONFIG.closed;
 
 const STATUS_LABEL: Record<string, string> = {
   active:       'Active Loan',
@@ -42,27 +75,34 @@ const STATUS_LABEL: Record<string, string> = {
   overdue:      'Overdue Loan',
 };
 
+// ── Sort priority — closed ranks above denied ─────────────────────────────────
+const STATUS_ORDER: Record<string, number> = {
+  overdue:      0,
+  active:       1,
+  under_review: 2,
+  pending:      3,
+  closed:       4,  // closed before denied
+  denied:       5,
+  paid:         6,
+};
+
 export default function Dashboard() {
   const navigate = useNavigate();
-  const [loans, setLoans] = React.useState<Loan[]>([]);
-  const [loading, setLoading] = React.useState(true);
+  const [loans, setLoans]             = React.useState<Loan[]>([]);
+  const [loading, setLoading]         = React.useState(true);
   const [showAllLoans, setShowAllLoans] = React.useState(false);
   const [totalBalance, setTotalBalance] = React.useState(0);
-  const [parsedUser, setParsedUser] = React.useState<any>(null);
+  const [parsedUser, setParsedUser]   = React.useState<any>(null);
   const [blockedLoan, setBlockedLoan] = React.useState<Loan | null>(null);
 
   React.useEffect(() => {
     let user = null;
-    try {
-      user = JSON.parse(localStorage.getItem('user') || 'null');
-    } catch {
-      user = null;
-    }
+    try { user = JSON.parse(localStorage.getItem('user') || 'null'); } catch {}
 
     localStorage.removeItem('loanApplicationData');
     localStorage.removeItem('loanApplicationStep2');
 
-    if (!user || !user.customer_id) {
+    if (!user?.customer_id) {
       localStorage.removeItem('user');
       navigate('/login', { replace: true });
       return;
@@ -75,7 +115,7 @@ export default function Dashboard() {
   const fetchLoans = async (customerId: number) => {
     setLoading(true);
     try {
-      const data = await loansAPI.getLoans(customerId);
+      const data     = await loansAPI.getLoans(customerId);
       const loanList = Array.isArray(data) ? data : [];
       setLoans(loanList);
 
@@ -93,30 +133,28 @@ export default function Dashboard() {
 
   const handleApplyClick = () => {
     const blocked = loans.find(l => BLOCKED_STATUSES.includes(l.status?.toLowerCase()));
-    if (blocked) {
-      setBlockedLoan(blocked);
-      return;
-    }
+    if (blocked) { setBlockedLoan(blocked); return; }
     navigate('/apply');
   };
 
   if (!parsedUser) return null;
 
-  // ── Sort: overdue first, then active, then others, paid last
+  // ── Sort: by status priority, then newest first within same status ─────────
   const sortedLoans = [...loans].sort((a, b) => {
-    const order: Record<string, number> = { overdue: 0, active: 1, under_review: 2, pending: 3, denied: 4, closed: 5, paid: 6 };
-    const aOrder = order[a.status?.toLowerCase()] ?? 4;
-    const bOrder = order[b.status?.toLowerCase()] ?? 4;
-    return aOrder - bOrder;
+    const aOrder = STATUS_ORDER[a.status?.toLowerCase()] ?? 5;
+    const bOrder = STATUS_ORDER[b.status?.toLowerCase()] ?? 5;
+    if (aOrder !== bOrder) return aOrder - bOrder;
+    // Tiebreaker: newest created_at first
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
   });
 
-  const overdueLoans  = loans.filter(l => l.status?.toLowerCase() === 'overdue');
-  const activeLoans   = loans.filter(l => l.status?.toLowerCase() === 'active');
-  const hasOverdue    = overdueLoans.length > 0;
+  const overdueLoans = loans.filter(l => l.status?.toLowerCase() === 'overdue');
+  const activeLoans  = loans.filter(l => l.status?.toLowerCase() === 'active');
+  const hasOverdue   = overdueLoans.length > 0;
 
-  const PREVIEW_COUNT = 3;
-  const hiddenCount   = sortedLoans.length - PREVIEW_COUNT;
-  const hasMore       = !showAllLoans && hiddenCount > 0;
+  const PREVIEW_COUNT  = 3;
+  const hiddenCount    = sortedLoans.length - PREVIEW_COUNT;
+  const hasMore        = !showAllLoans && hiddenCount > 0;
   const displayedLoans = showAllLoans ? sortedLoans : sortedLoans.slice(0, PREVIEW_COUNT);
 
   const fmt = (n: number) =>
@@ -154,16 +192,16 @@ export default function Dashboard() {
               initial={{ opacity: 0, y: -8 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
-              className="bg-orange-500/10 border border-orange-500/20 rounded-2xl p-4 flex items-start gap-3"
+              className="bg-orange-500/10 border border-orange-500/25 rounded-2xl p-4 flex items-start gap-3"
             >
               <div className="bg-orange-500 rounded-full p-1 shrink-0 mt-0.5">
                 <AlertTriangle size={14} className="text-white" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-orange-500 font-headline font-bold text-sm">
+                <p className="text-orange-600 font-headline font-bold text-sm">
                   {overdueLoans.length} overdue loan{overdueLoans.length > 1 ? 's' : ''} require attention
                 </p>
-                <p className="text-orange-400 text-xs mt-0.5 leading-relaxed">
+                <p className="text-orange-500/80 text-xs mt-0.5 leading-relaxed">
                   Late fees are accumulating daily. Tap a loan below to pay now.
                 </p>
               </div>
@@ -171,47 +209,50 @@ export default function Dashboard() {
           )}
         </AnimatePresence>
 
-        {/* ── Balance + Stats Row ── */}
+        {/* ── Balance Card ── */}
         <motion.section
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.05 }}
         >
-          {/* Main balance card */}
           <div className={cn(
-            "relative overflow-hidden rounded-3xl p-6 shadow-xl mb-4",
+            "relative overflow-hidden rounded-3xl p-6 mb-4",
+            // Subtle 2-hue gradient — within 40deg hue shift, low saturation on surface
             hasOverdue
-              ? "bg-gradient-to-br from-orange-500/20 via-surface-container-high to-surface-container-high border border-orange-500/20"
-              : "bg-gradient-to-br from-primary/10 via-surface-container-high to-surface-container-high border border-primary/10"
+              ? "bg-surface-container-high border border-orange-500/20 shadow-[0_4px_16px_rgba(0,0,0,0.07),0_2px_4px_rgba(0,0,0,0.04)]"
+              : "bg-surface-container-high border border-primary/15 shadow-[0_4px_16px_rgba(0,0,0,0.07),0_2px_4px_rgba(0,0,0,0.04)]"
           )}>
+            {/* Subtle ambient glow — single hue, low opacity */}
             <div className={cn(
-              "absolute top-0 right-0 -mr-8 -mt-8 w-40 h-40 rounded-full blur-[60px]",
-              hasOverdue ? "bg-orange-500/20" : "bg-primary/15"
+              "absolute top-0 right-0 -mr-10 -mt-10 w-36 h-36 rounded-full blur-[56px] pointer-events-none",
+              hasOverdue ? "bg-orange-500/15" : "bg-primary/12"
             )} />
+
             <div className="relative z-10">
               <div className="flex items-center justify-between mb-3">
                 <span className="text-on-surface-variant text-[10px] font-bold uppercase tracking-widest">
                   Outstanding Balance
                 </span>
                 <div className={cn(
-                  "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider",
+                  "flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border",
                   hasOverdue
-                    ? "bg-orange-500/15 text-orange-400 border border-orange-500/20"
-                    : "bg-primary/10 text-primary border border-primary/20"
+                    ? "bg-orange-500/10 text-orange-600 border-orange-500/25"
+                    : "bg-primary/10 text-primary border-primary/20"
                 )}>
-                  {hasOverdue ? (
-                    <><Clock size={10} /> {overdueLoans.length} Overdue</>
-                  ) : (
-                    <><TrendingUp size={10} /> {activeLoans.length} Active</>
-                  )}
+                  {hasOverdue
+                    ? <><Clock size={10} /> {overdueLoans.length} Overdue</>
+                    : <><TrendingUp size={10} /> {activeLoans.length} Active</>
+                  }
                 </div>
               </div>
+
               <p className={cn(
                 "font-headline font-extrabold text-5xl tracking-tight",
-                hasOverdue ? "text-orange-400" : "text-primary"
+                hasOverdue ? "text-orange-500" : "text-primary"
               )}>
                 ₱{fmt(totalBalance)}
               </p>
+
               {hasOverdue && (
                 <p className="text-orange-400/70 text-xs mt-1.5 font-medium">
                   Includes late fees on overdue loans
@@ -227,19 +268,21 @@ export default function Dashboard() {
                 label: 'Total Loans',
                 value: loans.length,
                 color: 'text-on-surface',
-                bg: 'bg-surface-container',
+                bg:    'bg-surface-container border border-outline/15',
               },
               {
                 label: 'Active',
                 value: activeLoans.length,
-                color: 'text-green-500',
-                bg: 'bg-green-500/10',
+                color: 'text-green-600',
+                bg:    'bg-green-500/8 border border-green-500/20',
               },
               {
                 label: 'Overdue',
                 value: overdueLoans.length,
-                color: overdueLoans.length > 0 ? 'text-orange-400' : 'text-on-surface-variant',
-                bg: overdueLoans.length > 0 ? 'bg-orange-500/10' : 'bg-surface-container',
+                color: overdueLoans.length > 0 ? 'text-orange-500' : 'text-on-surface-variant',
+                bg:    overdueLoans.length > 0
+                  ? 'bg-orange-500/8 border border-orange-500/20'
+                  : 'bg-surface-container border border-outline/15',
               },
             ].map(({ label, value, color, bg }) => (
               <div key={label} className={cn("rounded-2xl p-3 flex flex-col items-center gap-1", bg)}>
@@ -256,16 +299,18 @@ export default function Dashboard() {
 
         {/* ── Apply Card ── */}
         <motion.section
-          initial={{ opacity: 0, scale: 0.95 }}
+          initial={{ opacity: 0, scale: 0.97 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ delay: 0.1 }}
         >
-          <div className="relative overflow-hidden rounded-2xl bg-surface-container-high p-5 shadow-xl flex items-center gap-4">
-            <div className="absolute inset-0 bg-gradient-to-r from-primary/5 to-transparent pointer-events-none" />
-            <div className="w-12 h-12 rounded-2xl bg-primary/20 flex items-center justify-center shrink-0">
-              <Wallet className="text-primary" size={24} />
+          <div className="relative overflow-hidden rounded-2xl bg-surface-container-high border border-outline/15 p-5
+            shadow-[0_2px_8px_rgba(0,0,0,0.05),0_1px_2px_rgba(0,0,0,0.03)]
+            flex items-center gap-4
+            transition-shadow duration-200 hover:shadow-[0_4px_16px_rgba(0,0,0,0.07),0_2px_4px_rgba(0,0,0,0.04)]">
+            <div className="w-12 h-12 rounded-2xl bg-primary/15 flex items-center justify-center shrink-0">
+              <Wallet className="text-primary" size={22} />
             </div>
-            <div className="flex-1 min-w-0 relative z-10">
+            <div className="flex-1 min-w-0">
               <h3 className="font-headline text-base font-bold text-on-surface leading-tight">
                 Need a funding boost?
               </h3>
@@ -275,7 +320,11 @@ export default function Dashboard() {
             </div>
             <button
               onClick={handleApplyClick}
-              className="relative z-10 shrink-0 py-2.5 px-5 bg-primary text-on-primary font-headline font-extrabold text-sm rounded-full shadow-lg shadow-primary/20 active:scale-95 transition-all duration-200"
+              className="shrink-0 py-2.5 px-5 bg-primary text-on-primary font-headline font-extrabold text-sm rounded-full
+                shadow-[0_2px_8px_rgba(0,0,0,0.05)]
+                transition-all duration-150
+                hover:scale-[1.02] hover:shadow-[0_4px_16px_rgba(0,0,0,0.07)]
+                active:scale-95"
             >
               Apply
             </button>
@@ -289,7 +338,8 @@ export default function Dashboard() {
             {loans.length > PREVIEW_COUNT && (
               <button
                 onClick={() => setShowAllLoans(!showAllLoans)}
-                className="flex items-center gap-1.5 text-primary text-xs font-bold uppercase tracking-widest"
+                className="flex items-center gap-1.5 text-primary text-xs font-bold uppercase tracking-widest
+                  transition-opacity duration-150 hover:opacity-70"
               >
                 {showAllLoans ? 'Show Less' : (
                   <>
@@ -303,12 +353,14 @@ export default function Dashboard() {
             )}
           </div>
 
-          <div className="bg-surface-container-low rounded-2xl overflow-hidden border border-outline-variant/10">
+          <div className="bg-surface-container-low rounded-2xl overflow-hidden border border-outline/15
+            shadow-[0_2px_8px_rgba(0,0,0,0.05),0_1px_2px_rgba(0,0,0,0.03)]">
+
             {/* Table header */}
-            <div className="grid grid-cols-3 px-5 py-3.5 bg-surface-container-highest/20 border-b border-outline-variant/10">
-              <span className="text-[10px] font-headline font-bold uppercase tracking-widest text-outline">Reference</span>
-              <span className="text-[10px] font-headline font-bold uppercase tracking-widest text-outline text-center">Status</span>
-              <span className="text-[10px] font-headline font-bold uppercase tracking-widest text-outline text-right">Date</span>
+            <div className="grid grid-cols-3 px-5 py-3.5 bg-surface-container-highest/25 border-b border-outline/12">
+              <span className="text-[10px] font-headline font-bold uppercase tracking-widest text-on-surface-variant">Reference</span>
+              <span className="text-[10px] font-headline font-bold uppercase tracking-widest text-on-surface-variant text-center">Status</span>
+              <span className="text-[10px] font-headline font-bold uppercase tracking-widest text-on-surface-variant text-right">Date</span>
             </div>
 
             {loading ? (
@@ -317,27 +369,34 @@ export default function Dashboard() {
               </div>
             ) : loans.length > 0 ? (
               <>
-                <div className="divide-y divide-outline-variant/10">
+                <div className="divide-y divide-outline/10">
                   {displayedLoans.map((loan, index) => {
+                    const config      = getStatusConfig(loan.status);
                     const isOverdueRow = loan.status?.toLowerCase() === 'overdue';
+                    const isClosedRow  = loan.status?.toLowerCase() === 'closed';
+                    const isDeniedRow  = loan.status?.toLowerCase() === 'denied';
+
                     return (
                       <motion.div
                         key={loan.loan_id}
                         initial={{ opacity: 0, y: 6 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: index * 0.04 }}
-                        className={cn(
-                          "px-5 py-4 transition-colors cursor-pointer",
-                          isOverdueRow
-                            ? "hover:bg-orange-500/5 bg-orange-500/[0.03]"
-                            : "hover:bg-surface-container-highest/10"
-                        )}
                         onClick={() => navigate(`/loan/${loan.loan_id}`)}
+                        className={cn(
+                          "px-5 py-4 cursor-pointer transition-all duration-180",
+                          // Closed + denied rows are visually muted
+                          (isClosedRow || isDeniedRow) && "opacity-70",
+                          config.row
+                        )}
+                        style={{ transition: 'background-color 180ms ease, transform 180ms ease' }}
+                        whileHover={{ translateY: -1 }}
                       >
                         <div className="grid grid-cols-3 items-center">
+
                           {/* Reference */}
                           <div className="flex items-center gap-2 pr-2 min-w-0">
-                            <div className={cn("w-1.5 h-1.5 rounded-full shrink-0", getDotStyle(loan.status))} />
+                            <div className={cn("w-1.5 h-1.5 rounded-full shrink-0", config.dot)} />
                             <span className="text-xs font-mono font-bold text-on-surface truncate">
                               {loan.reference_no}
                             </span>
@@ -347,24 +406,46 @@ export default function Dashboard() {
                           <div className="flex justify-center">
                             <span className={cn(
                               "text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-tighter",
-                              getStatusStyle(loan.status)
+                              config.badge
                             )}>
                               {loan.status}
                             </span>
                           </div>
 
                           {/* Date */}
-                          <span className="text-xs text-on-surface-variant text-right">
-                            {new Date(loan.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                          <span className="text-xs text-on-surface-variant text-right tabular-nums">
+                            {new Date(loan.created_at).toLocaleDateString('en-US', {
+                              month: 'short', day: 'numeric',
+                            })}
                           </span>
                         </div>
 
-                        {/* Overdue sub-row — remaining balance */}
+                        {/* Overdue sub-row */}
                         {isOverdueRow && (
                           <div className="mt-2 ml-3.5 flex items-center gap-1.5">
                             <span className="text-orange-400/70 text-[10px] font-medium">Balance due:</span>
-                            <span className="text-orange-400 text-[11px] font-headline font-bold tabular-nums">
+                            <span className="text-orange-500 text-[11px] font-headline font-bold tabular-nums">
                               ₱{fmt(Number(loan.remaining_balance))}
+                            </span>
+                          </div>
+                        )}
+
+                        {/* Closed sub-row — show settled amount */}
+                        {isClosedRow && (
+                          <div className="mt-2 ml-3.5 flex items-center gap-1.5">
+                            <CheckCircle2 size={10} className="text-outline/50" />
+                            <span className="text-on-surface-variant/60 text-[10px] font-medium">
+                              Fully settled
+                            </span>
+                          </div>
+                        )}
+
+                        {/* Denied sub-row */}
+                        {isDeniedRow && (
+                          <div className="mt-2 ml-3.5 flex items-center gap-1.5">
+                            <Ban size={10} className="text-red-400/50" />
+                            <span className="text-red-400/60 text-[10px] font-medium">
+                              Application not approved
                             </span>
                           </div>
                         )}
@@ -373,24 +454,31 @@ export default function Dashboard() {
                   })}
                 </div>
 
+                {/* Show more — fade preview */}
                 {hasMore && (
                   <div className="relative">
-                    <div className="px-5 py-4 opacity-30 pointer-events-none select-none">
+                    <div className="px-5 py-4 opacity-25 pointer-events-none select-none">
                       <div className="grid grid-cols-3 items-center">
-                        <div className="h-3 w-24 bg-on-surface/20 rounded-full" />
+                        <div className="h-3 w-24 bg-on-surface/15 rounded-full" />
                         <div className="flex justify-center">
-                          <div className="h-5 w-14 bg-on-surface/20 rounded-full" />
+                          <div className="h-5 w-14 bg-on-surface/15 rounded-full" />
                         </div>
                         <div className="flex justify-end">
-                          <div className="h-3 w-10 bg-on-surface/20 rounded-full" />
+                          <div className="h-3 w-10 bg-on-surface/15 rounded-full" />
                         </div>
                       </div>
                     </div>
-                    <div className="absolute inset-0 bg-gradient-to-b from-transparent via-surface-container-low/80 to-surface-container-low pointer-events-none" />
+                    <div className="absolute inset-0 bg-gradient-to-b from-transparent via-surface-container-low/70 to-surface-container-low pointer-events-none" />
                     <div className="absolute bottom-3 left-0 right-0 flex justify-center">
                       <button
                         onClick={() => setShowAllLoans(true)}
-                        className="flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-surface-container-highest border border-outline-variant/20 text-primary text-[11px] font-bold shadow-lg active:scale-95 transition-transform"
+                        className="flex items-center gap-1.5 px-4 py-1.5 rounded-full
+                          bg-surface-container-highest border border-outline/20
+                          text-primary text-[11px] font-bold
+                          shadow-[0_2px_8px_rgba(0,0,0,0.05)]
+                          transition-all duration-150
+                          hover:shadow-[0_4px_16px_rgba(0,0,0,0.07)] hover:scale-[1.02]
+                          active:scale-95"
                       >
                         <ChevronDown size={13} />
                         {hiddenCount} more loan{hiddenCount > 1 ? 's' : ''}
@@ -429,9 +517,14 @@ export default function Dashboard() {
               className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
             />
             <motion.div
-              initial={{ opacity: 0, y: 80 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 80 }}
+              initial={{ opacity: 0, y: 80 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 80 }}
               transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-              className="fixed bottom-0 left-0 right-0 z-50 bg-surface-container-low rounded-t-[2rem] shadow-2xl border-t border-outline-variant max-w-md mx-auto"
+              className="fixed bottom-0 left-0 right-0 z-50 max-w-md mx-auto
+                bg-surface-container-low rounded-t-[2rem]
+                shadow-[0_8px_24px_rgba(0,0,0,0.09),0_4px_8px_rgba(0,0,0,0.05)]
+                border-t border-outline/15"
             >
               <div className="p-6">
                 <div className="w-10 h-1 bg-outline-variant rounded-full mx-auto mb-6" />
@@ -442,12 +535,12 @@ export default function Dashboard() {
                     "w-16 h-16 rounded-full flex items-center justify-center mb-4",
                     blockedLoan.status?.toLowerCase() === 'overdue'
                       ? "bg-orange-500/10"
-                      : "bg-secondary/10"
+                      : "bg-primary/10"
                   )}>
-                    <AlertTriangle size={32} className={
+                    <AlertTriangle size={28} className={
                       blockedLoan.status?.toLowerCase() === 'overdue'
-                        ? "text-orange-400"
-                        : "text-secondary"
+                        ? "text-orange-500"
+                        : "text-primary"
                     } />
                   </div>
                   <h3 className="font-headline font-bold text-xl text-on-surface">
@@ -458,21 +551,21 @@ export default function Dashboard() {
                     <span className="font-bold text-on-surface">
                       {STATUS_LABEL[blockedLoan.status?.toLowerCase()] ?? blockedLoan.status}
                     </span>{' '}
-                    that must be settled or resolved before you can apply for a new loan.
+                    that must be settled or resolved before applying for a new loan.
                   </p>
                 </div>
 
                 {/* Loan Info */}
-                <div className="p-4 bg-surface-container-high rounded-2xl space-y-2 mb-6">
+                <div className="p-4 bg-surface-container-high rounded-2xl border border-outline/15 space-y-2 mb-6">
                   <div className="flex justify-between text-sm">
                     <span className="text-on-surface-variant">Reference No.</span>
                     <span className="font-bold font-mono text-on-surface">{blockedLoan.reference_no}</span>
                   </div>
-                  <div className="flex justify-between text-sm">
+                  <div className="flex justify-between text-sm items-center">
                     <span className="text-on-surface-variant">Status</span>
                     <span className={cn(
-                      "text-[11px] font-bold px-2 py-0.5 rounded-full uppercase",
-                      getStatusStyle(blockedLoan.status)
+                      "text-[11px] font-bold px-2.5 py-0.5 rounded-full uppercase border",
+                      getStatusConfig(blockedLoan.status).badge
                     )}>
                       {blockedLoan.status}
                     </span>
@@ -481,12 +574,14 @@ export default function Dashboard() {
                     <div className="flex justify-between text-sm">
                       <span className="text-on-surface-variant">Remaining Balance</span>
                       <span className={cn(
-                        "font-bold",
+                        "font-bold tabular-nums",
                         blockedLoan.status?.toLowerCase() === 'overdue'
-                          ? "text-orange-400"
+                          ? "text-orange-500"
                           : "text-on-surface"
                       )}>
-                        ₱{Number(blockedLoan.remaining_balance).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                        ₱{Number(blockedLoan.remaining_balance).toLocaleString('en-PH', {
+                          minimumFractionDigits: 2,
+                        })}
                       </span>
                     </div>
                   )}
@@ -495,22 +590,26 @@ export default function Dashboard() {
                 {/* Actions */}
                 <div className="flex flex-col gap-3">
                   <button
-                    onClick={() => {
-                      setBlockedLoan(null);
-                      navigate(`/loan/${blockedLoan.loan_id}`);
-                    }}
+                    onClick={() => { setBlockedLoan(null); navigate(`/loan/${blockedLoan.loan_id}`); }}
                     className={cn(
-                      "w-full py-4 rounded-full font-bold text-sm active:scale-95 transition-transform",
+                      "w-full py-4 rounded-full font-bold text-sm",
+                      "transition-all duration-150 hover:scale-[1.01] active:scale-95",
+                      "shadow-[0_2px_8px_rgba(0,0,0,0.05)] hover:shadow-[0_4px_16px_rgba(0,0,0,0.07)]",
                       blockedLoan.status?.toLowerCase() === 'overdue'
                         ? "bg-orange-500 text-white"
                         : "bg-primary text-on-primary"
                     )}
                   >
-                    {blockedLoan.status?.toLowerCase() === 'overdue' ? 'Pay Now (Overdue)' : 'View Existing Loan'}
+                    {blockedLoan.status?.toLowerCase() === 'overdue'
+                      ? 'Pay Now (Overdue)'
+                      : 'View Existing Loan'
+                    }
                   </button>
                   <button
                     onClick={() => setBlockedLoan(null)}
-                    className="w-full py-4 rounded-full bg-surface-container-highest text-on-surface font-bold text-sm active:scale-95 transition-transform"
+                    className="w-full py-4 rounded-full bg-surface-container-highest border border-outline/20
+                      text-on-surface font-bold text-sm
+                      transition-all duration-150 hover:scale-[1.01] active:scale-95"
                   >
                     Go Back
                   </button>
