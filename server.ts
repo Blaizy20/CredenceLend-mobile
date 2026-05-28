@@ -1113,6 +1113,21 @@ async function startServer() {
     }
   });
 
+  // ── Notifications: Delete One ─────────────────────────────────────────────
+  // ← NEW ROUTE (for swipe-to-dismiss)
+  app.delete("/api/notifications/:notificationId", async (req, res) => {
+    try {
+      await pool.query(
+        `DELETE FROM notifications WHERE notification_id = ?`,
+        [req.params.notificationId]
+      );
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("Delete notification error:", err.message);
+      res.status(500).json({ success: false });
+    }
+  });
+
   // ── Notifications: Mark All Read ─────────────────────────────────────────
   // ← NEW ROUTE (was missing — this is why blue dots never cleared)
   app.patch("/api/notifications/:customerId/read-all", async (req, res) => {
@@ -1125,21 +1140,6 @@ async function startServer() {
       res.json({ success: true });
     } catch (err: any) {
       console.error("Read-all error:", err.message);
-      res.status(500).json({ success: false });
-    }
-  });
-
-  // ── Notifications: Delete One ─────────────────────────────────────────────
-  // ← NEW ROUTE (for swipe-to-dismiss)
-  app.delete("/api/notifications/:notificationId", async (req, res) => {
-    try {
-      await pool.query(
-        `DELETE FROM notifications WHERE notification_id = ?`,
-        [req.params.notificationId]
-      );
-      res.json({ success: true });
-    } catch (err: any) {
-      console.error("Delete notification error:", err.message);
       res.status(500).json({ success: false });
     }
   });

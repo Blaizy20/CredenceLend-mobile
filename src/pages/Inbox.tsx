@@ -23,25 +23,26 @@ interface Notification {
   created_at:      string;
 }
 
-type FilterTab = 'all' | 'unread' | 'loans' | 'payments';
+type FilterTab = 'unread' | 'loans' | 'payments' | 'all';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
+// ── Unread first, All last ────────────────────────────────────────────────────
 const FILTER_TABS: { key: FilterTab; label: string }[] = [
-  { key: 'all',      label: 'All'      },
   { key: 'unread',   label: 'Unread'   },
   { key: 'loans',    label: 'Loans'    },
   { key: 'payments', label: 'Payments' },
+  { key: 'all',      label: 'All'      },
 ];
 
 const LOAN_TYPES    = new Set(['approved', 'denied', 'general']);
 const PAYMENT_TYPES = new Set(['payment']);
 
 const NOTIF_CONFIG: Record<string, {
-  icon:    (size: number) => JSX.Element;
-  bg:      string;
-  border:  string;
-  iconBg:  string;
+  icon:   (size: number) => JSX.Element;
+  bg:     string;
+  border: string;
+  iconBg: string;
 }> = {
   approved: {
     icon:   (s) => <CheckCircle2 className="text-green-500"          size={s} />,
@@ -93,38 +94,57 @@ function NotifCard({
   onDismiss: (id: number) => void;
   onClick:   (notif: Notification) => void;
 }) {
-  const config    = getConfig(notif.type);
-  const isUnread  = notif.is_read === 0 || notif.is_read === false;
-  const dest      = getDestination(notif);
+  const config   = getConfig(notif.type);
+  const isUnread = notif.is_read === 0 || notif.is_read === false;
+  const dest     = getDestination(notif);
 
-  const startX    = useRef(0);
-  const currentX  = useRef(0);
-  const [swipeDx, setSwipeDx]         = useState(0);
-  const [swiping, setSwiping]         = useState(false);
-  const [dismissed, setDismissed]     = useState(false);
+  const startX            = useRef(0);
+  const [swipeDx, setSwipeDx]     = useState(0);
+  const [swiping, setSwiping]     = useState(false);
+  const [dismissed, setDismissed] = useState(false);
 
   const DISMISS_THRESHOLD = -80;
 
+  // ── Touch (mobile) ────────────────────────────────────────────────────────
   const handleTouchStart = (e: React.TouchEvent) => {
-    startX.current  = e.touches[0].clientX;
-    currentX.current = e.touches[0].clientX;
+    startX.current = e.touches[0].clientX;
     setSwiping(true);
   };
-
   const handleTouchMove = (e: React.TouchEvent) => {
     const dx = e.touches[0].clientX - startX.current;
-    currentX.current = e.touches[0].clientX;
     if (dx < 0) setSwipeDx(Math.max(dx, -120));
   };
-
   const handleTouchEnd = () => {
     setSwiping(false);
     if (swipeDx < DISMISS_THRESHOLD) {
-      setDismissed(true);
-      setTimeout(() => onDismiss(notif.notification_id), 300);
+      triggerDismiss();
     } else {
       setSwipeDx(0);
     }
+  };
+
+  // ── Mouse (web fallback) ──────────────────────────────────────────────────
+  const handleMouseDown = (e: React.MouseEvent) => {
+    startX.current = e.clientX;
+    setSwiping(true);
+  };
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!swiping) return;
+    const dx = e.clientX - startX.current;
+    if (dx < 0) setSwipeDx(Math.max(dx, -120));
+  };
+  const handleMouseUp = () => {
+    setSwiping(false);
+    if (swipeDx < DISMISS_THRESHOLD) {
+      triggerDismiss();
+    } else {
+      setSwipeDx(0);
+    }
+  };
+
+  const triggerDismiss = () => {
+    setDismissed(true);
+    setTimeout(() => onDismiss(notif.notification_id), 300);
   };
 
   const formatTime = (dateStr: string) => {
@@ -142,30 +162,51 @@ function NotifCard({
     <motion.div
       key={notif.notification_id}
       initial={{ opacity: 0, y: 10 }}
-      animate={dismissed ? { opacity: 0, x: -60, height: 0, marginBottom: 0 } : { opacity: 1, y: 0 }}
+      animate={dismissed
+        ? { opacity: 0, x: -40, height: 0, marginBottom: 0, paddingBottom: 0 }
+        : { opacity: 1, y: 0 }
+      }
       transition={{ delay: dismissed ? 0 : index * 0.04, duration: dismissed ? 0.25 : 0.3 }}
-      className="relative overflow-hidden rounded-2xl"
+      className="relative overflow-hidden rounded-2xl select-none"
     >
-      {/* Red delete bg revealed on swipe */}
-      <div className="absolute inset-y-0 right-0 flex items-center justify-end px-5 bg-red-500/15 rounded-2xl">
-        <Trash2 size={20} className="text-red-500" />
-      </div>
+      {/* Red delete bg — only visible when swiping */}
+      {swipeDx < -10 && (
+        <div className="absolute inset-y-0 right-0 flex items-center justify-end px-5 bg-red-500/15 rounded-2xl pointer-events-none">
+          <Trash2 size={20} className="text-red-500" />
+        </div>
+      )}
 
       {/* Card */}
       <div
-        style={{ transform: `translateX(${swipeDx}px)`, transition: swiping ? 'none' : 'transform 0.3s ease' }}
+        style={{
+          transform:  `translateX(${swipeDx}px)`,
+          transition: swiping ? 'none' : 'transform 0.3s ease',
+        }}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
-        onClick={() => onClick(notif)}
-        className={`relative p-4 rounded-2xl border flex items-start gap-4 cursor-pointer active:scale-[0.98] transition-transform
-          ${config.bg} ${config.border}
-          ${isUnread ? 'opacity-100' : 'opacity-75'}`}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUp}
+        onMouseLeave={() => { if (swiping) { setSwiping(false); setSwipeDx(0); } }}
+        className={`relative p-4 rounded-2xl border flex items-start gap-4
+          ${config.bg} ${config.border}`}
       >
-        {/* Unread dot — only shown until read-all fires */}
+        {/* Unread dot */}
         {isUnread && (
-          <span className="absolute top-3.5 right-3.5 w-2 h-2 rounded-full bg-primary" />
+          <span className="absolute top-3.5 right-10 w-2 h-2 rounded-full bg-primary" />
         )}
+
+        {/* Delete button — always visible, works on web + mobile */}
+        <button
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); triggerDismiss(); }}
+          className="absolute top-3 right-3 w-7 h-7 rounded-lg flex items-center justify-center
+            bg-red-500/10 hover:bg-red-500/20 active:scale-90 transition-all"
+          aria-label="Dismiss notification"
+        >
+          <Trash2 size={13} className="text-red-400" />
+        </button>
 
         {/* Icon */}
         <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${config.iconBg}`}>
@@ -173,7 +214,10 @@ function NotifCard({
         </div>
 
         {/* Content */}
-        <div className="flex-1 min-w-0 pr-4">
+        <div
+          className="flex-1 min-w-0 pr-8 cursor-pointer"
+          onClick={() => onClick(notif)}
+        >
           <div className="flex items-start justify-between gap-2 mb-1">
             <p className={`text-sm leading-tight ${isUnread ? 'font-bold text-on-surface' : 'font-semibold text-on-surface-variant'}`}>
               {notif.title}
@@ -207,7 +251,7 @@ export default function Inbox() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading]             = useState(true);
   const [error, setError]                 = useState('');
-  const [activeTab, setActiveTab]         = useState<FilterTab>('all');
+  const [activeTab, setActiveTab]         = useState<FilterTab>('unread'); // ← default: Unread
   const [customerId, setCustomerId]       = useState<number | null>(null);
 
   useEffect(() => {
@@ -228,11 +272,10 @@ export default function Inbox() {
       const notifs: Notification[] = Array.isArray(data) ? data : [];
       setNotifications(notifs);
 
-      // Mark all read immediately after load — fixes the blue dot bug
+      // Mark all read + optimistically clear dots — fixes the blue dot bug
       const unreadCount = notifs.filter(n => n.is_read === 0 || n.is_read === false).length;
       if (unreadCount > 0) {
         fetch(`${API_BASE}/api/notifications/${cid}/read-all`, { method: 'PATCH' }).catch(() => {});
-        // Optimistically clear unread dots in local state
         setNotifications(prev => prev.map(n => ({ ...n, is_read: 1 })));
       }
     } catch {
@@ -268,10 +311,17 @@ export default function Inbox() {
     if (activeTab === 'unread')   return n.is_read === 0 || n.is_read === false;
     if (activeTab === 'loans')    return LOAN_TYPES.has(type);
     if (activeTab === 'payments') return PAYMENT_TYPES.has(type);
-    return true;
+    return true; // 'all'
   });
 
   const unreadCount = notifications.filter(n => n.is_read === 0 || n.is_read === false).length;
+
+  const getTabCount = (key: FilterTab) => {
+    if (key === 'unread')   return notifications.filter(n => n.is_read === 0 || n.is_read === false).length;
+    if (key === 'loans')    return notifications.filter(n => LOAN_TYPES.has(n.type?.toLowerCase())).length;
+    if (key === 'payments') return notifications.filter(n => PAYMENT_TYPES.has(n.type?.toLowerCase())).length;
+    return notifications.length;
+  };
 
   return (
     <div className="min-h-screen bg-background pb-32">
@@ -302,18 +352,12 @@ export default function Inbox() {
           </div>
         )}
 
-        {/* ── Filter Tabs ── */}
+        {/* ── Filter Tabs — Unread first, All last ── */}
         {!loading && !error && notifications.length > 0 && (
           <div className="flex gap-2 mb-5 overflow-x-auto pb-1 scrollbar-hide">
             {FILTER_TABS.map(tab => {
               const isActive = activeTab === tab.key;
-              const count = tab.key === 'unread'
-                ? notifications.filter(n => n.is_read === 0 || n.is_read === false).length
-                : tab.key === 'loans'
-                  ? notifications.filter(n => LOAN_TYPES.has(n.type?.toLowerCase())).length
-                  : tab.key === 'payments'
-                    ? notifications.filter(n => PAYMENT_TYPES.has(n.type?.toLowerCase())).length
-                    : notifications.length;
+              const count    = getTabCount(tab.key);
               return (
                 <button
                   key={tab.key}
@@ -327,7 +371,10 @@ export default function Inbox() {
                   {tab.label}
                   {count > 0 && (
                     <span className={`text-[9px] font-extrabold px-1 rounded-full
-                      ${isActive ? 'bg-on-primary/20 text-on-primary' : 'bg-outline/20 text-on-surface-variant'}`}>
+                      ${isActive
+                        ? 'bg-on-primary/20 text-on-primary'
+                        : 'bg-outline/20 text-on-surface-variant'
+                      }`}>
                       {count}
                     </span>
                   )}
@@ -364,7 +411,7 @@ export default function Inbox() {
           </div>
         )}
 
-        {/* ── Empty (global) ── */}
+        {/* ── Empty (no notifications at all) ── */}
         {!loading && !error && notifications.length === 0 && (
           <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
             <div className="w-20 h-20 rounded-full bg-surface-container-high flex items-center justify-center mb-6">
@@ -377,15 +424,20 @@ export default function Inbox() {
           </div>
         )}
 
-        {/* ── Empty (filtered) ── */}
+        {/* ── Empty (filtered tab has nothing) ── */}
         {!loading && !error && notifications.length > 0 && filtered.length === 0 && (
           <div className="flex flex-col items-center justify-center py-24 text-center">
             <div className="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center mb-4">
               <InboxIcon className="text-outline/40" size={28} />
             </div>
-            <p className="text-on-surface font-semibold text-sm">No {activeTab} notifications</p>
+            <p className="text-on-surface font-semibold text-sm">
+              No {activeTab === 'all' ? '' : activeTab} notifications
+            </p>
             <p className="text-on-surface-variant text-xs mt-1">
-              {activeTab === 'unread' ? 'You\'re all caught up!' : `Switch to "All" to see everything.`}
+              {activeTab === 'unread'
+                ? "You're all caught up! 🎉"
+                : 'Switch to "All" to see everything.'
+              }
             </p>
           </div>
         )}
@@ -393,8 +445,8 @@ export default function Inbox() {
         {/* ── Notifications List ── */}
         {!loading && !error && filtered.length > 0 && (
           <div className="space-y-3">
-            <p className="text-[9px] text-on-surface-variant/60 text-center mb-2">
-              Swipe left to dismiss
+            <p className="text-[9px] text-on-surface-variant/50 text-center mb-2">
+              Swipe left or tap 🗑 to dismiss
             </p>
             <AnimatePresence>
               {filtered.map((notif, i) => (
