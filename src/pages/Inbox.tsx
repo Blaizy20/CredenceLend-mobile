@@ -121,9 +121,9 @@ function NotifCard({
   onDismiss: (id: number) => void;
   onClick:   (notif: Notification) => void;
 }) {
-  const config    = getConfig(notif.type);
-  const isUnread  = notif.is_read === 0 || notif.is_read === false;
-  const dest      = getDestination(notif);
+  const config   = getConfig(notif.type);
+  const isUnread = notif.is_read === 0 || notif.is_read === false;
+  const dest     = getDestination(notif);
   const { main, reason } = parseMessage(notif);
 
   const startX             = useRef(0);
@@ -139,7 +139,7 @@ function NotifCard({
     setTimeout(() => onDismiss(notif.notification_id), 300);
   };
 
-  // ── Touch (mobile) ──────────────────────────────────────────────────────
+  // ── Touch (mobile) ────────────────────────────────────────────────────────
   const handleTouchStart = (e: React.TouchEvent) => {
     startX.current   = e.touches[0].clientX;
     didSwipe.current = false;
@@ -161,7 +161,7 @@ function NotifCard({
     }
   };
 
-  // ── Mouse (web fallback) ────────────────────────────────────────────────
+  // ── Mouse (web fallback) ──────────────────────────────────────────────────
   const handleMouseDown = (e: React.MouseEvent) => {
     startX.current   = e.clientX;
     didSwipe.current = false;
@@ -270,11 +270,11 @@ function NotifCard({
             {main}
           </p>
 
-          {/* Denial reason highlight box */}
+          {/* Denial reason highlight box — no emoji */}
           {reason && (
             <div className="mt-2 px-3 py-2 bg-red-500/8 border border-red-500/15 rounded-xl">
               <p className="text-[11px] font-semibold text-red-500 leading-relaxed">
-                ⚠️ {reason}
+                {reason}
               </p>
             </div>
           )}
@@ -312,6 +312,23 @@ export default function Inbox() {
     loadNotifications(user.customer_id);
   }, []);
 
+  // ── Mark all read only when user leaves the inbox page ───────────────────
+  useEffect(() => {
+    return () => {
+      try {
+        const stored = localStorage.getItem('user');
+        if (!stored) return;
+        const user = JSON.parse(stored);
+        if (user?.customer_id) {
+          fetch(`${API_BASE}/api/notifications/${user.customer_id}/read-all`, {
+            method: 'PATCH',
+          }).catch(() => {});
+        }
+      } catch {}
+    };
+  }, []);
+
+  // ── Load — preserve is_read state, sort newest first ────────────────────
   const loadNotifications = async (cid: number) => {
     setLoading(true);
     setError('');
@@ -320,14 +337,12 @@ export default function Inbox() {
       const data = await res.json();
       if (!res.ok) { setError(data?.message || 'Failed to load notifications.'); return; }
       const notifs: Notification[] = Array.isArray(data) ? data : [];
+      // Sort newest first so latest unread appears at top
+      notifs.sort((a, b) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
       setNotifications(notifs);
-
-      // Mark all read + optimistically clear unread dots
-      const unreadCount = notifs.filter(n => n.is_read === 0 || n.is_read === false).length;
-      if (unreadCount > 0) {
-        fetch(`${API_BASE}/api/notifications/${cid}/read-all`, { method: 'PATCH' }).catch(() => {});
-        setNotifications(prev => prev.map(n => ({ ...n, is_read: 1 })));
-      }
+      // Do NOT mark as read here — user must see unread items first
     } catch {
       setError('Unable to load notifications. Check your connection and try again.');
     } finally {
@@ -343,7 +358,9 @@ export default function Inbox() {
   const handleMarkAllRead = () => {
     if (!customerId) return;
     setNotifications(prev => prev.map(n => ({ ...n, is_read: 1 })));
-    fetch(`${API_BASE}/api/notifications/${customerId}/read-all`, { method: 'PATCH' }).catch(() => {});
+    fetch(`${API_BASE}/api/notifications/${customerId}/read-all`, {
+      method: 'PATCH',
+    }).catch(() => {});
   };
 
   const handleNotifClick = (notif: Notification) => {
@@ -351,7 +368,7 @@ export default function Inbox() {
     if (dest) navigate(dest);
   };
 
-  // ── Filtered list ───────────────────────────────────────────────────────
+  // ── Filtered list ─────────────────────────────────────────────────────────
   const filtered = notifications.filter(n => {
     const type = n.type?.toLowerCase() ?? 'general';
     if (activeTab === 'unread')   return n.is_read === 0 || n.is_read === false;
@@ -360,9 +377,11 @@ export default function Inbox() {
     return true;
   });
 
-  const unreadCount = notifications.filter(n => n.is_read === 0 || n.is_read === false).length;
+  const unreadCount = notifications.filter(
+    n => n.is_read === 0 || n.is_read === false
+  ).length;
 
-  const getTabCount = (key: FilterTab) => {
+  const getTabCount = (key: FilterTab): number => {
     if (key === 'unread')   return notifications.filter(n => n.is_read === 0 || n.is_read === false).length;
     if (key === 'loans')    return notifications.filter(n => LOAN_TYPES.has(n.type?.toLowerCase())).length;
     if (key === 'payments') return notifications.filter(n => PAYMENT_TYPES.has(n.type?.toLowerCase())).length;
@@ -444,7 +463,9 @@ export default function Inbox() {
               <AlertCircle className="text-red-500" size={36} />
             </div>
             <div>
-              <h2 className="text-lg font-headline font-bold text-on-surface">Something went wrong</h2>
+              <h2 className="text-lg font-headline font-bold text-on-surface">
+                Something went wrong
+              </h2>
               <p className="text-on-surface-variant text-sm mt-1 max-w-xs">{error}</p>
             </div>
             <button
@@ -463,7 +484,9 @@ export default function Inbox() {
             <div className="w-20 h-20 rounded-full bg-surface-container-high flex items-center justify-center mb-6">
               <InboxIcon className="text-outline/40" size={40} />
             </div>
-            <h2 className="text-xl font-headline font-bold text-on-surface">No messages yet</h2>
+            <h2 className="text-xl font-headline font-bold text-on-surface">
+              No messages yet
+            </h2>
             <p className="text-on-surface-variant text-sm mt-2">
               Loan updates and notifications will appear here.
             </p>
@@ -481,7 +504,7 @@ export default function Inbox() {
             </p>
             <p className="text-on-surface-variant text-xs mt-1">
               {activeTab === 'unread'
-                ? "You're all caught up! 🎉"
+                ? "You're all caught up."
                 : 'Switch to "All" to see everything.'
               }
             </p>
@@ -492,7 +515,7 @@ export default function Inbox() {
         {!loading && !error && filtered.length > 0 && (
           <div className="space-y-3">
             <p className="text-[9px] text-on-surface-variant/50 text-center mb-2">
-              Swipe left or tap 🗑 to dismiss
+              Swipe left or tap the trash icon to dismiss
             </p>
             <AnimatePresence>
               {filtered.map((notif, i) => (
