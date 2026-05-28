@@ -93,7 +93,7 @@ export default function LoanDetails() {
     );
   }
 
-  // ── Derived values ────────────────────────────────────────────────────────
+  // ── Derived values ─────────────────────────────────────────────────────────
   const principal    = Number(loan.principal_amount  ?? 0);
   const interestRate = Number(loan.interest_rate     ?? 0);
   const termMonths   = Number(loan.term_months       ?? 1);
@@ -115,9 +115,7 @@ export default function LoanDetails() {
     return totalPayable;
   })();
 
-  // ✅ Late fee — principal × daily_rate × days_late
-  // Mirrors the web app's loan_late_payment_daily_rates formula.
-  // The backend already sums this into total_payable when the loan goes overdue.
+  // ── Late fee ───────────────────────────────────────────────────────────────
   const lateFee = (() => {
     if (!isOverdue || !loan.due_date) return 0;
 
@@ -137,12 +135,10 @@ export default function LoanDetails() {
     const daysLate = Math.max(0, Math.floor((today.getTime() - dueDate.getTime()) / msPerDay));
 
     if (daysLate === 0) return 0;
-
-    // ✅ Uses principal — NOT remainingBal or totalPayable
     return Number((principal * dailyRate * daysLate).toFixed(2));
   })();
 
-  // ── Schedule generator ────────────────────────────────────────────────────
+  // ── Schedule generator (fixed) ─────────────────────────────────────────────
   const generateSchedule = () => {
     const startDate = loan.activated_at
       ? new Date(loan.activated_at)
@@ -150,11 +146,26 @@ export default function LoanDetails() {
         ? new Date(loan.created_at)
         : new Date();
 
-    const totalPaid      = totalPayable - remainingBal;
-    const paidCount      = amountPerTerm > 0 ? Math.floor(totalPaid / amountPerTerm) : 0;
-    const termsLeft      = totalTermCount - paidCount;
-    const partialCredit  = parseFloat((totalPaid - paidCount * amountPerTerm).toFixed(2));
-    const currentTermDue = parseFloat((amountPerTerm - partialCredit).toFixed(2));
+    // Total amount paid so far
+    const totalPaid = Math.max(0, totalPayable - remainingBal);
+
+    // How many full terms have been completely paid
+    const paidTerms = amountPerTerm > 0
+      ? Math.min(Math.floor(totalPaid / amountPerTerm), totalTermCount)
+      : 0;
+
+    // Credit already applied toward the current upcoming term
+    const creditTowardCurrent = parseFloat(
+      (totalPaid - paidTerms * amountPerTerm).toFixed(2)
+    );
+
+    // What still needs to be paid for the upcoming term
+    const upcomingTermDue = parseFloat(
+      Math.max(0, amountPerTerm - creditTowardCurrent).toFixed(2)
+    );
+
+    // Guard: if remaining balance is 0, all terms are paid
+    const allPaid = remainingBal <= 0 || paidTerms >= totalTermCount;
 
     const schedule = [];
 
@@ -162,25 +173,43 @@ export default function LoanDetails() {
       const date = new Date(startDate);
       const term = paymentTerm.toLowerCase().replace(/-/g, '_');
 
-      if (term.includes('daily'))       date.setDate(date.getDate() + i);
+      if      (term.includes('daily'))  date.setDate(date.getDate() + i);
       else if (term.includes('weekly')) date.setDate(date.getDate() + i * 7);
       else if (term.includes('semi'))   date.setDate(date.getDate() + i * 15);
       else                              date.setMonth(date.getMonth() + i);
 
-      const isPaid     = i < paidCount;
-      const isUpcoming = i === paidCount;
+      const isPaid     = allPaid || i < paidTerms;
+      const isUpcoming = !allPaid && i === paidTerms;
 
-      const termAmount = isPaid
-        ? amountPerTerm
-        : isUpcoming
-          ? (termsLeft === 1
-              ? remainingBal
-              : Math.min(currentTermDue, remainingBal))
-          : amountPerTerm;
+      // Amount to show per row
+      let termAmount: number;
+      if (isPaid) {
+        // Paid terms always show the full installment amount with strikethrough
+        termAmount = amountPerTerm;
+      } else if (isUpcoming) {
+        if (paidTerms === totalTermCount - 1) {
+          // Last term: show exact remaining balance to handle rounding
+          termAmount = remainingBal;
+        } else if (upcomingTermDue > 0) {
+          // Partial credit applied — show what's still owed for this term
+          termAmount = upcomingTermDue;
+        } else {
+          // No partial credit yet — show full installment amount
+          termAmount = amountPerTerm;
+        }
+      } else {
+        // Future pending terms always show full installment amount
+        termAmount = amountPerTerm;
+      }
 
       schedule.push({
-        date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-        amount: `₱ ${termAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        date: date.toLocaleDateString('en-US', {
+          month: 'short', day: 'numeric', year: 'numeric',
+        }),
+        amount: `₱ ${termAmount.toLocaleString(undefined, {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}`,
         rawAmount:  termAmount,
         status:     isPaid ? 'PAID' : 'PENDING',
         isUpcoming,
@@ -193,12 +222,14 @@ export default function LoanDetails() {
   const schedule    = generateSchedule();
   const nextPayment = schedule.find(s => s.isUpcoming);
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
+  // ── Helpers ────────────────────────────────────────────────────────────────
   const fmt = (n: number) =>
     n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   const fmtDate = (dateStr: string) =>
-    new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    new Date(dateStr).toLocaleDateString('en-US', {
+      month: 'short', day: 'numeric', year: 'numeric',
+    });
 
   return (
     <div className="min-h-screen bg-background pb-32">
@@ -206,7 +237,7 @@ export default function LoanDetails() {
 
       <main className="pt-20 px-4 space-y-6 max-w-lg mx-auto">
 
-        {/* Fully Paid Banner */}
+        {/* ── Fully Paid Banner ── */}
         {isFullyPaid && (
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
@@ -222,7 +253,7 @@ export default function LoanDetails() {
           </motion.div>
         )}
 
-        {/* Overdue Warning Banner */}
+        {/* ── Overdue Warning Banner ── */}
         {isOverdue && (
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
@@ -243,7 +274,7 @@ export default function LoanDetails() {
           </motion.div>
         )}
 
-        {/* Denial Reason */}
+        {/* ── Denial Reason ── */}
         {loan.status?.toLowerCase() === 'denied' && loan.denial_reason && (
           <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-2xl flex items-start gap-3">
             <AlertCircle className="text-red-500 mt-0.5 shrink-0" size={18} />
@@ -254,7 +285,7 @@ export default function LoanDetails() {
           </div>
         )}
 
-        {/* Pay Button — ACTIVE and OVERDUE */}
+        {/* ── Pay Button ── */}
         {(loan.status?.toLowerCase() === 'active' || isOverdue) && !isFullyPaid && (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
@@ -276,7 +307,7 @@ export default function LoanDetails() {
           </motion.div>
         )}
 
-        {/* Hero Card */}
+        {/* ── Hero Card ── */}
         <motion.section
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -298,7 +329,6 @@ export default function LoanDetails() {
             <h2 className="font-headline font-extrabold text-4xl mt-2 tracking-tight">
               ₱ {fmt(remainingBal)}
             </h2>
-            {/* Late fee sub-label — only when overdue and lateFee > 0 */}
             {isOverdue && lateFee > 0 && (
               <p className="text-orange-400 text-xs mt-1 font-semibold">
                 Includes ₱{fmt(lateFee)} late fee
@@ -316,7 +346,9 @@ export default function LoanDetails() {
               </p>
               <p className="font-headline font-bold text-lg">
                 {nextPayment?.date ?? (loan.due_date
-                  ? new Date(loan.due_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                  ? new Date(loan.due_date).toLocaleDateString('en-US', {
+                      month: 'short', day: 'numeric', year: 'numeric',
+                    })
                   : '—'
                 )}
               </p>
@@ -324,7 +356,7 @@ export default function LoanDetails() {
           </div>
         </motion.section>
 
-        {/* Loan Information */}
+        {/* ── Loan Information ── */}
         <section className="bg-surface-container-low p-5 rounded-2xl space-y-3">
           <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-2">
             Loan Information
@@ -334,21 +366,24 @@ export default function LoanDetails() {
             { label: 'Payment Term',   value: paymentTerm          || '—' },
             { label: 'Collateral',     value: loan.collateral_type ?? '—' },
             { label: 'ID Type',        value: loan.id_type         ?? '—' },
-            // Late fee row — only when overdue and lateFee > 0
             ...(isOverdue && lateFee > 0
               ? [{ label: 'Late Fee Added', value: `+ ₱${fmt(lateFee)}` }]
               : []
             ),
-            { label: 'Applied On', value: loan.created_at
-                ? new Date(loan.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
-                : '—'
+            {
+              label: 'Applied On',
+              value: loan.created_at
+                ? new Date(loan.created_at).toLocaleDateString('en-US', {
+                    month: 'long', day: 'numeric', year: 'numeric',
+                  })
+                : '—',
             },
           ].map(({ label, value }) => (
             <div key={label} className="flex justify-between text-sm">
               <span className="text-on-surface-variant">{label}</span>
               <span className={cn(
-                "font-semibold text-right max-w-[60%] truncate",
-                label === 'Late Fee Added' ? "text-orange-500" : "text-on-surface"
+                'font-semibold text-right max-w-[60%] truncate',
+                label === 'Late Fee Added' ? 'text-orange-500' : 'text-on-surface'
               )}>
                 {value}
               </span>
@@ -356,7 +391,7 @@ export default function LoanDetails() {
           ))}
         </section>
 
-        {/* Stats Grid */}
+        {/* ── Stats Grid ── */}
         <section className="grid grid-cols-2 gap-4">
           <div className="bg-surface-container p-5 rounded-2xl flex flex-col justify-between min-h-[110px]">
             <div className="flex items-center gap-2 text-on-surface-variant mb-4">
@@ -364,7 +399,8 @@ export default function LoanDetails() {
               <span className="text-[10px] font-bold uppercase tracking-widest">Interest</span>
             </div>
             <p className="font-headline font-bold text-xl">
-              {interestRate}% <span className="text-xs font-normal text-on-surface-variant">Rate</span>
+              {interestRate}%{' '}
+              <span className="text-xs font-normal text-on-surface-variant">Rate</span>
             </p>
           </div>
           <div className="bg-surface-container p-5 rounded-2xl flex flex-col justify-between min-h-[110px]">
@@ -373,12 +409,13 @@ export default function LoanDetails() {
               <span className="text-[10px] font-bold uppercase tracking-widest">Term</span>
             </div>
             <p className="font-headline font-bold text-xl">
-              {totalTermCount} <span className="text-xs font-normal text-on-surface-variant">Installments</span>
+              {totalTermCount}{' '}
+              <span className="text-xs font-normal text-on-surface-variant">Installments</span>
             </p>
           </div>
         </section>
 
-        {/* Progress */}
+        {/* ── Progress ── */}
         <section className="bg-surface-container-low p-6 rounded-3xl">
           <div className="flex justify-between items-center mb-4">
             <h3 className="font-headline font-bold text-sm tracking-tight">Payment Progress</h3>
@@ -398,7 +435,7 @@ export default function LoanDetails() {
           </div>
         </section>
 
-        {/* Payment History */}
+        {/* ── Payment History ── */}
         {payments.length > 0 && (
           <section className="space-y-3">
             <div className="flex items-center justify-between px-1">
@@ -451,7 +488,7 @@ export default function LoanDetails() {
           </section>
         )}
 
-        {/* Loan Schedule — ACTIVE and OVERDUE */}
+        {/* ── Loan Schedule ── */}
         {(loan.status?.toLowerCase() === 'active' || isOverdue) && schedule.length > 0 && (
           <section className="space-y-4">
             <div className="flex items-center justify-between px-2">
@@ -462,7 +499,10 @@ export default function LoanDetails() {
                   className="text-primary text-xs font-bold uppercase tracking-widest flex items-center gap-1"
                 >
                   {showAllSchedule ? 'Show Less' : 'View All'}
-                  <ChevronRight size={14} className={cn('transition-transform', showAllSchedule && 'rotate-90')} />
+                  <ChevronRight
+                    size={14}
+                    className={cn('transition-transform', showAllSchedule && 'rotate-90')}
+                  />
                 </button>
               )}
             </div>
@@ -501,8 +541,8 @@ export default function LoanDetails() {
                         </p>
                         {item.isUpcoming && (
                           <p className={cn(
-                            "text-[9px] font-bold uppercase tracking-widest mt-1",
-                            isOverdue ? "text-orange-500" : "text-primary"
+                            'text-[9px] font-bold uppercase tracking-widest mt-1',
+                            isOverdue ? 'text-orange-500' : 'text-primary'
                           )}>
                             {isOverdue ? 'Overdue' : 'Upcoming'}
                           </p>
@@ -536,7 +576,10 @@ export default function LoanDetails() {
                           {item.status === 'PAID' && (
                             <CheckCircle size={11} fill="currentColor" className="text-green-600" />
                           )}
-                          {item.isUpcoming && isOverdue ? 'OVERDUE' : item.status}
+                          {item.isUpcoming && isOverdue
+                            ? 'OVERDUE'
+                            : item.status
+                          }
                         </span>
                       </td>
                     </tr>
@@ -547,7 +590,7 @@ export default function LoanDetails() {
           </section>
         )}
 
-        {/* Notes */}
+        {/* ── Notes ── */}
         {loan.notes && (
           <section className="bg-surface-container-low p-5 rounded-2xl">
             <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-2">Notes</p>
@@ -555,7 +598,7 @@ export default function LoanDetails() {
           </section>
         )}
 
-        {/* Loan Documents */}
+        {/* ── Loan Documents ── */}
         <section className="bg-surface-container-low rounded-2xl overflow-hidden">
           <div className="px-5 pt-5 pb-2">
             <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
@@ -569,7 +612,7 @@ export default function LoanDetails() {
 
       <BottomNav />
 
-      {/* Payment History Bottom Sheet Modal */}
+      {/* ── Payment History Modal ── */}
       {showAllPayments && (
         <div className="fixed inset-0 z-50 flex flex-col justify-end">
           <motion.div
@@ -614,7 +657,9 @@ export default function LoanDetails() {
                 >
                   <div>
                     <p className="text-xs font-semibold text-on-surface">
-                      {new Date(p.payment_date ?? p.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                      {new Date(p.payment_date ?? p.created_at).toLocaleDateString('en-US', {
+                        month: 'short', day: 'numeric',
+                      })}
                     </p>
                     <p className="text-[10px] text-on-surface-variant">
                       {new Date(p.payment_date ?? p.created_at).getFullYear()}
