@@ -89,7 +89,7 @@ export default function ApplyLoanStep1() {
         setBlockCheck('allowed');
       }
     }).catch(() => {
-      setBlockCheck('allowed'); // fail open — don't block if API errors
+      setBlockCheck('allowed');
     });
   }, []);
 
@@ -276,6 +276,8 @@ export default function ApplyLoanStep1() {
 
         {/* ── Loan Amount & Term ── */}
         <section className="space-y-5 mb-10">
+
+          {/* ── Fixed: clamps at ₱500,000 live ── */}
           <Input
             label="REQUESTED AMOUNT"
             placeholder="0.00"
@@ -283,7 +285,20 @@ export default function ApplyLoanStep1() {
             icon={<span className="font-bold text-lg">₱</span>}
             className="text-xl font-bold"
             value={formData.amount}
-            onChange={(e) => set('amount', e.target.value)}
+            onChange={(e) => {
+              const raw = e.target.value;
+              const num = Number(raw);
+              if (raw === '' || raw === '-') {
+                set('amount', raw);
+                return;
+              }
+              if (num > 500000) {
+                set('amount', '500000');
+              } else {
+                set('amount', raw);
+              }
+              if (errors.amount) setErrors(prev => ({ ...prev, amount: '' }));
+            }}
             error={errors.amount}
           />
           <p className="text-xs text-on-surface-variant -mt-3 ml-1">
@@ -306,13 +321,26 @@ export default function ApplyLoanStep1() {
             </select>
           </div>
 
-          {/* Loan Duration */}
+          {/* ── Fixed: clamps at 180 months live ── */}
           <Input
             label="LOAN DURATION (MONTHS)"
             placeholder="e.g. 12"
             type="number"
             value={formData.term_months}
-            onChange={(e) => set('term_months', e.target.value)}
+            onChange={(e) => {
+              const raw = e.target.value;
+              const num = Number(raw);
+              if (raw === '') {
+                set('term_months', raw);
+                return;
+              }
+              if (num > 180) {
+                set('term_months', '180');
+              } else {
+                set('term_months', raw);
+              }
+              if (errors.term_months) setErrors(prev => ({ ...prev, term_months: '' }));
+            }}
             error={errors.term_months}
           />
           <p className="text-xs text-on-surface-variant -mt-3 ml-1">

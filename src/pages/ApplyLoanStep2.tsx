@@ -83,13 +83,13 @@ export default function ApplyLoanStep2() {
     COMAKER_ID:   null,
   });
 
-  const [errors, setErrors]                 = useState<Record<string, string>>({});
-  const [submitting, setSubmitting]         = useState(false);
-  const [submitError, setSubmitError]       = useState('');
-  const [showConfirm, setShowConfirm]       = useState(false);
-  const [uploadProgress, setUploadProgress] = useState('');
-  const [successStep, setSuccessStep]       = useState<'idle' | 'loading' | 'done'>('idle');
-  const [submittedLoanId, setSubmittedLoanId] = useState<number | null>(null); // ← NEW
+  const [errors, setErrors]                   = useState<Record<string, string>>({});
+  const [submitting, setSubmitting]           = useState(false);
+  const [submitError, setSubmitError]         = useState('');
+  const [showConfirm, setShowConfirm]         = useState(false);
+  const [uploadProgress, setUploadProgress]   = useState('');
+  const [successStep, setSuccessStep]         = useState<'idle' | 'loading' | 'done'>('idle');
+  const [submittedLoanId, setSubmittedLoanId] = useState<number | null>(null);
 
   const [successData, setSuccessData] = useState<{
     instant_reason:       string;
@@ -137,8 +137,14 @@ export default function ApplyLoanStep2() {
 
   const validate = () => {
     const newErrors: Record<string, string> = {};
+
+    // ── Fixed: letters-only validation for names ──
     if (!formData.first_name.trim()) newErrors.first_name = 'First name is required.';
+    else if (!/^[A-Za-z\s.'-]+$/.test(formData.first_name.trim())) newErrors.first_name = 'First name must contain letters only.';
+
     if (!formData.last_name.trim())  newErrors.last_name  = 'Last name is required.';
+    else if (!/^[A-Za-z\s.'-]+$/.test(formData.last_name.trim()))  newErrors.last_name  = 'Last name must contain letters only.';
+
     if (!formData.contact_no.trim()) newErrors.contact_no = 'Contact number is required.';
     else if (!/^09\d{9}$/.test(formData.contact_no))
       newErrors.contact_no = 'Please enter a valid PH number (09XXXXXXXXX).';
@@ -234,7 +240,7 @@ export default function ApplyLoanStep2() {
       }
 
       const loanId = result.loan?.loan_id;
-      if (loanId) setSubmittedLoanId(loanId); // ← NEW
+      if (loanId) setSubmittedLoanId(loanId);
 
       const allDocs: { code: string; label: string; file: File }[] = [
         ...uploadDocs.map(d => ({ code: d.code, label: d.label, file: d.file })),
@@ -334,14 +340,32 @@ export default function ApplyLoanStep2() {
             <div className="w-1 h-6 bg-primary rounded-full" />
             <h2 className="font-headline font-bold text-lg text-on-surface">Co-maker Personal Info</h2>
           </div>
+
+          {/* ── Fixed: letters-only for first and last name ── */}
           <div className="grid grid-cols-2 gap-4">
             <Input label="First Name" placeholder="Juan"
-              value={formData.first_name} onChange={(e) => handleChange('first_name', e.target.value)} error={errors.first_name} />
+              value={formData.first_name}
+              onChange={(e) => {
+                const clean = e.target.value.replace(/[^A-Za-z\s.'-]/g, '');
+                handleChange('first_name', clean);
+              }}
+              error={errors.first_name} />
             <Input label="Last Name" placeholder="Dela Cruz"
-              value={formData.last_name} onChange={(e) => handleChange('last_name', e.target.value)} error={errors.last_name} />
+              value={formData.last_name}
+              onChange={(e) => {
+                const clean = e.target.value.replace(/[^A-Za-z\s.'-]/g, '');
+                handleChange('last_name', clean);
+              }}
+              error={errors.last_name} />
           </div>
+
           <Input label="Contact No." placeholder="09XXXXXXXXX"
-            value={formData.contact_no} onChange={(e) => handleChange('contact_no', e.target.value)} error={errors.contact_no} />
+            value={formData.contact_no}
+            onChange={(e) => {
+              const digits = e.target.value.replace(/\D/g, '').slice(0, 11);
+              handleChange('contact_no', digits);
+            }}
+            error={errors.contact_no} />
           <Input label="Email Address (Optional)" placeholder="juan@example.com" type="email"
             value={formData.email} onChange={(e) => handleChange('email', e.target.value)} error={errors.email} />
         </section>
@@ -641,7 +665,6 @@ export default function ApplyLoanStep2() {
                     <LayoutDashboard size={18} />
                     Go to Dashboard
                   </button>
-                  {/* ── Fixed: navigate to the actual submitted loan ── */}
                   <button
                     onClick={() => navigate(`/loan/${submittedLoanId}`, { replace: true })}
                     disabled={!submittedLoanId}

@@ -186,7 +186,11 @@ export default function RegisterStep1() {
               name="contactNo"
               icon={<Phone size={20} />}
               value={formData.contactNo}
-              onChange={handleChange}
+              onChange={(e) => {
+                const digits = e.target.value.replace(/\D/g, '').slice(0, 11);
+                setFormData(prev => ({ ...prev, contactNo: digits }));
+                if (errors.contactNo) setErrors(prev => ({ ...prev, contactNo: '' }));
+              }}
               error={errors.contactNo}
             />
 
