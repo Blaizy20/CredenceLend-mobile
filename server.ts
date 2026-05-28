@@ -109,12 +109,14 @@ function getTermCount(paymentTerm: string, termMonths: number): number {
   }
 }
 
+// ── UPDATED: added optional loanId param ─────────────────────────────────────
 async function insertNotification(
   customerId: number,
   tenantId:   number,
   title:      string,
   message:    string,
-  type:       string
+  type:       string,
+  loanId?:    number | null   // ← NEW
 ): Promise<void> {
   try {
     const [existing] = await pool.query<RowDataPacket[]>(
@@ -125,8 +127,9 @@ async function insertNotification(
     );
     if (existing.length > 0) return;
     await pool.query(
-      `INSERT INTO notifications (customer_id, tenant_id, title, message, type) VALUES (?, ?, ?, ?, ?)`,
-      [customerId, tenantId, title, message, type]
+      `INSERT INTO notifications (customer_id, tenant_id, title, message, type, loan_id)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [customerId, tenantId, title, message, type, loanId ?? null]
     );
   } catch (err: any) {
     console.warn("Notification insert skipped:", err.message);
@@ -720,8 +723,7 @@ async function startServer() {
       const {
         customer_id, tenant_id, principal_amount, payment_term,
         interest_rate, term_months, id_type, collateral_type,
-        collateral_notes, notes,
-        comakers, // ✅ changed from co_maker to comakers (array from frontend)
+        collateral_notes, notes, comakers,
       } = req.body;
 
       if (!customer_id || !principal_amount || !payment_term || !collateral_type)
@@ -768,7 +770,6 @@ async function startServer() {
       );
       const loan_id = loanResult.insertId;
 
-      // ✅ FIXED: Now inserts into loan_comakers using the correct schema
       if (Array.isArray(comakers) && comakers.length > 0) {
         for (const cm of comakers) {
           try {
@@ -779,12 +780,12 @@ async function startServer() {
               [
                 resolvedTenantId,
                 loan_id,
-                String(cm.full_name  ?? '').trim()       || null,
-                String(cm.phone_number ?? '').trim()     || null,
+                String(cm.full_name    ?? '').trim() || null,
+                String(cm.phone_number ?? '').trim() || null,
                 String(cm.relationship ?? 'Co-maker').trim(),
-                cm.email   ? String(cm.email).trim()     : null,
-                cm.address ? String(cm.address).trim()   : null,
-                null, // notes not collected in form
+                cm.email   ? String(cm.email).trim()   : null,
+                cm.address ? String(cm.address).trim() : null,
+                null,
               ]
             );
           } catch (coMakerErr: any) {
@@ -793,11 +794,13 @@ async function startServer() {
         }
       }
 
+      // ── UPDATED: pass loan_id to insertNotification ───────────────────────
       await insertNotification(
         customer_id, resolvedTenantId,
         "Loan Application Received",
         `Your application (${reference_no}) for ₱${amount.toLocaleString()} has been submitted and is pending review.`,
-        "general"
+        "general",
+        loan_id   // ← NEW
       );
 
       try {
@@ -895,8 +898,6 @@ async function startServer() {
         }
 
         if (lastStatus !== newStatus) {
-          // ── Update cache FIRST before sending email/notification ──────────
-          // This prevents duplicate triggers when the frontend polls rapidly
           await pool.query(
             `INSERT INTO loan_status_cache (loan_id, last_status) VALUES (?, ?)
              ON DUPLICATE KEY UPDATE last_status = VALUES(last_status)`,
@@ -904,7 +905,14 @@ async function startServer() {
           );
 
           const notif = NOTIF_MAP[newStatus];
-          if (notif) await insertNotification(Number(customerId), tenantId, notif.title, notif.message(loan.reference_no), notif.type);
+          // ── UPDATED: pass loan.loan_id to insertNotification ──────────────
+          if (notif) await insertNotification(
+            Number(customerId), tenantId,
+            notif.title,
+            notif.message(loan.reference_no),
+            notif.type,
+            loan.loan_id   // ← NEW
+          );
 
           try {
             const [custRows] = await pool.query<RowDataPacket[]>(
@@ -1080,7 +1088,6 @@ async function startServer() {
   // ── Notifications: List ───────────────────────────────────────────────────
   app.get("/api/notifications/:customerId", async (req, res) => {
     try {
-      // Auto-clean old READ notifications only
       await pool.query(
         `DELETE FROM notifications
          WHERE customer_id = ?
@@ -1089,8 +1096,9 @@ async function startServer() {
         [req.params.customerId]
       );
 
+      // ── UPDATED: now returns loan_id ──────────────────────────────────────
       const [rows] = await pool.query<RowDataPacket[]>(
-        `SELECT notification_id, title, message, type, is_read, created_at
+        `SELECT notification_id, title, message, type, is_read, loan_id, created_at
          FROM notifications
          WHERE customer_id = ?
          ORDER BY created_at DESC
@@ -1102,6 +1110,37 @@ async function startServer() {
     } catch (err: any) {
       console.error("Notifications error:", err.message);
       res.status(500).json({ success: false, message: "Unable to retrieve notifications." });
+    }
+  });
+
+  // ── Notifications: Mark All Read ─────────────────────────────────────────
+  // ← NEW ROUTE (was missing — this is why blue dots never cleared)
+  app.patch("/api/notifications/:customerId/read-all", async (req, res) => {
+    try {
+      await pool.query(
+        `UPDATE notifications SET is_read = 1
+         WHERE customer_id = ? AND is_read = 0`,
+        [req.params.customerId]
+      );
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("Read-all error:", err.message);
+      res.status(500).json({ success: false });
+    }
+  });
+
+  // ── Notifications: Delete One ─────────────────────────────────────────────
+  // ← NEW ROUTE (for swipe-to-dismiss)
+  app.delete("/api/notifications/:notificationId", async (req, res) => {
+    try {
+      await pool.query(
+        `DELETE FROM notifications WHERE notification_id = ?`,
+        [req.params.notificationId]
+      );
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error("Delete notification error:", err.message);
+      res.status(500).json({ success: false });
     }
   });
 
@@ -1384,7 +1423,6 @@ async function startServer() {
       const pmId  = paymongo_session_id ?? paymongo_source_id ?? paymongo_intent_id;
       const or_no = pmId ? `OR-PM-${String(pmId).slice(-8).toUpperCase()}` : `OR-${Date.now()}`;
 
-      // ── Strong idempotency: check or_no first, then all PayMongo refs ─────
       const [existingByOrNo] = await pool.query<RowDataPacket[]>(
         `SELECT payment_id FROM payments WHERE or_no = ? LIMIT 1`, [or_no]
       );
@@ -1435,17 +1473,17 @@ async function startServer() {
         [newBalance, newBalance, newBalance, loan_id]
       );
 
+      // ── UPDATED: pass loan_id to insertNotification ───────────────────────
       await insertNotification(
         loan.customer_id, Number(loan.tenant_id) || FALLBACK_TENANT_ID,
         isFullyPaid ? "Loan Fully Paid" : "Payment Received",
         isFullyPaid
           ? "Congratulations! Your loan has been fully paid. Thank you!"
           : `Your payment of ₱${payAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })} has been received and is being processed.`,
-        "payment"
+        "payment",
+        Number(loan_id)   // ← NEW
       );
 
-      // ── Only send payment email for partial payments ──────────────────────
-      // Fully paid email is handled by sendLoanStatusEmail on status change
       if (!isFullyPaid) {
         try {
           const [customerRows] = await pool.query<RowDataPacket[]>(
