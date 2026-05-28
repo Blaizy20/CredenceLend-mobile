@@ -9,7 +9,6 @@ import {
   CheckCheck, ChevronRight,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { formatRelative } from '../lib/dateutils';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -27,7 +26,6 @@ type FilterTab = 'unread' | 'loans' | 'payments' | 'all';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-// ── Unread first, All last ────────────────────────────────────────────────────
 const FILTER_TABS: { key: FilterTab; label: string }[] = [
   { key: 'unread',   label: 'Unread'   },
   { key: 'loans',    label: 'Loans'    },
@@ -45,43 +43,72 @@ const NOTIF_CONFIG: Record<string, {
   iconBg: string;
 }> = {
   approved: {
-    icon:   (s) => <CheckCircle2 className="text-green-500"          size={s} />,
+    icon:   (s) => <CheckCircle2 className="text-green-500"      size={s} />,
     bg:     'bg-green-500/8',
     border: 'border-green-500/15',
     iconBg: 'bg-green-500/12',
   },
   denied: {
-    icon:   (s) => <XCircle className="text-red-500"                 size={s} />,
+    icon:   (s) => <XCircle className="text-red-500"             size={s} />,
     bg:     'bg-red-500/8',
     border: 'border-red-500/15',
     iconBg: 'bg-red-500/12',
   },
   payment: {
-    icon:   (s) => <CheckCircle2 className="text-primary"            size={s} />,
+    icon:   (s) => <CheckCircle2 className="text-primary"        size={s} />,
     bg:     'bg-primary/8',
     border: 'border-primary/15',
     iconBg: 'bg-primary/12',
   },
   general: {
-    icon:   (s) => <Bell className="text-on-surface-variant"         size={s} />,
+    icon:   (s) => <Bell className="text-on-surface-variant"     size={s} />,
     bg:     'bg-surface-container-high',
     border: 'border-outline-variant/10',
     iconBg: 'bg-surface-container-highest',
   },
 };
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 const getConfig = (type: string) =>
   NOTIF_CONFIG[type?.toLowerCase()] ?? NOTIF_CONFIG.general;
 
 const getDestination = (notif: Notification): string | null => {
-  if (notif.loan_id && ['approved', 'denied', 'general', 'payment'].includes(notif.type?.toLowerCase())) {
-    return `/loan/${notif.loan_id}`;
-  }
+  if (notif.loan_id) return `/loan/${notif.loan_id}`;
   if (notif.type?.toLowerCase() === 'payment') return '/transactions';
   return null;
 };
 
-// ─── Swipeable Notification Card ──────────────────────────────────────────────
+const getTapLabel = (notif: Notification): string => {
+  const t = notif.type?.toLowerCase();
+  if (t === 'approved') return 'View payment schedule';
+  if (t === 'denied')   return 'View loan details';
+  if (t === 'payment')  return notif.loan_id ? 'View loan' : 'View transactions';
+  return 'View loan';
+};
+
+const parseMessage = (notif: Notification): { main: string; reason: string | null } => {
+  const isDenied = notif.type?.toLowerCase() === 'denied';
+  if (isDenied && notif.message.includes('Reason:')) {
+    const [main, ...rest] = notif.message.split('Reason:');
+    const reason = rest.join('Reason:').trim();
+    return { main: main.trim(), reason: reason || null };
+  }
+  return { main: notif.message, reason: null };
+};
+
+const formatTime = (dateStr: string): string => {
+  const date = new Date(dateStr);
+  const now  = new Date();
+  const diff = Math.floor((now.getTime() - date.getTime()) / 1000);
+  if (diff < 60)     return 'Just now';
+  if (diff < 3600)   return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400)  return `${Math.floor(diff / 3600)}h ago`;
+  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+};
+
+// ─── Notification Card ────────────────────────────────────────────────────────
 
 function NotifCard({
   notif,
@@ -94,25 +121,36 @@ function NotifCard({
   onDismiss: (id: number) => void;
   onClick:   (notif: Notification) => void;
 }) {
-  const config   = getConfig(notif.type);
-  const isUnread = notif.is_read === 0 || notif.is_read === false;
-  const dest     = getDestination(notif);
+  const config    = getConfig(notif.type);
+  const isUnread  = notif.is_read === 0 || notif.is_read === false;
+  const dest      = getDestination(notif);
+  const { main, reason } = parseMessage(notif);
 
-  const startX            = useRef(0);
+  const startX             = useRef(0);
+  const didSwipe           = useRef(false);
   const [swipeDx, setSwipeDx]     = useState(0);
   const [swiping, setSwiping]     = useState(false);
   const [dismissed, setDismissed] = useState(false);
 
   const DISMISS_THRESHOLD = -80;
 
-  // ── Touch (mobile) ────────────────────────────────────────────────────────
+  const triggerDismiss = () => {
+    setDismissed(true);
+    setTimeout(() => onDismiss(notif.notification_id), 300);
+  };
+
+  // ── Touch (mobile) ──────────────────────────────────────────────────────
   const handleTouchStart = (e: React.TouchEvent) => {
-    startX.current = e.touches[0].clientX;
+    startX.current   = e.touches[0].clientX;
+    didSwipe.current = false;
     setSwiping(true);
   };
   const handleTouchMove = (e: React.TouchEvent) => {
     const dx = e.touches[0].clientX - startX.current;
-    if (dx < 0) setSwipeDx(Math.max(dx, -120));
+    if (dx < 0) {
+      setSwipeDx(Math.max(dx, -120));
+      if (Math.abs(dx) > 5) didSwipe.current = true;
+    }
   };
   const handleTouchEnd = () => {
     setSwiping(false);
@@ -123,15 +161,19 @@ function NotifCard({
     }
   };
 
-  // ── Mouse (web fallback) ──────────────────────────────────────────────────
+  // ── Mouse (web fallback) ────────────────────────────────────────────────
   const handleMouseDown = (e: React.MouseEvent) => {
-    startX.current = e.clientX;
+    startX.current   = e.clientX;
+    didSwipe.current = false;
     setSwiping(true);
   };
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!swiping) return;
     const dx = e.clientX - startX.current;
-    if (dx < 0) setSwipeDx(Math.max(dx, -120));
+    if (dx < 0) {
+      setSwipeDx(Math.max(dx, -120));
+      if (Math.abs(dx) > 5) didSwipe.current = true;
+    }
   };
   const handleMouseUp = () => {
     setSwiping(false);
@@ -142,22 +184,6 @@ function NotifCard({
     }
   };
 
-  const triggerDismiss = () => {
-    setDismissed(true);
-    setTimeout(() => onDismiss(notif.notification_id), 300);
-  };
-
-  const formatTime = (dateStr: string) => {
-    const date = new Date(dateStr);
-    const now  = new Date();
-    const diff = Math.floor((now.getTime() - date.getTime()) / 1000);
-    if (diff < 60)     return 'Just now';
-    if (diff < 3600)   return `${Math.floor(diff / 60)}m ago`;
-    if (diff < 86400)  return `${Math.floor(diff / 3600)}h ago`;
-    if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-  };
-
   return (
     <motion.div
       key={notif.notification_id}
@@ -166,10 +192,13 @@ function NotifCard({
         ? { opacity: 0, x: -40, height: 0, marginBottom: 0, paddingBottom: 0 }
         : { opacity: 1, y: 0 }
       }
-      transition={{ delay: dismissed ? 0 : index * 0.04, duration: dismissed ? 0.25 : 0.3 }}
+      transition={{
+        delay:    dismissed ? 0 : index * 0.04,
+        duration: dismissed ? 0.25 : 0.3,
+      }}
       className="relative overflow-hidden rounded-2xl select-none"
     >
-      {/* Red delete bg — only visible when swiping */}
+      {/* Swipe-reveal red bg */}
       {swipeDx < -10 && (
         <div className="absolute inset-y-0 right-0 flex items-center justify-end px-5 bg-red-500/15 rounded-2xl pointer-events-none">
           <Trash2 size={20} className="text-red-500" />
@@ -197,7 +226,7 @@ function NotifCard({
           <span className="absolute top-3.5 right-10 w-2 h-2 rounded-full bg-primary" />
         )}
 
-        {/* Delete button — always visible, works on web + mobile */}
+        {/* Delete button */}
         <button
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => { e.stopPropagation(); triggerDismiss(); }}
@@ -216,10 +245,18 @@ function NotifCard({
         {/* Content */}
         <div
           className="flex-1 min-w-0 pr-8 cursor-pointer"
-          onClick={() => onClick(notif)}
+          onClick={() => {
+            if (didSwipe.current) { didSwipe.current = false; return; }
+            onClick(notif);
+          }}
         >
+          {/* Title + time */}
           <div className="flex items-start justify-between gap-2 mb-1">
-            <p className={`text-sm leading-tight ${isUnread ? 'font-bold text-on-surface' : 'font-semibold text-on-surface-variant'}`}>
+            <p className={`text-sm leading-tight
+              ${isUnread
+                ? 'font-bold text-on-surface'
+                : 'font-semibold text-on-surface-variant'
+              }`}>
               {notif.title}
             </p>
             <div className="flex items-center gap-1 text-on-surface-variant shrink-0">
@@ -227,13 +264,26 @@ function NotifCard({
               <span className="text-[10px]">{formatTime(notif.created_at)}</span>
             </div>
           </div>
-          <p className="text-xs text-on-surface-variant leading-relaxed">{notif.message}</p>
 
-          {/* Tap hint if navigable */}
+          {/* Main message */}
+          <p className="text-xs text-on-surface-variant leading-relaxed">
+            {main}
+          </p>
+
+          {/* Denial reason highlight box */}
+          {reason && (
+            <div className="mt-2 px-3 py-2 bg-red-500/8 border border-red-500/15 rounded-xl">
+              <p className="text-[11px] font-semibold text-red-500 leading-relaxed">
+                ⚠️ {reason}
+              </p>
+            </div>
+          )}
+
+          {/* Tap hint */}
           {dest && (
             <div className="flex items-center gap-1 mt-2">
               <span className="text-[10px] font-semibold text-primary uppercase tracking-wider">
-                {notif.type === 'payment' && !notif.loan_id ? 'View transactions' : 'View loan'}
+                {getTapLabel(notif)}
               </span>
               <ChevronRight size={10} className="text-primary" />
             </div>
@@ -251,7 +301,7 @@ export default function Inbox() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading]             = useState(true);
   const [error, setError]                 = useState('');
-  const [activeTab, setActiveTab]         = useState<FilterTab>('unread'); // ← default: Unread
+  const [activeTab, setActiveTab]         = useState<FilterTab>('unread');
   const [customerId, setCustomerId]       = useState<number | null>(null);
 
   useEffect(() => {
@@ -272,7 +322,7 @@ export default function Inbox() {
       const notifs: Notification[] = Array.isArray(data) ? data : [];
       setNotifications(notifs);
 
-      // Mark all read + optimistically clear dots — fixes the blue dot bug
+      // Mark all read + optimistically clear unread dots
       const unreadCount = notifs.filter(n => n.is_read === 0 || n.is_read === false).length;
       if (unreadCount > 0) {
         fetch(`${API_BASE}/api/notifications/${cid}/read-all`, { method: 'PATCH' }).catch(() => {});
@@ -301,17 +351,13 @@ export default function Inbox() {
     if (dest) navigate(dest);
   };
 
-  const handleRetry = () => {
-    if (customerId) loadNotifications(customerId);
-  };
-
-  // ── Filtered list ─────────────────────────────────────────────────────────
+  // ── Filtered list ───────────────────────────────────────────────────────
   const filtered = notifications.filter(n => {
     const type = n.type?.toLowerCase() ?? 'general';
     if (activeTab === 'unread')   return n.is_read === 0 || n.is_read === false;
     if (activeTab === 'loans')    return LOAN_TYPES.has(type);
     if (activeTab === 'payments') return PAYMENT_TYPES.has(type);
-    return true; // 'all'
+    return true;
   });
 
   const unreadCount = notifications.filter(n => n.is_read === 0 || n.is_read === false).length;
@@ -352,7 +398,7 @@ export default function Inbox() {
           </div>
         )}
 
-        {/* ── Filter Tabs — Unread first, All last ── */}
+        {/* ── Filter Tabs ── */}
         {!loading && !error && notifications.length > 0 && (
           <div className="flex gap-2 mb-5 overflow-x-auto pb-1 scrollbar-hide">
             {FILTER_TABS.map(tab => {
@@ -402,7 +448,7 @@ export default function Inbox() {
               <p className="text-on-surface-variant text-sm mt-1 max-w-xs">{error}</p>
             </div>
             <button
-              onClick={handleRetry}
+              onClick={() => { if (customerId) loadNotifications(customerId); }}
               className="flex items-center gap-2 px-6 py-3 bg-primary text-on-primary rounded-full font-bold text-sm active:scale-95 transition-transform"
             >
               <RefreshCw size={16} />

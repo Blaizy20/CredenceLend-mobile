@@ -869,16 +869,33 @@ async function startServer() {
         `SELECT l.loan_id, l.reference_no, l.principal_amount, l.interest_rate,
                 l.payment_term, l.term_months, l.total_payable, l.amount_per_term,
                 l.remaining_balance, l.status, l.due_date, l.activated_at,
+                l.denial_reason,             
                 l.created_at, l.is_active, c.tenant_id
          FROM loans l JOIN customers c ON c.customer_id = l.customer_id
          WHERE l.customer_id = ? AND l.is_active = 1 ORDER BY l.created_at DESC`,
         [customerId]
       );
 
-      const NOTIF_MAP: Record<string, { title: string; message: (ref: string) => string; type: string }> = {
-        active: { title: "Loan Approved",           message: (ref) => `Your loan (${ref}) has been approved. View your payment schedule now.`, type: "approved" },
-        denied: { title: "Loan Application Denied", message: (ref) => `Your loan application (${ref}) was not approved. Please contact your cooperative.`, type: "denied" },
-        closed: { title: "Loan Fully Paid",          message: (ref) => `Congratulations! Your loan (${ref}) has been fully paid.`, type: "payment" },
+      const NOTIF_MAP: Record<string, { title: string; message: (ref: string, extra?: string) => string; type: string }> = {
+        active: {
+          title:   "Loan Approved",
+          message: (ref) => `Your loan (${ref}) has been approved. View your payment schedule now.`,
+          type:    "approved",
+        },
+        denied: {
+          title:   "Loan Application Denied",
+          // ← now includes denial_reason if available
+          message: (ref, reason) =>
+            reason
+              ? `Your loan application (${ref}) was not approved. Reason: ${reason}`
+              : `Your loan application (${ref}) was not approved. Please contact your cooperative.`,
+          type: "denied",
+        },
+        closed: {
+          title:   "Loan Fully Paid",
+          message: (ref) => `Congratulations! Your loan (${ref}) has been fully paid.`,
+          type:    "payment",
+        },
       };
 
       for (const loan of rows) {
@@ -909,9 +926,9 @@ async function startServer() {
           if (notif) await insertNotification(
             Number(customerId), tenantId,
             notif.title,
-            notif.message(loan.reference_no),
+            notif.message(loan.reference_no, loan.denial_reason ?? undefined),
             notif.type,
-            loan.loan_id   // ← NEW
+            loan.loan_id
           );
 
           try {
