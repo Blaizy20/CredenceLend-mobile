@@ -805,6 +805,10 @@ async function startServer() {
         customer_id, tenant_id, principal_amount, payment_term,
         interest_rate, term_months, id_type, collateral_type,
         collateral_notes, notes, comakers,
+        // ── Breakdown fields from frontend ──
+        loans_receivable, service_fee, notarial_fee, risk_management,
+        paf, doc_stamps, total_fees, total_interest, cash_released,
+        amortization, total_periods,
       } = req.body;
 
       if (!customer_id || !principal_amount || !payment_term || !collateral_type)
@@ -839,15 +843,38 @@ async function startServer() {
       const months           = Number(term_months)   || 1;
       const resolvedTenantId = Number(tenant_id      ?? FALLBACK_TENANT_ID);
 
-      const totalInterest   = amount * (rate / 100) * months;
-      const total_payable   = Number((amount + totalInterest).toFixed(2));
-      const termCount       = getTermCount(payment_term, months);
-      const amount_per_term = Number((total_payable / termCount).toFixed(2));
+      // ── Use frontend breakdown if provided, otherwise fallback ──────────────
+      const totalInterestCalc = amount * (rate / 100) * months;
+      const fallbackTotal     = Number((amount + totalInterestCalc).toFixed(2));
+      const termCount         = getTermCount(payment_term, months);
+
+      const total_payable   = loans_receivable   ? Number(Number(loans_receivable).toFixed(2))   : fallbackTotal;
+      const amount_per_term = amortization        ? Number(Number(amortization).toFixed(2))        : Number((total_payable / termCount).toFixed(2));
+      const totalPeriods    = total_periods       ? Number(total_periods)                          : termCount;
 
       const [loanResult] = await pool.query<ResultSetHeader>(
-        `INSERT INTO loans (tenant_id, customer_id, reference_no, principal_amount, interest_rate, payment_term, term_months, total_payable, amount_per_term, remaining_balance, id_type, collateral_type, status, is_active)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 1)`,
-        [resolvedTenantId, customer_id, reference_no, amount, rate, payment_term, months, total_payable, amount_per_term, total_payable, id_type ?? null, collateral_type]
+        `INSERT INTO loans (
+          tenant_id, customer_id, reference_no, principal_amount, interest_rate,
+          payment_term, term_months, total_payable, amount_per_term, remaining_balance,
+          id_type, collateral_type, collateral_notes,
+          total_periods, service_fee, notarial_fee, risk_management_fee,
+          paf, doc_stamps, total_fees, total_interest, cash_released,
+          status, is_active
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 1)`,
+        [
+          resolvedTenantId, customer_id, reference_no, amount, rate,
+          payment_term, months, total_payable, amount_per_term, total_payable,
+          id_type ?? null, collateral_type, collateral_notes ?? null,
+          totalPeriods,
+          service_fee      ? Number(service_fee)      : null,
+          notarial_fee     ? Number(notarial_fee)      : null,
+          risk_management  ? Number(risk_management)   : null,
+          paf              ? Number(paf)               : null,
+          doc_stamps       ? Number(doc_stamps)        : null,
+          total_fees       ? Number(total_fees)        : null,
+          total_interest   ? Number(total_interest)    : null,
+          cash_released    ? Number(cash_released)     : null,
+        ]
       );
       const loan_id = loanResult.insertId;
 
