@@ -18,7 +18,7 @@ const upload     = multer({ storage: multer.memoryStorage() });
 
 const PORT               = Number(process.env.PORT || 3000);
 const FALLBACK_TENANT_ID = Number(process.env.DEFAULT_TENANT_ID || 1);
-const PAYMONGO_MIN_AMOUNT = 20; // ₱20.00 minimum enforced by PayMongo
+const PAYMONGO_MIN_AMOUNT = 1; // ₱20.00 minimum enforced by PayMongo
 
 const pool = mysql.createPool({
   host:               process.env.DB_HOST,
