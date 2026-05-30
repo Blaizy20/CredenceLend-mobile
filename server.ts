@@ -909,73 +909,119 @@ async function startServer() {
         loan_id
       );
 
-      // ── Fire-and-forget: application received email ────────────────────────
-      void (async () => {
-        try {
-          const [custRows] = await pool.query<RowDataPacket[]>(
-            `SELECT first_name, email FROM customers WHERE customer_id = ? LIMIT 1`,
-            [customer_id]
-          );
-          if (custRows.length > 0 && custRows[0].email) {
-            const { brand, branch } = await getTenantBranding(resolvedTenantId);
-            const formattedAmount   = amount.toLocaleString('en-PH', { minimumFractionDigits: 2 });
-            const accent            = "#01696f";
+          // ── Fire-and-forget: loan voucher email ───────────────────────────────
+          void (async () => {
+            try {
+              const [custRows] = await pool.query<RowDataPacket[]>(
+                `SELECT first_name, email FROM customers WHERE customer_id = ? LIMIT 1`,
+                [customer_id]
+              );
+              if (custRows.length > 0 && custRows[0].email) {
+                const { brand, branch } = await getTenantBranding(resolvedTenantId);
+                const accent            = "#01696f";
 
-            const content = `
-              <h2 style="margin:0 0 8px;font-size:20px;font-weight:700;color:${accent};">Application Received</h2>
-              <p style="margin:0 0 20px;font-size:14px;color:#555;line-height:1.6;">
-                Hi <strong>${custRows[0].first_name}</strong>, we have received your loan application and it is now pending review.
-              </p>
-              ${infoBlock(accent, [
-                { label: "Reference No.", value: reference_no },
-                { label: "Amount",        value: `&#8369;${formattedAmount}` },
-                { label: "Status",        value: "PENDING REVIEW", highlight: true },
-              ])}
-              <p style="margin:0;font-size:13px;color:#888;line-height:1.6;">
-                You will receive another email once your application has been reviewed.
-              </p>`;
+                const fmt = (n: number) => n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                const fmtW = (n: number) => Math.round(n).toLocaleString('en-PH');
 
-            await fetch('https://api.brevo.com/v3/smtp/email', {
-              method: 'POST',
-              headers: {
-                'accept':       'application/json',
-                'api-key':      process.env.BREVO_API_KEY ?? '',
-                'content-type': 'application/json',
-              },
-              body: JSON.stringify({
-                sender: {
-                  name:  `${brand} via CredenceLend`,
-                  email: process.env.BREVO_SENDER_EMAIL ?? '',
-                },
-                to: [{ email: custRows[0].email }],
-                subject:     `${brand} — Loan Application Received`,
-                htmlContent: emailWrapper(brand, branch, accent, content),
-              }),
-            });
-          }
-        } catch (emailErr: any) {
-          console.warn('Application email skipped:', emailErr.message);
+                const TERM_LABELS: Record<string, string> = {
+                  daily: 'Daily', weekly: 'Weekly',
+                  semi_monthly: 'Semi-monthly', monthly: 'Monthly',
+                };
+                const PERIOD_LABELS: Record<string, string> = {
+                  daily: 'day', weekly: 'week',
+                  semi_monthly: '15-day period', monthly: 'month',
+                };
+                const termLabel   = TERM_LABELS[payment_term]  ?? payment_term;
+                const periodLabel = PERIOD_LABELS[payment_term] ?? 'month';
+
+                const content = `
+                  <h2 style="margin:0 0 4px;font-size:20px;font-weight:700;color:${accent};">
+                    Loan Application Received
+                  </h2>
+                  <p style="margin:0 0 20px;font-size:14px;color:#555;line-height:1.6;">
+                    Hi <strong>${custRows[0].first_name}</strong>, your loan application has been submitted
+                    and is now <strong>pending review</strong>. Below is your official loan breakdown voucher.
+                  </p>
+
+                  <!-- Reference & Status -->
+                  ${infoBlock(accent, [
+                    { label: 'Reference No.',  value: reference_no                    },
+                    { label: 'Date Applied',   value: new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' }) },
+                    { label: 'Payment Term',   value: `${termLabel} · ${months} Month${months > 1 ? 's' : ''}` },
+                    { label: 'Status',         value: 'PENDING REVIEW', highlight: true },
+                  ])}
+
+                  <!-- Loan Breakdown -->
+                  <p style="margin:16px 0 6px;font-size:11px;font-weight:700;color:#aaa;letter-spacing:0.08em;text-transform:uppercase;">
+                    Loan Breakdown
+                  </p>
+                  ${infoBlock(accent, [
+                    { label: 'Principal Amount',      value: `&#8369;${fmt(amount)}`                                              },
+                    { label: 'Interest Income',       value: `&#8369;${fmtW(Number(total_interest  ?? amount * (rate/100) * months))}` },
+                    { label: 'Service Fee (3%)',       value: `&#8369;${fmtW(Number(service_fee     ?? 0))}`                      },
+                    { label: 'Notarial Fee (1%)',      value: `&#8369;${fmtW(Number(notarial_fee    ?? 0))}`                      },
+                    { label: 'Risk Management (0.5%)', value: `&#8369;${fmtW(Number(risk_management ?? 0))}`                      },
+                    { label: 'PAF (0.5%)',             value: `&#8369;${fmtW(Number(paf             ?? 0))}`                      },
+                    { label: 'Documentary Stamps',     value: `&#8369;${fmtW(Number(doc_stamps      ?? 0))}`                      },
+                  ])}
+
+                  <!-- Totals -->
+                  <p style="margin:16px 0 6px;font-size:11px;font-weight:700;color:#aaa;letter-spacing:0.08em;text-transform:uppercase;">
+                    Summary
+                  </p>
+                  ${infoBlock(accent, [
+                    { label: 'Loans Receivable', value: `&#8369;${fmt(total_payable)}`,   highlight: true  },
+                    { label: 'Net Proceeds',     value: `&#8369;${fmt(amount)}`,                           },
+                    { label: `Amortization / ${periodLabel}`, value: `&#8369;${fmt(amount_per_term)}`, highlight: true },
+                    { label: 'Total Installments', value: `${totalPeriods} ${termLabel.toLowerCase()} payment${totalPeriods > 1 ? 's' : ''}` },
+                  ])}
+
+                  <p style="margin:20px 0 0;font-size:13px;color:#888;line-height:1.6;">
+                    You will receive another notification once your application has been reviewed.
+                    Please keep this email as your official application record.
+                  </p>`;
+
+                await fetch('https://api.brevo.com/v3/smtp/email', {
+                  method: 'POST',
+                  headers: {
+                    'accept':       'application/json',
+                    'api-key':      process.env.BREVO_API_KEY ?? '',
+                    'content-type': 'application/json',
+                  },
+                  body: JSON.stringify({
+                    sender: {
+                      name:  `${brand} via CredenceLend`,
+                      email: process.env.BREVO_SENDER_EMAIL ?? '',
+                    },
+                    to:          [{ email: custRows[0].email }],
+                    subject:     `${brand} — Loan Application Voucher (${reference_no})`,
+                    htmlContent: emailWrapper(brand, branch, accent, content),
+                  }),
+                });
+              }
+            } catch (emailErr: any) {
+              console.warn('Voucher email skipped:', emailErr.message);
+            }
+          })();
+
+          try {
+            await pool.query(
+              `INSERT INTO loan_status_cache (loan_id, last_status) VALUES (?, 'PENDING')
+               ON DUPLICATE KEY UPDATE last_status = 'PENDING'`,
+              [loan_id]
+            );
+          } catch (cacheErr: any) { console.warn("Status cache seed skipped:", cacheErr.message); }
+
+          res.status(201).json({
+            success: true,
+            message: "Your loan application has been submitted successfully.",
+            loan:    { loan_id, reference_no, total_payable, amount_per_term, status: "PENDING" },
+          });
+        } catch (err: any) {
+          console.error("Loan apply error:", err);
+          res.status(500).json({ success: false, message: "Failed to submit loan application.", error: err.message });
         }
-      })();
-
-      try {
-        await pool.query(
-          `INSERT INTO loan_status_cache (loan_id, last_status) VALUES (?, 'PENDING')
-           ON DUPLICATE KEY UPDATE last_status = 'PENDING'`,
-          [loan_id]
-        );
-      } catch (cacheErr: any) { console.warn("Status cache seed skipped:", cacheErr.message); }
-
-      res.status(201).json({
-        success: true,
-        message: "Your loan application has been submitted successfully.",
-        loan:    { loan_id, reference_no, total_payable, amount_per_term, status: "PENDING" },
       });
-    } catch (err: any) {
-      console.error("Loan apply error:", err);
-      res.status(500).json({ success: false, message: "Failed to submit loan application.", error: err.message });
-    }
-  });
 
   // ── Loans: List by Customer ────────────────────────────────────────────────
   app.get("/api/loans/:customerId", async (req, res) => {
