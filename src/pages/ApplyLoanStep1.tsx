@@ -9,8 +9,8 @@ import { loansAPI } from '../lib/api';
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const TERM_OPTIONS = [
-  { label: 'Daily',        apiValue: 'daily',       rate: 2.75, periodsPerMonth: 25   },
-  { label: 'Weekly',       apiValue: 'weekly',      rate: 3.0,  periodsPerMonth: 4.25 },
+  { label: 'Daily',        apiValue: 'daily',       rate: 2.75, periodsPerMonth: 30   },
+  { label: 'Weekly',       apiValue: 'weekly',      rate: 3.0,  periodsPerMonth: 4    },
   { label: 'Semi-monthly', apiValue: 'semi_monthly',rate: 3.5,  periodsPerMonth: 2    },
   { label: 'Monthly',      apiValue: 'monthly',     rate: 4.0,  periodsPerMonth: 1    },
 ];
@@ -24,10 +24,10 @@ const FEE_RATES = {
 
 // Doc stamps rate is term-specific (reverse-engineered from disbursement vouchers)
 const DOC_STAMPS_RATE: Record<string, number> = {
-  daily:        0.152727, // ₱168/₱1,100 & ₱252/₱1,650 = 15.2727%
-  weekly:       0.150000, // ₱180/₱1,200 = 15.0000%
-  semi_monthly: 0.150000, // no voucher sample — defaulting to 15%
-  monthly:      0.150000, // no voucher sample — defaulting to 15%
+  daily:        0.14,
+  weekly:       0.14,
+  semi_monthly: 0.14,
+  monthly:      0.14,
 };
 
 const COLLATERAL_TYPES = [
@@ -166,8 +166,8 @@ export default function ApplyLoanStep1() {
 
     // Amortization: ceiled to nearest whole peso (matches voucher convention)
     const totalPeriods  = Math.round(months * termOption.periodsPerMonth);
-    const amortization  = totalPeriods > 0
-      ? Math.ceil(loansReceivable / totalPeriods)
+    const amortization = totalPeriods > 0
+      ? Math.round((loansReceivable / totalPeriods) * 100) / 100
       : 0;
 
     const periodLabel =
