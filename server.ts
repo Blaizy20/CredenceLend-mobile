@@ -109,69 +109,14 @@ function getTermCount(paymentTerm: string, termMonths: number): number {
   }
 }
 
-// ── Tenant name helper ────────────────────────────────────────────────────────
-async function getTenantName(tenantId: number): Promise<string> {
-  try {
-    const [rows] = await pool.query<RowDataPacket[]>(
-      `SELECT display_name, tenant_name FROM tenants WHERE tenant_id = ? LIMIT 1`,
-      [tenantId]
-    );
-    if (rows.length > 0) {
-      return rows[0].display_name || rows[0].tenant_name || "CredenceLend";
-    }
-  } catch {}
-  return "CredenceLend";
-}
-
-// ── Shared email styles / layout helpers ──────────────────────────────────────
-function emailWrapper(tenantName: string, accentColor: string, content: string): string {
-  return `
-    <div style="font-family:'Segoe UI',Arial,sans-serif;max-width:520px;margin:auto;background:#f4f4f0;padding:32px 16px;">
-
-      <!-- Header -->
-      <div style="background:#ffffff;border-radius:12px 12px 0 0;padding:28px 32px 20px;border-bottom:2px solid ${accentColor};">
-        <p style="margin:0;font-size:18px;font-weight:700;color:#1a1a1a;letter-spacing:-0.3px;">
-          ${tenantName}
-        </p>
-        <p style="margin:4px 0 0;font-size:11px;font-weight:500;color:#888;letter-spacing:0.5px;text-transform:uppercase;">
-          Powered by CredenceLend
-        </p>
-      </div>
-
-      <!-- Body -->
-      <div style="background:#ffffff;padding:28px 32px;border-radius:0 0 12px 12px;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
-        ${content}
-        <!-- Footer -->
-        <div style="margin-top:32px;padding-top:20px;border-top:1px solid #eeede9;">
-          <p style="margin:0;font-size:11px;color:#aaa;line-height:1.6;">
-            This is an automated message from <strong>${tenantName}</strong> via CredenceLend.<br>
-            Please do not reply to this email.
-          </p>
-        </div>
-      </div>
-
-    </div>`;
-}
-
-function infoBlock(accentColor: string, rows: { label: string; value: string; highlight?: boolean }[]): string {
-  return `
-    <table style="width:100%;border-collapse:collapse;margin:20px 0;border-radius:8px;overflow:hidden;border:1px solid #eeede9;">
-      ${rows.map((r, i) => `
-        <tr style="background:${i % 2 === 0 ? '#fafaf8' : '#ffffff'};">
-          <td style="padding:10px 14px;font-size:13px;color:#666;width:45%;">${r.label}</td>
-          <td style="padding:10px 14px;font-size:13px;font-weight:600;color:${r.highlight ? accentColor : '#1a1a1a'};">${r.value}</td>
-        </tr>`).join('')}
-    </table>`;
-}
-
-// ── Notification insert ───────────────────────────────────────────────────────
+// ── UPDATED: added optional loanId param ─────────────────────────────────────
 async function insertNotification(
   customerId: number,
   tenantId:   number,
   title:      string,
   message:    string,
   type:       string,
-  loanId?:    number | null
+  loanId?:    number | null   // ← NEW
 ): Promise<void> {
   try {
     const [existing] = await pool.query<RowDataPacket[]>(
@@ -191,29 +136,7 @@ async function insertNotification(
   }
 }
 
-// ── Email: OTP ────────────────────────────────────────────────────────────────
-async function sendOtpEmail(
-  toEmail:    string,
-  otp:        string,
-  tenantName: string
-): Promise<void> {
-  const accent  = "#01696f";
-  const content = `
-    <h2 style="margin:0 0 8px;font-size:20px;font-weight:700;color:#1a1a1a;">Verification Code</h2>
-    <p style="margin:0 0 20px;font-size:14px;color:#555;line-height:1.6;">
-      Use the code below to verify your identity. It expires in <strong>10 minutes</strong>.
-    </p>
-    <div style="text-align:center;margin:24px 0;">
-      <div style="display:inline-block;font-size:36px;font-weight:800;letter-spacing:0.4em;
-                  color:#1a1a1a;background:#f4f4f0;padding:16px 32px;border-radius:10px;
-                  border:2px dashed ${accent};">
-        ${otp}
-      </div>
-    </div>
-    <p style="margin:0;font-size:13px;color:#aaa;text-align:center;">
-      If you did not request this, please ignore this email.
-    </p>`;
-
+async function sendOtpEmail(toEmail: string, otp: string): Promise<void> {
   const response = await fetch("https://api.brevo.com/v3/smtp/email", {
     method: "POST",
     headers: {
@@ -223,23 +146,27 @@ async function sendOtpEmail(
     },
     body: JSON.stringify({
       sender: {
-        name:  `${tenantName} via CredenceLend`,
+        name:  process.env.BREVO_SENDER_NAME  ?? "Loan Manager",
         email: process.env.BREVO_SENDER_EMAIL ?? "",
       },
       to: [{ email: toEmail }],
-      subject: `${tenantName} — Your Verification Code`,
-      htmlContent: emailWrapper(tenantName, accent, content),
+      subject: "Your Verification Code",
+      htmlContent: `
+        <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#f9f8f5;border-radius:8px;">
+          <h2 style="color:#01696f;">Verification Code</h2>
+          <p>Use the code below to verify your identity. It expires in 10 minutes.</p>
+          <div style="font-size:2rem;font-weight:700;letter-spacing:0.3em;color:#28251d;background:#fff;padding:16px 24px;border-radius:6px;text-align:center;margin:24px 0;">${otp}</div>
+          <p style="color:#7a7974;font-size:0.875rem;">If you did not request this, please ignore this email.</p>
+        </div>`,
     }),
   });
-
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
-    console.error("Brevo OTP email error:", err);
+    console.error("Brevo send error:", err);
     throw new Error(`Brevo API error: ${response.status}`);
   }
 }
 
-// ── Email: Payment Confirmation ───────────────────────────────────────────────
 async function sendPaymentEmail(
   toEmail:     string,
   firstName:   string,
@@ -247,35 +174,10 @@ async function sendPaymentEmail(
   newBalance:  number,
   orNo:        string,
   method:      string,
-  isFullyPaid: boolean,
-  tenantName:  string
+  isFullyPaid: boolean
 ): Promise<void> {
-  const accent           = isFullyPaid ? "#16a34a" : "#01696f";
   const formattedAmount  = amount.toLocaleString("en-PH", { minimumFractionDigits: 2 });
   const formattedBalance = newBalance.toLocaleString("en-PH", { minimumFractionDigits: 2 });
-
-  const content = isFullyPaid ? `
-    <h2 style="margin:0 0 8px;font-size:20px;font-weight:700;color:#16a34a;">Loan Fully Paid</h2>
-    <p style="margin:0 0 20px;font-size:14px;color:#555;line-height:1.6;">
-      Hi <strong>${firstName}</strong>, congratulations! Your loan has been
-      <strong>fully settled</strong>. Thank you for paying on time.
-    </p>
-    ${infoBlock(accent, [
-      { label: "Amount Paid",       value: `&#8369;${formattedAmount}`,  highlight: true },
-      { label: "Payment Method",    value: method },
-      { label: "OR Number",         value: orNo },
-      { label: "Remaining Balance", value: "&#8369;0.00 — CLOSED",       highlight: true },
-    ])}` : `
-    <h2 style="margin:0 0 8px;font-size:20px;font-weight:700;color:#01696f;">Payment Received</h2>
-    <p style="margin:0 0 20px;font-size:14px;color:#555;line-height:1.6;">
-      Hi <strong>${firstName}</strong>, we have successfully received your payment.
-    </p>
-    ${infoBlock(accent, [
-      { label: "Amount Paid",       value: `&#8369;${formattedAmount}`,  highlight: true },
-      { label: "Payment Method",    value: method },
-      { label: "OR Number",         value: orNo },
-      { label: "Remaining Balance", value: `&#8369;${formattedBalance}` },
-    ])}`;
 
   const response = await fetch("https://api.brevo.com/v3/smtp/email", {
     method: "POST",
@@ -286,14 +188,60 @@ async function sendPaymentEmail(
     },
     body: JSON.stringify({
       sender: {
-        name:  `${tenantName} via CredenceLend`,
+        name:  process.env.BREVO_SENDER_NAME  ?? "Loan Manager",
         email: process.env.BREVO_SENDER_EMAIL ?? "",
       },
       to: [{ email: toEmail }],
-      subject: isFullyPaid
-        ? `${tenantName} — Loan Fully Paid`
-        : `${tenantName} — Payment Received`,
-      htmlContent: emailWrapper(tenantName, accent, content),
+      subject: isFullyPaid ? "🎉 Your Loan is Fully Paid!" : "Payment Received – CredenceLend",
+      htmlContent: isFullyPaid ? `
+        <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#f9f8f5;border-radius:8px;">
+          <h2 style="color:#16a34a;">Loan Fully Paid! 🎉</h2>
+          <p>Hi <strong>${firstName}</strong>,</p>
+          <p>Congratulations! Your loan has been <strong>fully paid</strong>. Thank you for settling your account on time.</p>
+          <table style="width:100%;border-collapse:collapse;margin:24px 0;">
+            <tr style="background:#f0fdf4;">
+              <td style="padding:10px 14px;font-size:0.85rem;color:#374151;">Amount Paid</td>
+              <td style="padding:10px 14px;font-weight:700;color:#16a34a;">₱${formattedAmount}</td>
+            </tr>
+            <tr>
+              <td style="padding:10px 14px;font-size:0.85rem;color:#374151;">Payment Method</td>
+              <td style="padding:10px 14px;font-weight:600;color:#28251d;">${method}</td>
+            </tr>
+            <tr style="background:#f0fdf4;">
+              <td style="padding:10px 14px;font-size:0.85rem;color:#374151;">OR Number</td>
+              <td style="padding:10px 14px;font-weight:600;color:#28251d;">${orNo}</td>
+            </tr>
+            <tr>
+              <td style="padding:10px 14px;font-size:0.85rem;color:#374151;">Remaining Balance</td>
+              <td style="padding:10px 14px;font-weight:700;color:#16a34a;">₱0.00 — CLOSED</td>
+            </tr>
+          </table>
+          <p style="color:#7a7974;font-size:0.875rem;">This is an automated payment confirmation. Please keep this for your records.</p>
+        </div>` : `
+        <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#f9f8f5;border-radius:8px;">
+          <h2 style="color:#01696f;">Payment Received</h2>
+          <p>Hi <strong>${firstName}</strong>,</p>
+          <p>We have successfully received your payment. Here are the details:</p>
+          <table style="width:100%;border-collapse:collapse;margin:24px 0;">
+            <tr style="background:#f0faf9;">
+              <td style="padding:10px 14px;font-size:0.85rem;color:#374151;">Amount Paid</td>
+              <td style="padding:10px 14px;font-weight:700;color:#01696f;">₱${formattedAmount}</td>
+            </tr>
+            <tr>
+              <td style="padding:10px 14px;font-size:0.85rem;color:#374151;">Payment Method</td>
+              <td style="padding:10px 14px;font-weight:600;color:#28251d;">${method}</td>
+            </tr>
+            <tr style="background:#f0faf9;">
+              <td style="padding:10px 14px;font-size:0.85rem;color:#374151;">OR Number</td>
+              <td style="padding:10px 14px;font-weight:600;color:#28251d;">${orNo}</td>
+            </tr>
+            <tr>
+              <td style="padding:10px 14px;font-size:0.85rem;color:#374151;">Remaining Balance</td>
+              <td style="padding:10px 14px;font-weight:700;color:#28251d;">₱${formattedBalance}</td>
+            </tr>
+          </table>
+          <p style="color:#7a7974;font-size:0.875rem;">This is an automated payment confirmation. Please keep this for your records.</p>
+        </div>`,
     }),
   });
 
@@ -303,62 +251,38 @@ async function sendPaymentEmail(
   }
 }
 
-// ── Email: Loan Status ────────────────────────────────────────────────────────
 async function sendLoanStatusEmail(
   toEmail:     string,
   firstName:   string,
   status:      string,
   referenceNo: string,
-  amount:      number,
-  tenantName:  string
+  amount:      number
 ): Promise<void> {
   const formattedAmount = amount.toLocaleString('en-PH', { minimumFractionDigits: 2 });
 
-  const TEMPLATES: Record<string, {
-    subject:  string;
-    heading:  string;
-    accent:   string;
-    intro:    string;
-    statusLabel: string;
-  }> = {
+  const TEMPLATES: Record<string, { subject: string; heading: string; color: string; body: string }> = {
     active: {
-      subject:     `${tenantName} — Loan Approved`,
-      heading:     "Your Loan Has Been Approved",
-      accent:      "#16a34a",
-      intro:       `Great news, <strong>${firstName}</strong>! Your loan application <strong>${referenceNo}</strong> for <strong>&#8369;${formattedAmount}</strong> has been <strong>approved</strong>. Please log in to view your payment schedule.`,
-      statusLabel: "APPROVED",
+      subject: `✅ Loan Approved – ${referenceNo}`,
+      heading: 'Your Loan Has Been Approved!',
+      color:   '#16a34a',
+      body:    `Great news, <strong>${firstName}</strong>! Your loan application <strong>${referenceNo}</strong> for <strong>₱${formattedAmount}</strong> has been <strong>approved</strong>. Please log in to your CredenceLend app to view your payment schedule.`,
     },
     denied: {
-      subject:     `${tenantName} — Loan Application Update`,
-      heading:     "Loan Application Not Approved",
-      accent:      "#dc2626",
-      intro:       `Hi <strong>${firstName}</strong>, unfortunately your loan application <strong>${referenceNo}</strong> for <strong>&#8369;${formattedAmount}</strong> was <strong>not approved</strong> at this time. Please contact your cooperative for more information.`,
-      statusLabel: "NOT APPROVED",
+      subject: `❌ Loan Application Update – ${referenceNo}`,
+      heading: 'Loan Application Not Approved',
+      color:   '#dc2626',
+      body:    `Hi <strong>${firstName}</strong>, unfortunately your loan application <strong>${referenceNo}</strong> for <strong>₱${formattedAmount}</strong> was <strong>not approved</strong> at this time. Please contact your cooperative for more information or to discuss your options.`,
     },
     closed: {
-      subject:     `${tenantName} — Loan Fully Paid`,
-      heading:     "Loan Fully Paid",
-      accent:      "#01696f",
-      intro:       `Congratulations, <strong>${firstName}</strong>! Your loan <strong>${referenceNo}</strong> has been marked as <strong>fully paid</strong>. Thank you for settling your account. We hope to serve you again!`,
-      statusLabel: "CLOSED",
+      subject: `🎉 Loan Fully Paid – ${referenceNo}`,
+      heading: 'Loan Fully Paid!',
+      color:   '#01696f',
+      body:    `Congratulations, <strong>${firstName}</strong>! Your loan <strong>${referenceNo}</strong> has been marked as <strong>fully paid</strong>. Thank you for settling your account. We hope to serve you again!`,
     },
   };
 
   const template = TEMPLATES[status.toLowerCase()];
   if (!template) return;
-
-  const content = `
-    <h2 style="margin:0 0 8px;font-size:20px;font-weight:700;color:${template.accent};">
-      ${template.heading}
-    </h2>
-    <p style="margin:0 0 20px;font-size:14px;color:#555;line-height:1.6;">
-      ${template.intro}
-    </p>
-    ${infoBlock(template.accent, [
-      { label: "Reference No.", value: referenceNo },
-      { label: "Amount",        value: `&#8369;${formattedAmount}` },
-      { label: "Status",        value: template.statusLabel, highlight: true },
-    ])}`;
 
   const response = await fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST',
@@ -369,12 +293,22 @@ async function sendLoanStatusEmail(
     },
     body: JSON.stringify({
       sender: {
-        name:  `${tenantName} via CredenceLend`,
+        name:  process.env.BREVO_SENDER_NAME  ?? 'Loan Manager',
         email: process.env.BREVO_SENDER_EMAIL ?? '',
       },
       to: [{ email: toEmail }],
-      subject:     template.subject,
-      htmlContent: emailWrapper(tenantName, template.accent, content),
+      subject: template.subject,
+      htmlContent: `
+        <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#f9f8f5;border-radius:8px;">
+          <h2 style="color:${template.color};">${template.heading}</h2>
+          <p>${template.body}</p>
+          <div style="margin:24px 0;padding:16px;background:#fff;border-radius:6px;border-left:4px solid ${template.color};">
+            <p style="margin:0;font-size:0.85rem;color:#374151;">Reference No: <strong>${referenceNo}</strong></p>
+            <p style="margin:4px 0 0;font-size:0.85rem;color:#374151;">Amount: <strong>₱${formattedAmount}</strong></p>
+            <p style="margin:4px 0 0;font-size:0.85rem;color:#374151;">Status: <strong style="color:${template.color};">${status.toUpperCase()}</strong></p>
+          </div>
+          <p style="color:#7a7974;font-size:0.875rem;">This is an automated notification from CredenceLend. Please do not reply to this email.</p>
+        </div>`,
     }),
   });
 
@@ -418,17 +352,17 @@ async function startServer() {
     credentials: true,
   }));
 
-  // ── Health ─────────────────────────────────────────────────────────────────
+  // ── Health ────────────────────────────────────────────────────────────────
   app.get("/api/health", async (_req, res) => {
     try {
       await pool.query("SELECT 1");
-      res.json({ status: "ok", database: "connected" });
+      res.json({ status: "ok", database: "connected ✅" });
     } catch (err: any) {
-      res.status(500).json({ status: "error", database: "disconnected", error: err.message });
+      res.status(500).json({ status: "error", database: "disconnected ❌", error: err.message });
     }
   });
 
-  // ── Auth: Availability Checks ──────────────────────────────────────────────
+  // ── Auth: Availability Checks ─────────────────────────────────────────────
   app.get("/api/auth/check-username", async (req, res) => {
     try {
       const username  = String(req.query.username  || "").trim();
@@ -471,7 +405,7 @@ async function startServer() {
     } catch { res.status(500).json({ taken: false, message: "An unexpected error occurred." }); }
   });
 
-  // ── Tenant: Verify Code ────────────────────────────────────────────────────
+  // ── Tenant: Verify Code ───────────────────────────────────────────────────
   app.post('/api/tenants/verify-code', async (req: any, res: any) => {
     const { code } = req.body;
     if (!code || typeof code !== 'string' || code.length !== 6)
@@ -510,7 +444,7 @@ async function startServer() {
     }
   });
 
-  // ── Auth: Send OTP ─────────────────────────────────────────────────────────
+  // ── Auth: Send OTP ────────────────────────────────────────────────────────
   app.post("/api/auth/send-otp", async (req, res) => {
     try {
       const email     = String(req.body.email     ?? "").trim().toLowerCase();
@@ -528,13 +462,10 @@ async function startServer() {
       if (customers.length === 0)
         return res.status(404).json({ success: false, message: "No account is associated with this email address in the selected cooperative." });
 
-      const otp        = Math.floor(100000 + Math.random() * 900000).toString();
-      const expiresAt  = Date.now() + 10 * 60 * 1000;
-      const tenantName = await getTenantName(tenant_id);
-
+      const otp       = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = Date.now() + 10 * 60 * 1000;
       await pool.query("REPLACE INTO otps (email, otp, expires_at) VALUES (?, ?, ?)", [email, otp, expiresAt]);
-      await sendOtpEmail(email, otp, tenantName);
-
+      await sendOtpEmail(email, otp);
       res.json({ success: true, message: "A verification code has been sent to your email." });
     } catch (err: any) {
       console.error("Send OTP error:", err.message);
@@ -542,7 +473,7 @@ async function startServer() {
     }
   });
 
-  // ── Auth: Verify OTP ───────────────────────────────────────────────────────
+  // ── Auth: Verify OTP ──────────────────────────────────────────────────────
   app.post("/api/auth/verify-otp", async (req, res) => {
     try {
       const email     = String(req.body.email     ?? "").trim().toLowerCase();
@@ -576,7 +507,7 @@ async function startServer() {
     }
   });
 
-  // ── Auth: Reset Password ───────────────────────────────────────────────────
+  // ── Auth: Reset Password ──────────────────────────────────────────────────
   app.post("/api/auth/reset-password", async (req, res) => {
     try {
       const email       = String(req.body.email       ?? "").trim().toLowerCase();
@@ -609,7 +540,7 @@ async function startServer() {
     }
   });
 
-  // ── Auth: Register ─────────────────────────────────────────────────────────
+  // ── Auth: Register ────────────────────────────────────────────────────────
   app.post("/api/auth/register", async (req, res) => {
     try {
       const tenant_id  = Number(req.body.tenant_id  ?? FALLBACK_TENANT_ID);
@@ -667,7 +598,7 @@ async function startServer() {
     }
   });
 
-  // ── Auth: Login ────────────────────────────────────────────────────────────
+  // ── Auth: Login ───────────────────────────────────────────────────────────
   app.post("/api/auth/login", async (req, res) => {
     try {
       const usernameOrEmail = String(req.body.username ?? req.body.email ?? "").trim();
@@ -703,7 +634,7 @@ async function startServer() {
     }
   });
 
-  // ── Profile ────────────────────────────────────────────────────────────────
+  // ── Profile ───────────────────────────────────────────────────────────────
   app.get("/api/profile/:customerId", async (req, res) => {
     try {
       const [rows] = await pool.query<RowDataPacket[]>(
@@ -716,7 +647,7 @@ async function startServer() {
     } catch { res.status(500).json({ success: false, message: "An unexpected error occurred." }); }
   });
 
-  // ── Profile: Update Credentials ────────────────────────────────────────────
+  // ── Profile: Update Credentials ───────────────────────────────────────────
   app.patch("/api/profile/update", async (req, res) => {
     try {
       const customer_id = Number(req.body.customer_id ?? 0);
@@ -786,7 +717,7 @@ async function startServer() {
     }
   });
 
-  // ── Loans: Apply ───────────────────────────────────────────────────────────
+  // ── Loans: Apply ──────────────────────────────────────────────────────────
   app.post("/api/loans/apply", async (req, res) => {
     try {
       const {
@@ -847,7 +778,8 @@ async function startServer() {
                  (tenant_id, loan_id, full_name, phone_number, relationship_to_borrower, email, address, notes)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
               [
-                resolvedTenantId, loan_id,
+                resolvedTenantId,
+                loan_id,
                 String(cm.full_name    ?? '').trim() || null,
                 String(cm.phone_number ?? '').trim() || null,
                 String(cm.relationship ?? 'Co-maker').trim(),
@@ -862,39 +794,22 @@ async function startServer() {
         }
       }
 
+      // ── UPDATED: pass loan_id to insertNotification ───────────────────────
       await insertNotification(
         customer_id, resolvedTenantId,
         "Loan Application Received",
         `Your application (${reference_no}) for ₱${amount.toLocaleString()} has been submitted and is pending review.`,
         "general",
-        loan_id
+        loan_id   // ← NEW
       );
 
-      // ── Send application received email with tenant name ──────────────────
       try {
         const [custRows] = await pool.query<RowDataPacket[]>(
           `SELECT first_name, email FROM customers WHERE customer_id = ? LIMIT 1`,
           [customer_id]
         );
         if (custRows.length > 0 && custRows[0].email) {
-          const tenantName      = await getTenantName(resolvedTenantId);
           const formattedAmount = amount.toLocaleString('en-PH', { minimumFractionDigits: 2 });
-          const accent          = "#01696f";
-
-          const content = `
-            <h2 style="margin:0 0 8px;font-size:20px;font-weight:700;color:${accent};">Application Received</h2>
-            <p style="margin:0 0 20px;font-size:14px;color:#555;line-height:1.6;">
-              Hi <strong>${custRows[0].first_name}</strong>, we have received your loan application and it is now pending review.
-            </p>
-            ${infoBlock(accent, [
-              { label: "Reference No.", value: reference_no },
-              { label: "Amount",        value: `&#8369;${formattedAmount}` },
-              { label: "Status",        value: "PENDING REVIEW", highlight: true },
-            ])}
-            <p style="margin:0;font-size:13px;color:#888;line-height:1.6;">
-              You will receive another email once your application has been reviewed.
-            </p>`;
-
           await fetch('https://api.brevo.com/v3/smtp/email', {
             method: 'POST',
             headers: {
@@ -904,12 +819,22 @@ async function startServer() {
             },
             body: JSON.stringify({
               sender: {
-                name:  `${tenantName} via CredenceLend`,
+                name:  process.env.BREVO_SENDER_NAME  ?? 'Loan Manager',
                 email: process.env.BREVO_SENDER_EMAIL ?? '',
               },
               to: [{ email: custRows[0].email }],
-              subject:     `${tenantName} — Loan Application Received`,
-              htmlContent: emailWrapper(tenantName, accent, content),
+              subject: `📋 Loan Application Received – ${reference_no}`,
+              htmlContent: `
+                <div style="font-family:sans-serif;max-width:480px;margin:auto;padding:32px;background:#f9f8f5;border-radius:8px;">
+                  <h2 style="color:#01696f;">Application Received</h2>
+                  <p>Hi <strong>${custRows[0].first_name}</strong>, we have received your loan application. Here are your details:</p>
+                  <div style="margin:24px 0;padding:16px;background:#fff;border-radius:6px;border-left:4px solid #01696f;">
+                    <p style="margin:0;font-size:0.85rem;color:#374151;">Reference No: <strong>${reference_no}</strong></p>
+                    <p style="margin:4px 0 0;font-size:0.85rem;color:#374151;">Amount: <strong>₱${formattedAmount}</strong></p>
+                    <p style="margin:4px 0 0;font-size:0.85rem;color:#374151;">Status: <strong style="color:#2563eb;">PENDING REVIEW</strong></p>
+                  </div>
+                  <p style="color:#7a7974;font-size:0.875rem;">You will receive another email once your application has been reviewed. This is an automated notification from CredenceLend.</p>
+                </div>`,
             }),
           });
         }
@@ -936,7 +861,7 @@ async function startServer() {
     }
   });
 
-  // ── Loans: List by Customer ────────────────────────────────────────────────
+  // ── Loans: List by Customer ───────────────────────────────────────────────
   app.get("/api/loans/:customerId", async (req, res) => {
     try {
       const customerId = req.params.customerId;
@@ -944,7 +869,7 @@ async function startServer() {
         `SELECT l.loan_id, l.reference_no, l.principal_amount, l.interest_rate,
                 l.payment_term, l.term_months, l.total_payable, l.amount_per_term,
                 l.remaining_balance, l.status, l.due_date, l.activated_at,
-                l.denial_reason,
+                l.denial_reason,             
                 l.created_at, l.is_active, c.tenant_id
          FROM loans l JOIN customers c ON c.customer_id = l.customer_id
          WHERE l.customer_id = ? AND l.is_active = 1 ORDER BY l.created_at DESC`,
@@ -959,6 +884,7 @@ async function startServer() {
         },
         denied: {
           title:   "Loan Application Denied",
+          // ← now includes denial_reason if available
           message: (ref, reason) =>
             reason
               ? `Your loan application (${ref}) was not approved. Reason: ${reason}`
@@ -996,6 +922,7 @@ async function startServer() {
           );
 
           const notif = NOTIF_MAP[newStatus];
+          // ── UPDATED: pass loan.loan_id to insertNotification ──────────────
           if (notif) await insertNotification(
             Number(customerId), tenantId,
             notif.title,
@@ -1004,21 +931,18 @@ async function startServer() {
             loan.loan_id
           );
 
-          // ── Send status change email with tenant name ────────────────────
           try {
             const [custRows] = await pool.query<RowDataPacket[]>(
               `SELECT first_name, email FROM customers WHERE customer_id = ? LIMIT 1`,
               [customerId]
             );
             if (custRows.length > 0 && custRows[0].email) {
-              const tenantName = await getTenantName(tenantId);
               await sendLoanStatusEmail(
                 custRows[0].email,
                 custRows[0].first_name,
                 newStatus,
                 loan.reference_no,
-                Number(loan.principal_amount),
-                tenantName
+                Number(loan.principal_amount)
               );
             }
           } catch (emailErr: any) {
@@ -1034,7 +958,7 @@ async function startServer() {
     }
   });
 
-  // ── Loans: Single Loan ─────────────────────────────────────────────────────
+  // ── Loans: Single Loan ────────────────────────────────────────────────────
   app.get("/api/loan/:loanId", async (req, res) => {
     try {
       const [rows] = await pool.query<RowDataPacket[]>(
@@ -1050,7 +974,7 @@ async function startServer() {
     } catch { res.status(500).json({ success: false, message: "Unable to retrieve loan details." }); }
   });
 
-  // ── Loan Documents: Get by Loan ────────────────────────────────────────────
+  // ── Loan Documents: Get by Loan ───────────────────────────────────────────
   app.get("/api/loan/:loanId/documents", async (req, res) => {
     try {
       const [rows] = await pool.query<RowDataPacket[]>(
@@ -1065,7 +989,7 @@ async function startServer() {
     }
   });
 
-  // ── Upload: Document to S3 ─────────────────────────────────────────────────
+  // ── Upload: Document to Railway S3 ────────────────────────────────────────
   app.post('/api/upload/document', upload.single('file'), async (req: any, res: any) => {
     try {
       const file = req.file;
@@ -1081,14 +1005,19 @@ async function startServer() {
 
       const uploader = new Upload({
         client: s3,
-        params: { Bucket: BUCKET, Key: key, Body: file.buffer, ContentType: file.mimetype },
+        params: {
+          Bucket:      BUCKET,
+          Key:         key,
+          Body:        file.buffer,
+          ContentType: file.mimetype,
+        },
       });
 
       await uploader.done();
 
-      const fileUrl   = `https://${BUCKET}.t3.storageapi.dev/${key}`;
-      const loanIdRaw = req.body.loan_id;
+      const fileUrl = `https://${BUCKET}.t3.storageapi.dev/${key}`;
 
+      const loanIdRaw = req.body.loan_id;
       if (loanIdRaw && !isNaN(Number(loanIdRaw))) {
         try {
           const [metaRows]: any = await pool.query(
@@ -1098,10 +1027,13 @@ async function startServer() {
              WHERE l.loan_id = ? LIMIT 1`,
             [Number(loanIdRaw)]
           );
+          const customer_no  = metaRows[0]?.customer_no  ?? null;
+          const reference_no = metaRows[0]?.reference_no ?? null;
+
           await pool.query(
             `INSERT INTO loan_documents (loan_id, tenant_id, customer_id, customer_no, reference_no, code, label, file_url, file_key)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [Number(loanIdRaw), tenant_id, customer_id, metaRows[0]?.customer_no ?? null, metaRows[0]?.reference_no ?? null, code, label, fileUrl, key]
+            [Number(loanIdRaw), tenant_id, customer_id, customer_no, reference_no, code, label, fileUrl, key]
           );
         } catch (dbErr: any) {
           console.warn('[upload] DB insert skipped:', dbErr.message);
@@ -1115,13 +1047,15 @@ async function startServer() {
     }
   });
 
-  // ── S3: Presigned URL ──────────────────────────────────────────────────────
+  // ── S3: Presigned URL ─────────────────────────────────────────────────────
   app.get('/api/documents/signed-url', async (req: any, res: any) => {
     try {
       const key = String(req.query.key ?? '').trim();
       if (!key) return res.status(400).json({ success: false, message: 'File key is required.' });
+
       const command   = new GetObjectCommand({ Bucket: BUCKET, Key: key });
       const signedUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
+
       return res.json({ success: true, url: signedUrl });
     } catch (err) {
       console.error('[signed-url]', err);
@@ -1129,7 +1063,7 @@ async function startServer() {
     }
   });
 
-  // ── Payments: List by Loan ─────────────────────────────────────────────────
+  // ── Payments: List by Loan ────────────────────────────────────────────────
   app.get("/api/payments/:loanId", async (req, res) => {
     try {
       const [rows] = await pool.query<RowDataPacket[]>(
@@ -1143,7 +1077,7 @@ async function startServer() {
     } catch { res.status(500).json({ success: false, message: "Unable to retrieve payment records." }); }
   });
 
-  // ── Payments: All by Customer ──────────────────────────────────────────────
+  // ── Payments: All by Customer ─────────────────────────────────────────────
   app.get("/api/payments/customer/:customerId", async (req, res) => {
     try {
       const tenant_id = Number(req.query.tenant_id || 0);
@@ -1160,6 +1094,7 @@ async function startServer() {
          ORDER BY COALESCE(p.created_at, p.payment_date) DESC, p.payment_id DESC`,
         [req.params.customerId, tenant_id]
       );
+
       res.json(rows);
     } catch (err: any) {
       console.error("Customer payments error:", err.message);
@@ -1167,20 +1102,27 @@ async function startServer() {
     }
   });
 
-  // ── Notifications: List ────────────────────────────────────────────────────
+  // ── Notifications: List ───────────────────────────────────────────────────
   app.get("/api/notifications/:customerId", async (req, res) => {
     try {
       await pool.query(
         `DELETE FROM notifications
-         WHERE customer_id = ? AND is_read = 1 AND created_at < NOW() - INTERVAL 60 DAY`,
+         WHERE customer_id = ?
+           AND is_read = 1
+           AND created_at < NOW() - INTERVAL 60 DAY`,
         [req.params.customerId]
       );
+
+      // ── UPDATED: now returns loan_id ──────────────────────────────────────
       const [rows] = await pool.query<RowDataPacket[]>(
         `SELECT notification_id, title, message, type, is_read, loan_id, created_at
-         FROM notifications WHERE customer_id = ?
-         ORDER BY created_at DESC LIMIT 100`,
+         FROM notifications
+         WHERE customer_id = ?
+         ORDER BY created_at DESC
+         LIMIT 100`,
         [req.params.customerId]
       );
+
       res.json(rows);
     } catch (err: any) {
       console.error("Notifications error:", err.message);
@@ -1188,10 +1130,14 @@ async function startServer() {
     }
   });
 
-  // ── Notifications: Delete One ──────────────────────────────────────────────
+  // ── Notifications: Delete One ─────────────────────────────────────────────
+  // ← NEW ROUTE (for swipe-to-dismiss)
   app.delete("/api/notifications/:notificationId", async (req, res) => {
     try {
-      await pool.query(`DELETE FROM notifications WHERE notification_id = ?`, [req.params.notificationId]);
+      await pool.query(
+        `DELETE FROM notifications WHERE notification_id = ?`,
+        [req.params.notificationId]
+      );
       res.json({ success: true });
     } catch (err: any) {
       console.error("Delete notification error:", err.message);
@@ -1199,11 +1145,13 @@ async function startServer() {
     }
   });
 
-  // ── Notifications: Mark All Read ───────────────────────────────────────────
+  // ── Notifications: Mark All Read ─────────────────────────────────────────
+  // ← NEW ROUTE (was missing — this is why blue dots never cleared)
   app.patch("/api/notifications/:customerId/read-all", async (req, res) => {
     try {
       await pool.query(
-        `UPDATE notifications SET is_read = 1 WHERE customer_id = ? AND is_read = 0`,
+        `UPDATE notifications SET is_read = 1
+         WHERE customer_id = ? AND is_read = 0`,
         [req.params.customerId]
       );
       res.json({ success: true });
@@ -1213,14 +1161,14 @@ async function startServer() {
     }
   });
 
-  // ── PayMongo: Create Checkout Session ──────────────────────────────────────
+  // ── PayMongo: Create Checkout Session ─────────────────────────────────────
   app.post("/api/paymongo/checkout", async (req, res) => {
     try {
       const { amount, description, reference_no, success_url, cancel_url, billing_name, billing_email, billing_phone } = req.body;
       if (!amount || !success_url || !cancel_url)
         return res.status(400).json({ success: false, message: "amount, success_url and cancel_url are required." });
 
-      const desc     = description || "Loan Payment";
+      const desc = description || "Loan Payment";
       const response = await fetch("https://api.paymongo.com/v1/checkout_sessions", {
         method: "POST",
         headers: PAYMONGO_HEADERS,
@@ -1231,15 +1179,21 @@ async function startServer() {
               show_description:     true,
               show_line_items:      true,
               line_items: [{
-                currency: "PHP", amount: Math.round(Number(amount) * 100),
-                name: desc, description: desc, quantity: 1,
+                currency:    "PHP",
+                amount:      Math.round(Number(amount) * 100),
+                name:        desc,
+                description: desc,
+                quantity:    1,
               }],
               payment_method_types: [
-                "card", "gcash", "paymaya", "qrph", "grab_pay",
-                "dob", "dob_ubp", "brankas_bdo", "brankas_landbank", "brankas_metrobank",
+                "card", "gcash", "paymaya", "qrph",
+                "grab_pay", "dob", "dob_ubp",
+                "brankas_bdo", "brankas_landbank", "brankas_metrobank",
               ],
-              description: desc, reference_number: reference_no || "",
-              success_url, cancel_url,
+              description:      desc,
+              reference_number: reference_no || "",
+              success_url,
+              cancel_url,
               ...(billing_name || billing_email || billing_phone
                 ? { billing: { name: billing_name || "", email: billing_email || "", phone: billing_phone || "" } }
                 : {}),
@@ -1259,7 +1213,7 @@ async function startServer() {
     }
   });
 
-  // ── PayMongo: Get Checkout Session Status ──────────────────────────────────
+  // ── PayMongo: Get Checkout Session Status ─────────────────────────────────
   app.get("/api/paymongo/checkout-status/:sessionId", async (req, res) => {
     try {
       const response = await fetch(
@@ -1278,13 +1232,15 @@ async function startServer() {
         ?? payment?.payment_method_type
         ?? attrs.payment_method_type
         ?? "other";
-      const normalizedMethod     = normalizeMethod(rawMethod);
-      const lineItemsTotal       = Array.isArray(attrs.line_items)
+      const normalizedMethod = normalizeMethod(rawMethod);
+
+      const lineItemsTotal = Array.isArray(attrs.line_items)
         ? attrs.line_items.reduce((sum: number, item: any) => sum + (item.amount ?? 0), 0) / 100
         : null;
-      const paymentAmount        = payment?.attributes?.amount
+      const paymentAmount  = payment?.attributes?.amount
         ? payment.attributes.amount / 100
         : payment?.amount ? payment.amount / 100 : null;
+      const resolvedAmount = lineItemsTotal ?? paymentAmount;
 
       res.json({
         success:             true,
@@ -1293,7 +1249,7 @@ async function startServer() {
         payment_method_type: rawMethod,
         method:              normalizedMethod,
         payment_id:          payment?.id ?? null,
-        amount:              lineItemsTotal ?? paymentAmount,
+        amount:              resolvedAmount,
       });
     } catch (err: any) {
       console.error("Checkout status error:", err.message);
@@ -1301,7 +1257,7 @@ async function startServer() {
     }
   });
 
-  // ── PayMongo: Create Source ────────────────────────────────────────────────
+  // ── PayMongo: Create Source (GCash QR in-app) ─────────────────────────────
   app.post("/api/paymongo/source", async (req, res) => {
     try {
       const { amount, type, reference_no, billing_name, billing_email, billing_phone, redirect_success, redirect_failed } = req.body;
@@ -1314,12 +1270,18 @@ async function startServer() {
         body: JSON.stringify({
           data: {
             attributes: {
-              amount: Math.round(Number(amount) * 100), currency: "PHP", type,
+              amount:   Math.round(Number(amount) * 100),
+              currency: "PHP",
+              type,
               redirect: {
                 success: redirect_success || "https://credencelend-mobile.up.railway.app/payment-success",
                 failed:  redirect_failed  || "https://credencelend-mobile.up.railway.app/payment-failed",
               },
-              billing: { name: billing_name || "", email: billing_email || "", phone: billing_phone || "" },
+              billing: {
+                name:  billing_name  || "",
+                email: billing_email || "",
+                phone: billing_phone || "",
+              },
             },
           },
         }),
@@ -1328,6 +1290,7 @@ async function startServer() {
       const data = await response.json();
       if (!response.ok)
         return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to create source." });
+
       res.json({ success: true, source: data.data });
     } catch (err: any) {
       console.error("PayMongo source error:", err.message);
@@ -1335,7 +1298,7 @@ async function startServer() {
     }
   });
 
-  // ── PayMongo: Get Source Status ────────────────────────────────────────────
+  // ── PayMongo: Get Source Status ───────────────────────────────────────────
   app.get("/api/paymongo/source/:sourceId", async (req, res) => {
     try {
       const response = await fetch(
@@ -1352,7 +1315,7 @@ async function startServer() {
     }
   });
 
-  // ── PayMongo: Create Payment Intent ───────────────────────────────────────
+  // ── PayMongo: Create Payment Intent (Card) ────────────────────────────────
   app.post("/api/paymongo/intent", async (req, res) => {
     try {
       const { amount, description } = req.body;
@@ -1378,6 +1341,7 @@ async function startServer() {
       const data = await response.json();
       if (!response.ok)
         return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to create payment intent." });
+
       res.json({ success: true, intent: data.data });
     } catch (err: any) {
       console.error("PayMongo intent error:", err.message);
@@ -1385,7 +1349,7 @@ async function startServer() {
     }
   });
 
-  // ── PayMongo: Create Payment Method ───────────────────────────────────────
+  // ── PayMongo: Create Payment Method (Card) ────────────────────────────────
   app.post("/api/paymongo/payment-method", async (req, res) => {
     try {
       const { card_number, exp_month, exp_year, cvc, name } = req.body;
@@ -1414,6 +1378,7 @@ async function startServer() {
       const data = await response.json();
       if (!response.ok)
         return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to create payment method." });
+
       res.json({ success: true, payment_method: data.data });
     } catch (err: any) {
       console.error("PayMongo payment method error:", err.message);
@@ -1421,7 +1386,7 @@ async function startServer() {
     }
   });
 
-  // ── PayMongo: Attach Payment Method ───────────────────────────────────────
+  // ── PayMongo: Attach Payment Method to Intent ─────────────────────────────
   app.post("/api/paymongo/attach", async (req, res) => {
     try {
       const { intent_id, payment_method_id, client_key, return_url } = req.body;
@@ -1448,6 +1413,7 @@ async function startServer() {
       const data = await response.json();
       if (!response.ok)
         return res.status(400).json({ success: false, message: data.errors?.[0]?.detail || "Failed to attach payment method." });
+
       res.json({ success: true, intent: data.data });
     } catch (err: any) {
       console.error("PayMongo attach error:", err.message);
@@ -1455,7 +1421,7 @@ async function startServer() {
     }
   });
 
-  // ── PayMongo: Record Payment ───────────────────────────────────────────────
+  // ── PayMongo: Record Payment ──────────────────────────────────────────────
   app.post("/api/paymongo/record-payment", async (req, res) => {
     try {
       const {
@@ -1470,8 +1436,9 @@ async function startServer() {
 
       const rawType          = paymongo_method_type ?? method;
       const normalizedMethod = normalizeMethod(String(rawType));
-      const pmId             = paymongo_session_id ?? paymongo_source_id ?? paymongo_intent_id;
-      const or_no            = pmId ? `OR-PM-${String(pmId).slice(-8).toUpperCase()}` : `OR-${Date.now()}`;
+
+      const pmId  = paymongo_session_id ?? paymongo_source_id ?? paymongo_intent_id;
+      const or_no = pmId ? `OR-PM-${String(pmId).slice(-8).toUpperCase()}` : `OR-${Date.now()}`;
 
       const [existingByOrNo] = await pool.query<RowDataPacket[]>(
         `SELECT payment_id FROM payments WHERE or_no = ? LIMIT 1`, [or_no]
@@ -1506,11 +1473,12 @@ async function startServer() {
       const pmRef              = paymongo_payment_id ?? paymongo_session_id ?? paymongo_source_id ?? paymongo_intent_id ?? null;
       const gcash_reference_no = isGcashMethod ? pmRef : null;
       const bank_reference_no  = isGcashMethod ? null  : pmRef;
+      const notes              = `Online Payment via PayMongo (${normalizedMethod})`;
 
       const [payResult] = await pool.query<ResultSetHeader>(
         `INSERT INTO payments (loan_id, amount, payment_date, method, status, notes, tenant_id, or_no, gcash_reference_no, bank_reference_no)
          VALUES (?, ?, CURDATE(), ?, 'Paid', ?, ?, ?, ?, ?)`,
-        [loan_id, payAmount, normalizedMethod, `Online Payment via PayMongo (${normalizedMethod})`, loan.tenant_id, or_no, gcash_reference_no, bank_reference_no]
+        [loan_id, payAmount, normalizedMethod, notes, loan.tenant_id, or_no, gcash_reference_no, bank_reference_no]
       );
 
       await pool.query(
@@ -1522,6 +1490,7 @@ async function startServer() {
         [newBalance, newBalance, newBalance, loan_id]
       );
 
+      // ── UPDATED: pass loan_id to insertNotification ───────────────────────
       await insertNotification(
         loan.customer_id, Number(loan.tenant_id) || FALLBACK_TENANT_ID,
         isFullyPaid ? "Loan Fully Paid" : "Payment Received",
@@ -1529,30 +1498,29 @@ async function startServer() {
           ? "Congratulations! Your loan has been fully paid. Thank you!"
           : `Your payment of ₱${payAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })} has been received and is being processed.`,
         "payment",
-        Number(loan_id)
+        Number(loan_id)   // ← NEW
       );
 
-      // ── Send payment email with tenant name ────────────────────────────────
-      try {
-        const [customerRows] = await pool.query<RowDataPacket[]>(
-          `SELECT first_name, email FROM customers WHERE customer_id = ? LIMIT 1`,
-          [loan.customer_id]
-        );
-        if (customerRows.length > 0 && customerRows[0].email) {
-          const tenantName = await getTenantName(Number(loan.tenant_id) || FALLBACK_TENANT_ID);
-          await sendPaymentEmail(
-            customerRows[0].email,
-            customerRows[0].first_name,
-            payAmount,
-            newBalance,
-            or_no,
-            normalizedMethod,
-            isFullyPaid,
-            tenantName
+      if (!isFullyPaid) {
+        try {
+          const [customerRows] = await pool.query<RowDataPacket[]>(
+            `SELECT first_name, email FROM customers WHERE customer_id = ? LIMIT 1`,
+            [loan.customer_id]
           );
+          if (customerRows.length > 0 && customerRows[0].email) {
+            await sendPaymentEmail(
+              customerRows[0].email,
+              customerRows[0].first_name,
+              payAmount,
+              newBalance,
+              or_no,
+              normalizedMethod,
+              false
+            );
+          }
+        } catch (emailErr: any) {
+          console.warn("Payment email skipped:", emailErr.message);
         }
-      } catch (emailErr: any) {
-        console.warn("Payment email skipped:", emailErr.message);
       }
 
       res.json({
@@ -1572,7 +1540,7 @@ async function startServer() {
     }
   });
 
-  // ── Static / Vite ──────────────────────────────────────────────────────────
+  // ── Static / Vite ─────────────────────────────────────────────────────────
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" });
     app.use(vite.middlewares);
