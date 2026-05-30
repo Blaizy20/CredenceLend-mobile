@@ -9,6 +9,7 @@ import { TopBar }  from '../components/TopBar';
 import { Button }  from '../components/Button';
 import { Input }   from '../components/Input';
 import { motion, AnimatePresence } from 'motion/react';
+import type { LoanBreakdown } from './ApplyLoanStep1';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -24,11 +25,11 @@ const TERM_LABELS: Record<string, string> = {
   monthly:      'Monthly',
 };
 
-const TERM_PERIODS: Record<string, { periodsPerMonth: number; label: string }> = {
-  daily:        { periodsPerMonth: 30,   label: 'Daily Payment'        },
-  weekly:       { periodsPerMonth: 4.33, label: 'Weekly Payment'       },
-  semi_monthly: { periodsPerMonth: 2,    label: 'Semi-monthly Payment' },
-  monthly:      { periodsPerMonth: 1,    label: 'Monthly Payment'      },
+const PERIOD_LABELS: Record<string, string> = {
+  daily:        'day',
+  weekly:       'week',
+  semi_monthly: '15-day period',
+  monthly:      'month',
 };
 
 const REASON_MESSAGES: Record<string, string> = {
@@ -64,10 +65,13 @@ const API = import.meta.env.VITE_API_URL ?? '';
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function ApplyLoanStep2() {
-  const navigate  = useNavigate();
-  const location  = useLocation();
-  const step1     = location.state?.step1;
+  const navigate   = useNavigate();
+  const location   = useLocation();
+  const step1      = location.state?.step1;
   const uploadDocs: UploadDoc[] = location.state?.uploadDocs ?? [];
+
+  // Use the breakdown computed in Step 1 — single source of truth
+  const breakdown: LoanBreakdown | null = step1?.breakdown ?? null;
 
   React.useEffect(() => {
     if (!step1) navigate('/apply', { replace: true });
@@ -97,20 +101,11 @@ export default function ApplyLoanStep2() {
     ci_required:          boolean;
   } | null>(null);
 
-  // ── Payment breakdown ─────────────────────────────────────────────────────
+  // Whole-peso formatter — consistent with Step 1 breakdown display
+  const fmtW = (n: number) =>
+    Math.round(n).toLocaleString('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
-  const paymentBreakdown = step1
-    ? (() => {
-        const { principal_amount, interest_rate, term_months, payment_term } = step1;
-        const termInfo      = TERM_PERIODS[payment_term] ?? TERM_PERIODS['monthly'];
-        const totalInterest = principal_amount * (interest_rate / 100) * term_months;
-        const totalPayable  = principal_amount + totalInterest;
-        const totalPeriods  = Math.round(term_months * termInfo.periodsPerMonth);
-        const perPayment    = totalPeriods > 0 ? totalPayable / totalPeriods : 0;
-        return { totalPayable, totalInterest, totalPeriods, perPayment, label: termInfo.label };
-      })()
-    : null;
-
+  // Two-decimal formatter — used only for principal amount input display
   const fmt = (n: number) =>
     n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -138,20 +133,23 @@ export default function ApplyLoanStep2() {
   const validate = () => {
     const newErrors: Record<string, string> = {};
 
-    // ── Fixed: letters-only validation for names ──
     if (!formData.first_name.trim()) newErrors.first_name = 'First name is required.';
-    else if (!/^[A-Za-z\s.'-]+$/.test(formData.first_name.trim())) newErrors.first_name = 'First name must contain letters only.';
+    else if (!/^[A-Za-z\s.'-]+$/.test(formData.first_name.trim()))
+      newErrors.first_name = 'First name must contain letters only.';
 
-    if (!formData.last_name.trim())  newErrors.last_name  = 'Last name is required.';
-    else if (!/^[A-Za-z\s.'-]+$/.test(formData.last_name.trim()))  newErrors.last_name  = 'Last name must contain letters only.';
+    if (!formData.last_name.trim()) newErrors.last_name = 'Last name is required.';
+    else if (!/^[A-Za-z\s.'-]+$/.test(formData.last_name.trim()))
+      newErrors.last_name = 'Last name must contain letters only.';
 
     if (!formData.contact_no.trim()) newErrors.contact_no = 'Contact number is required.';
     else if (!/^09\d{9}$/.test(formData.contact_no))
       newErrors.contact_no = 'Please enter a valid PH number (09XXXXXXXXX).';
+
     if (!formData.province.trim()) newErrors.province = 'Province is required.';
     if (!formData.city.trim())     newErrors.city     = 'City is required.';
     if (!formData.barangay.trim()) newErrors.barangay = 'Barangay is required.';
     if (!formData.street.trim())   newErrors.street   = 'Street is required.';
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -182,10 +180,7 @@ export default function ApplyLoanStep2() {
       fd.append('code',        code);
       fd.append('label',       label);
 
-      const res  = await fetch(`${API}/api/upload/document`, {
-        method: 'POST',
-        body:   fd,
-      });
+      const res  = await fetch(`${API}/api/upload/document`, { method: 'POST', body: fd });
       const data = await res.json();
       return data.success ?? res.ok;
     } catch {
@@ -222,6 +217,20 @@ export default function ApplyLoanStep2() {
         id_type:          step1.id_type,
         collateral_type:  step1.collateral_type,
         collateral_notes: step1.collateral_notes,
+        // Pass all breakdown fields to backend for storage
+        ...(breakdown && {
+          loans_receivable:  breakdown.loansReceivable,
+          service_fee:       breakdown.serviceFee,
+          notarial_fee:      breakdown.notarial,
+          risk_management:   breakdown.riskManagement,
+          paf:               breakdown.paf,
+          doc_stamps:        breakdown.docStamps,
+          total_fees:        breakdown.totalFees,
+          total_interest:    breakdown.totalInterest,
+          cash_released:     breakdown.cashReleased,
+          amortization:      breakdown.amortization,
+          total_periods:     breakdown.totalPeriods,
+        }),
         comakers: [{
           full_name:    `${formData.first_name} ${formData.last_name}`.trim(),
           phone_number: formData.contact_no,
@@ -274,6 +283,8 @@ export default function ApplyLoanStep2() {
 
   if (!step1) return null;
 
+  const periodLabel = PERIOD_LABELS[step1.payment_term] ?? 'month';
+
   return (
     <div className="min-h-screen bg-background pb-12">
       <TopBar title="Co-maker Details" />
@@ -293,11 +304,12 @@ export default function ApplyLoanStep2() {
           </div>
         </div>
 
-        {/* Loan Summary */}
+        {/* ── Loan Summary (uses Step 1 breakdown — single source of truth) ── */}
         <div className="mb-8 p-4 bg-surface-container-high rounded-xl space-y-2 border border-outline-variant/10">
           <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-2">Loan Summary</p>
+
           <div className="flex justify-between text-sm">
-            <span className="text-on-surface-variant">Amount</span>
+            <span className="text-on-surface-variant">Principal Amount</span>
             <span className="font-bold text-on-surface">₱{fmt(Number(step1.principal_amount))}</span>
           </div>
           <div className="flex justify-between text-sm">
@@ -310,12 +322,47 @@ export default function ApplyLoanStep2() {
             <span className="text-on-surface-variant">Interest Rate</span>
             <span className="font-bold text-primary">{step1.interest_rate}% / month</span>
           </div>
-          <div className="flex justify-between text-sm">
-            <span className="text-on-surface-variant">Total Interest</span>
-            <span className="font-bold text-on-surface">
-              ₱{paymentBreakdown ? fmt(paymentBreakdown.totalInterest) : '—'}
-            </span>
-          </div>
+
+          {breakdown && (
+            <>
+              <div className="flex justify-between text-sm">
+                <span className="text-on-surface-variant">Interest Income</span>
+                <span className="font-bold text-on-surface">₱{fmtW(breakdown.totalInterest)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-on-surface-variant">Service Fee</span>
+                <span className="font-bold text-on-surface">₱{fmtW(breakdown.serviceFee)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-on-surface-variant">Notarial Fee</span>
+                <span className="font-bold text-on-surface">₱{fmtW(breakdown.notarial)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-on-surface-variant">Risk Management</span>
+                <span className="font-bold text-on-surface">₱{fmtW(breakdown.riskManagement)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-on-surface-variant">PAF</span>
+                <span className="font-bold text-on-surface">₱{fmtW(breakdown.paf)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-on-surface-variant">Documentary Stamps</span>
+                <span className="font-bold text-on-surface">₱{fmtW(breakdown.docStamps)}</span>
+              </div>
+
+              <div className="border-t border-outline-variant/10 pt-2 space-y-1.5">
+                <div className="flex justify-between text-sm">
+                  <span className="text-on-surface-variant font-bold">Loans Receivable</span>
+                  <span className="font-extrabold text-on-surface">₱{fmtW(breakdown.loansReceivable)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-on-surface-variant">Net Proceeds</span>
+                  <span className="font-bold text-green-600">₱{fmtW(breakdown.cashReleased)}</span>
+                </div>
+              </div>
+            </>
+          )}
+
           <div className="flex justify-between text-sm">
             <span className="text-on-surface-variant">Collateral</span>
             <span className="font-bold text-on-surface">{step1.collateral_type}</span>
@@ -326,12 +373,13 @@ export default function ApplyLoanStep2() {
               <span className="font-bold text-on-surface text-right max-w-[55%]">{step1.collateral_notes}</span>
             </div>
           ) : null}
-          <div className="border-t border-outline-variant/10 pt-2 flex justify-between text-sm">
-            <span className="text-on-surface-variant">{paymentBreakdown?.label ?? 'Est. Payment'}</span>
-            <span className="font-extrabold text-primary">
-              ₱{paymentBreakdown ? fmt(paymentBreakdown.perPayment) : '—'}
-            </span>
-          </div>
+
+          {breakdown && (
+            <div className="border-t border-outline-variant/10 pt-2 flex justify-between text-sm">
+              <span className="text-on-surface-variant">Amortization / {periodLabel}</span>
+              <span className="font-extrabold text-primary text-base">₱{fmtW(breakdown.amortization)}</span>
+            </div>
+          )}
         </div>
 
         {/* Personal Info */}
@@ -340,8 +388,6 @@ export default function ApplyLoanStep2() {
             <div className="w-1 h-6 bg-primary rounded-full" />
             <h2 className="font-headline font-bold text-lg text-on-surface">Co-maker Personal Info</h2>
           </div>
-
-          {/* ── Fixed: letters-only for first and last name ── */}
           <div className="grid grid-cols-2 gap-4">
             <Input label="First Name" placeholder="Juan"
               value={formData.first_name}
@@ -358,7 +404,6 @@ export default function ApplyLoanStep2() {
               }}
               error={errors.last_name} />
           </div>
-
           <Input label="Contact No." placeholder="09XXXXXXXXX"
             value={formData.contact_no}
             onChange={(e) => {
@@ -476,29 +521,70 @@ export default function ApplyLoanStep2() {
                 {/* Loan details */}
                 <div className="mb-5 p-4 bg-surface-container-high border border-outline-variant rounded-2xl space-y-3">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-primary mb-3">Loan Details</p>
-                  {([
-                    ['Principal Amount', `₱${fmt(Number(step1.principal_amount))}`],
-                    ['Payment Term',     `${TERM_LABELS[step1.payment_term] ?? step1.payment_term} · ${step1.term_months} months`],
-                    ['Interest Rate',    `${step1.interest_rate}% / month`],
-                    ['Total Interest',   `₱${paymentBreakdown ? fmt(paymentBreakdown.totalInterest) : '—'}`],
-                    ['Total Payable',    `₱${paymentBreakdown ? fmt(paymentBreakdown.totalPayable) : '—'}`],
-                    ['Collateral',        step1.collateral_type],
-                    ...(step1.collateral_notes ? [['Collateral Notes', step1.collateral_notes]] : []),
-                  ] as [string, string][]).map(([label, value]) => (
-                    <div key={label} className="flex justify-between text-sm">
-                      <span className="text-on-surface-variant">{label}</span>
-                      <span className="font-bold text-on-surface text-right max-w-[55%]">{value}</span>
-                    </div>
-                  ))}
-                  <div className="border-t border-outline-variant my-1" />
+
                   <div className="flex justify-between text-sm">
-                    <span className="text-on-surface-variant">
-                      Est. {paymentBreakdown?.label ?? 'Payment'}
-                    </span>
-                    <span className="font-extrabold text-primary text-base">
-                      ₱{paymentBreakdown ? fmt(paymentBreakdown.perPayment) : '—'}
+                    <span className="text-on-surface-variant">Principal Amount</span>
+                    <span className="font-bold text-on-surface">₱{fmt(Number(step1.principal_amount))}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-on-surface-variant">Payment Term</span>
+                    <span className="font-bold text-on-surface">
+                      {TERM_LABELS[step1.payment_term] ?? step1.payment_term} · {step1.term_months} months
                     </span>
                   </div>
+                  <div className="flex justify-between text-sm">
+                    <span className="text-on-surface-variant">Interest Rate</span>
+                    <span className="font-bold text-on-surface">{step1.interest_rate}% / month</span>
+                  </div>
+
+                  {breakdown && (
+                    <>
+                      <div className="border-t border-outline-variant/20 my-1" />
+                      {[
+                        ['Interest Income',       fmtW(breakdown.totalInterest)  ],
+                        ['Service Fee (3%)',       fmtW(breakdown.serviceFee)     ],
+                        ['Notarial Fee (1%)',      fmtW(breakdown.notarial)       ],
+                        ['Risk Management (0.5%)', fmtW(breakdown.riskManagement) ],
+                        ['PAF (0.5%)',             fmtW(breakdown.paf)            ],
+                        ['Documentary Stamps',     fmtW(breakdown.docStamps)      ],
+                      ].map(([label, value]) => (
+                        <div key={label} className="flex justify-between text-sm">
+                          <span className="text-on-surface-variant">{label}</span>
+                          <span className="font-bold text-on-surface">₱{value}</span>
+                        </div>
+                      ))}
+                      <div className="border-t border-outline-variant/20 my-1" />
+                      <div className="flex justify-between text-sm">
+                        <span className="text-on-surface-variant font-bold">Loans Receivable</span>
+                        <span className="font-extrabold text-on-surface">₱{fmtW(breakdown.loansReceivable)}</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-on-surface-variant">Net Proceeds</span>
+                        <span className="font-bold text-green-600">₱{fmtW(breakdown.cashReleased)}</span>
+                      </div>
+                    </>
+                  )}
+
+                  <div className="flex justify-between text-sm">
+                    <span className="text-on-surface-variant">Collateral</span>
+                    <span className="font-bold text-on-surface">{step1.collateral_type}</span>
+                  </div>
+                  {step1.collateral_notes && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-on-surface-variant">Collateral Notes</span>
+                      <span className="font-bold text-on-surface text-right max-w-[55%]">{step1.collateral_notes}</span>
+                    </div>
+                  )}
+
+                  {breakdown && (
+                    <>
+                      <div className="border-t border-outline-variant my-1" />
+                      <div className="flex justify-between text-sm">
+                        <span className="text-on-surface-variant">Amortization / {periodLabel}</span>
+                        <span className="font-extrabold text-primary text-base">₱{fmtW(breakdown.amortization)}</span>
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 {/* Co-maker */}
@@ -656,7 +742,6 @@ export default function ApplyLoanStep2() {
                   </motion.div>
                 )}
 
-                {/* ── Action Buttons ── */}
                 <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}
                   className="w-full flex flex-col gap-3 pt-2">
                   <button
