@@ -109,62 +109,70 @@ function getTermCount(paymentTerm: string, termMonths: number): number {
   }
 }
 
-// ── Tenant name helper ────────────────────────────────────────────────────────
-async function getTenantName(tenantId: number): Promise<string> {
+// ── Tenant branding helper ─────────────────────────────────────────────────────
+async function getTenantBranding(tenantId: number): Promise<{ brand: string; branch: string | null }> {
   try {
     const [rows] = await pool.query<RowDataPacket[]>(
-      `SELECT display_name, tenant_name FROM tenants WHERE tenant_id = ? LIMIT 1`,
+      `SELECT tenant_name, display_name FROM tenants WHERE tenant_id = ? LIMIT 1`,
       [tenantId]
     );
     if (rows.length > 0) {
-      return rows[0].display_name || rows[0].tenant_name || "CredenceLend";
+      const brand  = rows[0].tenant_name || "CredenceLend";
+      const branch =
+        rows[0].display_name && rows[0].display_name !== rows[0].tenant_name
+          ? rows[0].display_name
+          : null;
+      return { brand, branch };
     }
   } catch {}
-  return "CredenceLend";
+  return { brand: "CredenceLend", branch: null };
 }
 
-// ── Shared email styles / layout helpers ──────────────────────────────────────
-function emailWrapper(tenantName: string, accentColor: string, content: string): string {
+// ── Shared email layout ────────────────────────────────────────────────────────
+function emailWrapper(
+  brand:   string,
+  branch:  string | null,
+  accent:  string,
+  content: string
+): string {
   return `
     <div style="font-family:'Segoe UI',Arial,sans-serif;max-width:520px;margin:auto;background:#f4f4f0;padding:32px 16px;">
-
-      <!-- Header -->
-      <div style="background:#ffffff;border-radius:12px 12px 0 0;padding:28px 32px 20px;border-bottom:2px solid ${accentColor};">
-        <p style="margin:0;font-size:18px;font-weight:700;color:#1a1a1a;letter-spacing:-0.3px;">
-          ${tenantName}
+      <div style="background:#ffffff;border-radius:12px 12px 0 0;padding:28px 32px 20px;border-bottom:2px solid ${accent};">
+        <p style="margin:0;font-size:19px;font-weight:700;color:#1a1a1a;letter-spacing:-0.3px;">
+          ${brand}
         </p>
-        <p style="margin:4px 0 0;font-size:11px;font-weight:500;color:#888;letter-spacing:0.5px;text-transform:uppercase;">
-          Powered by CredenceLend
+        <p style="margin:4px 0 0;font-size:11px;font-weight:500;color:#888;letter-spacing:0.4px;text-transform:uppercase;">
+          ${branch ? `${branch} &nbsp;&middot;&nbsp; ` : ''}Powered by CredenceLend
         </p>
       </div>
-
-      <!-- Body -->
       <div style="background:#ffffff;padding:28px 32px;border-radius:0 0 12px 12px;box-shadow:0 2px 8px rgba(0,0,0,0.05);">
         ${content}
-        <!-- Footer -->
         <div style="margin-top:32px;padding-top:20px;border-top:1px solid #eeede9;">
           <p style="margin:0;font-size:11px;color:#aaa;line-height:1.6;">
-            This is an automated message from <strong>${tenantName}</strong> via CredenceLend.<br>
+            This is an automated message from <strong>${brand}</strong>${branch ? ` (${branch})` : ''} via CredenceLend.<br>
             Please do not reply to this email.
           </p>
         </div>
       </div>
-
     </div>`;
 }
 
-function infoBlock(accentColor: string, rows: { label: string; value: string; highlight?: boolean }[]): string {
+// ── Shared info table ──────────────────────────────────────────────────────────
+function infoBlock(
+  accent: string,
+  rows:   { label: string; value: string; highlight?: boolean }[]
+): string {
   return `
     <table style="width:100%;border-collapse:collapse;margin:20px 0;border-radius:8px;overflow:hidden;border:1px solid #eeede9;">
       ${rows.map((r, i) => `
         <tr style="background:${i % 2 === 0 ? '#fafaf8' : '#ffffff'};">
           <td style="padding:10px 14px;font-size:13px;color:#666;width:45%;">${r.label}</td>
-          <td style="padding:10px 14px;font-size:13px;font-weight:600;color:${r.highlight ? accentColor : '#1a1a1a'};">${r.value}</td>
+          <td style="padding:10px 14px;font-size:13px;font-weight:600;color:${r.highlight ? accent : '#1a1a1a'};">${r.value}</td>
         </tr>`).join('')}
     </table>`;
 }
 
-// ── Notification insert ───────────────────────────────────────────────────────
+// ── Notification insert ────────────────────────────────────────────────────────
 async function insertNotification(
   customerId: number,
   tenantId:   number,
@@ -191,11 +199,12 @@ async function insertNotification(
   }
 }
 
-// ── Email: OTP ────────────────────────────────────────────────────────────────
+// ── Email: OTP ─────────────────────────────────────────────────────────────────
 async function sendOtpEmail(
-  toEmail:    string,
-  otp:        string,
-  tenantName: string
+  toEmail: string,
+  otp:     string,
+  brand:   string,
+  branch:  string | null
 ): Promise<void> {
   const accent  = "#01696f";
   const content = `
@@ -223,12 +232,12 @@ async function sendOtpEmail(
     },
     body: JSON.stringify({
       sender: {
-        name:  `${tenantName} via CredenceLend`,
+        name:  `${brand} via CredenceLend`,
         email: process.env.BREVO_SENDER_EMAIL ?? "",
       },
       to: [{ email: toEmail }],
-      subject: `${tenantName} — Your Verification Code`,
-      htmlContent: emailWrapper(tenantName, accent, content),
+      subject:     `${brand} — Your Verification Code`,
+      htmlContent: emailWrapper(brand, branch, accent, content),
     }),
   });
 
@@ -239,7 +248,7 @@ async function sendOtpEmail(
   }
 }
 
-// ── Email: Payment Confirmation ───────────────────────────────────────────────
+// ── Email: Payment Confirmation ────────────────────────────────────────────────
 async function sendPaymentEmail(
   toEmail:     string,
   firstName:   string,
@@ -248,7 +257,8 @@ async function sendPaymentEmail(
   orNo:        string,
   method:      string,
   isFullyPaid: boolean,
-  tenantName:  string
+  brand:       string,
+  branch:      string | null
 ): Promise<void> {
   const accent           = isFullyPaid ? "#16a34a" : "#01696f";
   const formattedAmount  = amount.toLocaleString("en-PH", { minimumFractionDigits: 2 });
@@ -286,14 +296,14 @@ async function sendPaymentEmail(
     },
     body: JSON.stringify({
       sender: {
-        name:  `${tenantName} via CredenceLend`,
+        name:  `${brand} via CredenceLend`,
         email: process.env.BREVO_SENDER_EMAIL ?? "",
       },
       to: [{ email: toEmail }],
       subject: isFullyPaid
-        ? `${tenantName} — Loan Fully Paid`
-        : `${tenantName} — Payment Received`,
-      htmlContent: emailWrapper(tenantName, accent, content),
+        ? `${brand} — Loan Fully Paid`
+        : `${brand} — Payment Received`,
+      htmlContent: emailWrapper(brand, branch, accent, content),
     }),
   });
 
@@ -303,40 +313,41 @@ async function sendPaymentEmail(
   }
 }
 
-// ── Email: Loan Status ────────────────────────────────────────────────────────
+// ── Email: Loan Status ─────────────────────────────────────────────────────────
 async function sendLoanStatusEmail(
   toEmail:     string,
   firstName:   string,
   status:      string,
   referenceNo: string,
   amount:      number,
-  tenantName:  string
+  brand:       string,
+  branch:      string | null
 ): Promise<void> {
   const formattedAmount = amount.toLocaleString('en-PH', { minimumFractionDigits: 2 });
 
   const TEMPLATES: Record<string, {
-    subject:  string;
-    heading:  string;
-    accent:   string;
-    intro:    string;
+    subject:     string;
+    heading:     string;
+    accent:      string;
+    intro:       string;
     statusLabel: string;
   }> = {
     active: {
-      subject:     `${tenantName} — Loan Approved`,
+      subject:     `${brand} — Loan Approved`,
       heading:     "Your Loan Has Been Approved",
       accent:      "#16a34a",
       intro:       `Great news, <strong>${firstName}</strong>! Your loan application <strong>${referenceNo}</strong> for <strong>&#8369;${formattedAmount}</strong> has been <strong>approved</strong>. Please log in to view your payment schedule.`,
       statusLabel: "APPROVED",
     },
     denied: {
-      subject:     `${tenantName} — Loan Application Update`,
+      subject:     `${brand} — Loan Application Update`,
       heading:     "Loan Application Not Approved",
       accent:      "#dc2626",
       intro:       `Hi <strong>${firstName}</strong>, unfortunately your loan application <strong>${referenceNo}</strong> for <strong>&#8369;${formattedAmount}</strong> was <strong>not approved</strong> at this time. Please contact your cooperative for more information.`,
       statusLabel: "NOT APPROVED",
     },
     closed: {
-      subject:     `${tenantName} — Loan Fully Paid`,
+      subject:     `${brand} — Loan Fully Paid`,
       heading:     "Loan Fully Paid",
       accent:      "#01696f",
       intro:       `Congratulations, <strong>${firstName}</strong>! Your loan <strong>${referenceNo}</strong> has been marked as <strong>fully paid</strong>. Thank you for settling your account. We hope to serve you again!`,
@@ -369,12 +380,12 @@ async function sendLoanStatusEmail(
     },
     body: JSON.stringify({
       sender: {
-        name:  `${tenantName} via CredenceLend`,
+        name:  `${brand} via CredenceLend`,
         email: process.env.BREVO_SENDER_EMAIL ?? '',
       },
       to: [{ email: toEmail }],
       subject:     template.subject,
-      htmlContent: emailWrapper(tenantName, template.accent, content),
+      htmlContent: emailWrapper(brand, branch, template.accent, content),
     }),
   });
 
@@ -528,12 +539,12 @@ async function startServer() {
       if (customers.length === 0)
         return res.status(404).json({ success: false, message: "No account is associated with this email address in the selected cooperative." });
 
-      const otp        = Math.floor(100000 + Math.random() * 900000).toString();
-      const expiresAt  = Date.now() + 10 * 60 * 1000;
-      const tenantName = await getTenantName(tenant_id);
+      const otp                = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt          = Date.now() + 10 * 60 * 1000;
+      const { brand, branch }  = await getTenantBranding(tenant_id);
 
       await pool.query("REPLACE INTO otps (email, otp, expires_at) VALUES (?, ?, ?)", [email, otp, expiresAt]);
-      await sendOtpEmail(email, otp, tenantName);
+      await sendOtpEmail(email, otp, brand, branch);
 
       res.json({ success: true, message: "A verification code has been sent to your email." });
     } catch (err: any) {
@@ -870,16 +881,16 @@ async function startServer() {
         loan_id
       );
 
-      // ── Send application received email with tenant name ──────────────────
+      // ── Application received email ─────────────────────────────────────────
       try {
         const [custRows] = await pool.query<RowDataPacket[]>(
           `SELECT first_name, email FROM customers WHERE customer_id = ? LIMIT 1`,
           [customer_id]
         );
         if (custRows.length > 0 && custRows[0].email) {
-          const tenantName      = await getTenantName(resolvedTenantId);
-          const formattedAmount = amount.toLocaleString('en-PH', { minimumFractionDigits: 2 });
-          const accent          = "#01696f";
+          const { brand, branch }  = await getTenantBranding(resolvedTenantId);
+          const formattedAmount    = amount.toLocaleString('en-PH', { minimumFractionDigits: 2 });
+          const accent             = "#01696f";
 
           const content = `
             <h2 style="margin:0 0 8px;font-size:20px;font-weight:700;color:${accent};">Application Received</h2>
@@ -904,12 +915,12 @@ async function startServer() {
             },
             body: JSON.stringify({
               sender: {
-                name:  `${tenantName} via CredenceLend`,
+                name:  `${brand} via CredenceLend`,
                 email: process.env.BREVO_SENDER_EMAIL ?? '',
               },
               to: [{ email: custRows[0].email }],
-              subject:     `${tenantName} — Loan Application Received`,
-              htmlContent: emailWrapper(tenantName, accent, content),
+              subject:     `${brand} — Loan Application Received`,
+              htmlContent: emailWrapper(brand, branch, accent, content),
             }),
           });
         }
@@ -973,9 +984,9 @@ async function startServer() {
       };
 
       for (const loan of rows) {
-        const newStatus  = String(loan.status ?? "").toLowerCase();
-        const tenantId   = loan.tenant_id ?? FALLBACK_TENANT_ID;
-        const [cached]   = await pool.query<RowDataPacket[]>(
+        const newStatus = String(loan.status ?? "").toLowerCase();
+        const tenantId  = loan.tenant_id ?? FALLBACK_TENANT_ID;
+        const [cached]  = await pool.query<RowDataPacket[]>(
           `SELECT last_status FROM loan_status_cache WHERE loan_id = ? LIMIT 1`, [loan.loan_id]
         );
         const lastStatus = cached[0] ? String(cached[0].last_status).toLowerCase() : null;
@@ -1004,21 +1015,22 @@ async function startServer() {
             loan.loan_id
           );
 
-          // ── Send status change email with tenant name ────────────────────
+          // ── Status change email ──────────────────────────────────────────
           try {
             const [custRows] = await pool.query<RowDataPacket[]>(
               `SELECT first_name, email FROM customers WHERE customer_id = ? LIMIT 1`,
               [customerId]
             );
             if (custRows.length > 0 && custRows[0].email) {
-              const tenantName = await getTenantName(tenantId);
+              const { brand, branch } = await getTenantBranding(tenantId);
               await sendLoanStatusEmail(
                 custRows[0].email,
                 custRows[0].first_name,
                 newStatus,
                 loan.reference_no,
                 Number(loan.principal_amount),
-                tenantName
+                brand,
+                branch
               );
             }
           } catch (emailErr: any) {
@@ -1076,14 +1088,12 @@ async function startServer() {
       const folder      = req.body.folder      ?? 'documents';
       const code        = req.body.code        ?? 'DOCUMENT';
       const label       = req.body.label       ?? file.originalname;
-
-      const key = `${tenant_id}/${customer_id}/${folder}/${Date.now()}-${file.originalname}`;
+      const key         = `${tenant_id}/${customer_id}/${folder}/${Date.now()}-${file.originalname}`;
 
       const uploader = new Upload({
         client: s3,
         params: { Bucket: BUCKET, Key: key, Body: file.buffer, ContentType: file.mimetype },
       });
-
       await uploader.done();
 
       const fileUrl   = `https://${BUCKET}.t3.storageapi.dev/${key}`;
@@ -1093,8 +1103,7 @@ async function startServer() {
         try {
           const [metaRows]: any = await pool.query(
             `SELECT c.customer_no, l.reference_no
-             FROM loans l
-             JOIN customers c ON c.customer_id = l.customer_id
+             FROM loans l JOIN customers c ON c.customer_id = l.customer_id
              WHERE l.loan_id = ? LIMIT 1`,
             [Number(loanIdRaw)]
           );
@@ -1227,9 +1236,9 @@ async function startServer() {
         body: JSON.stringify({
           data: {
             attributes: {
-              send_email_receipt:   false,
-              show_description:     true,
-              show_line_items:      true,
+              send_email_receipt: false,
+              show_description:   true,
+              show_line_items:    true,
               line_items: [{
                 currency: "PHP", amount: Math.round(Number(amount) * 100),
                 name: desc, description: desc, quantity: 1,
@@ -1304,7 +1313,7 @@ async function startServer() {
   // ── PayMongo: Create Source ────────────────────────────────────────────────
   app.post("/api/paymongo/source", async (req, res) => {
     try {
-      const { amount, type, reference_no, billing_name, billing_email, billing_phone, redirect_success, redirect_failed } = req.body;
+      const { amount, type, billing_name, billing_email, billing_phone, redirect_success, redirect_failed } = req.body;
       if (!amount || !type)
         return res.status(400).json({ success: false, message: "amount and type are required." });
 
@@ -1532,14 +1541,14 @@ async function startServer() {
         Number(loan_id)
       );
 
-      // ── Send payment email with tenant name ────────────────────────────────
+      // ── Payment email with tenant branding ────────────────────────────────
       try {
         const [customerRows] = await pool.query<RowDataPacket[]>(
           `SELECT first_name, email FROM customers WHERE customer_id = ? LIMIT 1`,
           [loan.customer_id]
         );
         if (customerRows.length > 0 && customerRows[0].email) {
-          const tenantName = await getTenantName(Number(loan.tenant_id) || FALLBACK_TENANT_ID);
+          const { brand, branch } = await getTenantBranding(Number(loan.tenant_id) || FALLBACK_TENANT_ID);
           await sendPaymentEmail(
             customerRows[0].email,
             customerRows[0].first_name,
@@ -1548,7 +1557,8 @@ async function startServer() {
             or_no,
             normalizedMethod,
             isFullyPaid,
-            tenantName
+            brand,
+            branch
           );
         }
       } catch (emailErr: any) {
