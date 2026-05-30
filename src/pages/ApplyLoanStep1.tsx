@@ -15,13 +15,19 @@ const TERM_OPTIONS = [
   { label: 'Monthly',      apiValue: 'monthly',     rate: 4.0,  periodsPerMonth: 1    },
 ];
 
-// Fee rates (derived from disbursement voucher reverse engineering)
 const FEE_RATES = {
-  SERVICE_FEE:      0.0300, // 3.00% of principal
-  NOTARIAL:         0.0100, // 1.00% of principal
-  RISK_MANAGEMENT:  0.0050, // 0.50% of principal
-  PAF:              0.0050, // 0.50% of principal
-  DOC_STAMPS:       0.1527, // 15.27% of total interest
+  SERVICE_FEE:     0.0300, // 3.00% of principal
+  NOTARIAL:        0.0100, // 1.00% of principal
+  RISK_MANAGEMENT: 0.0050, // 0.50% of principal
+  PAF:             0.0050, // 0.50% of principal
+};
+
+// Doc stamps rate is term-specific (reverse-engineered from disbursement vouchers)
+const DOC_STAMPS_RATE: Record<string, number> = {
+  daily:        0.152727, // ₱168/₱1,100 & ₱252/₱1,650 = 15.2727%
+  weekly:       0.150000, // ₱180/₱1,200 = 15.0000%
+  semi_monthly: 0.150000, // no voucher sample — defaulting to 15%
+  monthly:      0.150000, // no voucher sample — defaulting to 15%
 };
 
 const COLLATERAL_TYPES = [
@@ -70,19 +76,19 @@ interface Step1Data {
 }
 
 export interface LoanBreakdown {
-  rate:             number;
-  totalInterest:    number;
-  serviceFee:       number;
-  notarial:         number;
-  riskManagement:   number;
-  paf:              number;
-  docStamps:        number;
-  totalFees:        number;
-  loansReceivable:  number;
-  cashReleased:     number;
-  totalPeriods:     number;
-  amortization:     number;
-  periodLabel:      string;
+  rate:            number;
+  totalInterest:   number;
+  serviceFee:      number;
+  notarial:        number;
+  riskManagement:  number;
+  paf:             number;
+  docStamps:       number;
+  totalFees:       number;
+  loansReceivable: number;
+  cashReleased:    number;
+  totalPeriods:    number;
+  amortization:    number;
+  periodLabel:     string;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -141,23 +147,26 @@ export default function ApplyLoanStep1() {
 
     if (!principal || principal <= 0 || !months || months <= 0) return null;
 
-    // Core interest (flat rate)
-    const totalInterest   = Math.round(principal * (termOption.rate / 100) * months * 100) / 100;
+    // Core flat-rate interest
+    const totalInterest  = Math.round(principal * (termOption.rate / 100) * months * 100) / 100;
 
-    // Upfront fees (one-time, deducted from proceeds)
-    const serviceFee      = Math.round(principal * FEE_RATES.SERVICE_FEE     * 100) / 100;
-    const notarial        = Math.round(principal * FEE_RATES.NOTARIAL        * 100) / 100;
-    const riskManagement  = Math.round(principal * FEE_RATES.RISK_MANAGEMENT * 100) / 100;
-    const paf             = Math.round(principal * FEE_RATES.PAF             * 100) / 100;
-    const docStamps       = Math.round(totalInterest * FEE_RATES.DOC_STAMPS  * 100) / 100;
+    // One-time upfront fees based on principal
+    const serviceFee     = Math.round(principal * FEE_RATES.SERVICE_FEE     * 100) / 100;
+    const notarial       = Math.round(principal * FEE_RATES.NOTARIAL        * 100) / 100;
+    const riskManagement = Math.round(principal * FEE_RATES.RISK_MANAGEMENT * 100) / 100;
+    const paf            = Math.round(principal * FEE_RATES.PAF             * 100) / 100;
 
-    const totalFees       = serviceFee + notarial + riskManagement + paf + docStamps;
+    // Doc stamps: term-specific rate applied to total interest
+    const docStampsRate  = DOC_STAMPS_RATE[termOption.apiValue] ?? 0.15;
+    const docStamps      = Math.round(totalInterest * docStampsRate * 100) / 100;
+
+    const totalFees      = serviceFee + notarial + riskManagement + paf + docStamps;
     const loansReceivable = principal + totalInterest + totalFees;
-    const cashReleased    = principal; // net proceeds — fees deducted upfront
+    const cashReleased   = principal; // net proceeds — all fees deducted upfront
 
-    // Amortization based on Loans Receivable ÷ total payment count
-    const totalPeriods    = Math.round(months * termOption.periodsPerMonth);
-    const amortization    = totalPeriods > 0
+    // Amortization = Loans Receivable ÷ total payment count
+    const totalPeriods   = Math.round(months * termOption.periodsPerMonth);
+    const amortization   = totalPeriods > 0
       ? Math.round((loansReceivable / totalPeriods) * 100) / 100
       : 0;
 
@@ -392,7 +401,7 @@ export default function ApplyLoanStep1() {
                 Loan Breakdown
               </p>
 
-              {/* Interest Rate + Periods */}
+              {/* Rate + Periods */}
               <div className="grid grid-cols-2 gap-y-3">
                 <div>
                   <p className="text-[10px] text-on-surface-variant uppercase tracking-wider">Interest Rate</p>
@@ -406,19 +415,18 @@ export default function ApplyLoanStep1() {
                 </div>
               </div>
 
-              {/* Divider: Fees Section */}
+              {/* Fee Line Items */}
               <div className="border-t border-primary/15 pt-3 space-y-2">
                 <p className="text-[10px] font-bold tracking-widest text-on-surface-variant uppercase mb-2">
                   Fees (Deducted from Proceeds)
                 </p>
-
                 {[
-                  { label: 'Interest Income',      value: breakdown.totalInterest   },
-                  { label: 'Service Fee (3%)',      value: breakdown.serviceFee      },
-                  { label: 'Notarial Fee (1%)',     value: breakdown.notarial        },
-                  { label: 'Risk Management (0.5%)',value: breakdown.riskManagement  },
-                  { label: 'PAF (0.5%)',            value: breakdown.paf             },
-                  { label: 'Documentary Stamps',    value: breakdown.docStamps       },
+                  { label: 'Interest Income',       value: breakdown.totalInterest   },
+                  { label: 'Service Fee (3%)',       value: breakdown.serviceFee      },
+                  { label: 'Notarial Fee (1%)',      value: breakdown.notarial        },
+                  { label: 'Risk Management (0.5%)', value: breakdown.riskManagement  },
+                  { label: 'PAF (0.5%)',             value: breakdown.paf             },
+                  { label: 'Documentary Stamps',     value: breakdown.docStamps       },
                 ].map(({ label, value }) => (
                   <div key={label} className="flex justify-between items-center">
                     <p className="text-xs text-on-surface-variant">{label}</p>
@@ -427,7 +435,7 @@ export default function ApplyLoanStep1() {
                 ))}
               </div>
 
-              {/* Loans Receivable */}
+              {/* Loans Receivable + Cash Released */}
               <div className="border-t border-primary/15 pt-3 space-y-2">
                 <div className="flex justify-between items-center">
                   <p className="text-xs font-bold text-on-surface-variant uppercase tracking-wider">
@@ -441,7 +449,7 @@ export default function ApplyLoanStep1() {
                 </div>
               </div>
 
-              {/* Amortization — the key figure */}
+              {/* Amortization highlight */}
               <div className="rounded-xl bg-primary/10 px-4 py-3 flex justify-between items-center">
                 <div>
                   <p className="text-[10px] text-primary font-bold uppercase tracking-wider">
