@@ -9,11 +9,20 @@ import { loansAPI } from '../lib/api';
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const TERM_OPTIONS = [
-  { label: 'Daily',        apiValue: 'daily',        rate: 2.75, periodsPerMonth: 30   },
-  { label: 'Weekly',       apiValue: 'weekly',        rate: 3.0,  periodsPerMonth: 4.33 },
-  { label: 'Semi-monthly', apiValue: 'semi_monthly',  rate: 3.5,  periodsPerMonth: 2    },
-  { label: 'Monthly',      apiValue: 'monthly',       rate: 4.0,  periodsPerMonth: 1    },
+  { label: 'Daily',        apiValue: 'daily',       rate: 2.75, periodsPerMonth: 25   },
+  { label: 'Weekly',       apiValue: 'weekly',      rate: 3.0,  periodsPerMonth: 4.25 },
+  { label: 'Semi-monthly', apiValue: 'semi_monthly',rate: 3.5,  periodsPerMonth: 2    },
+  { label: 'Monthly',      apiValue: 'monthly',     rate: 4.0,  periodsPerMonth: 1    },
 ];
+
+// Fee rates (derived from disbursement voucher reverse engineering)
+const FEE_RATES = {
+  SERVICE_FEE:      0.0300, // 3.00% of principal
+  NOTARIAL:         0.0100, // 1.00% of principal
+  RISK_MANAGEMENT:  0.0050, // 0.50% of principal
+  PAF:              0.0050, // 0.50% of principal
+  DOC_STAMPS:       0.1527, // 15.27% of total interest
+};
 
 const COLLATERAL_TYPES = [
   'ORCR (Vehicle)',
@@ -60,6 +69,22 @@ interface Step1Data {
   docs:             DocSlot[];
 }
 
+export interface LoanBreakdown {
+  rate:             number;
+  totalInterest:    number;
+  serviceFee:       number;
+  notarial:         number;
+  riskManagement:   number;
+  paf:              number;
+  docStamps:        number;
+  totalFees:        number;
+  loansReceivable:  number;
+  cashReleased:     number;
+  totalPeriods:     number;
+  amortization:     number;
+  periodLabel:      string;
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function ApplyLoanStep1() {
@@ -88,9 +113,7 @@ export default function ApplyLoanStep1() {
       } else {
         setBlockCheck('allowed');
       }
-    }).catch(() => {
-      setBlockCheck('allowed');
-    });
+    }).catch(() => setBlockCheck('allowed'));
   }, []);
 
   // ── Form State ───────────────────────────────────────────────────────────────
@@ -111,24 +134,53 @@ export default function ApplyLoanStep1() {
 
   // ── Live Breakdown ──────────────────────────────────────────────────────────
 
-  const breakdown = useMemo(() => {
+  const breakdown = useMemo((): LoanBreakdown | null => {
     const principal  = Number(formData.amount);
     const months     = parseInt(formData.term_months, 10);
     const termOption = TERM_OPTIONS.find(t => t.label === formData.term) ?? TERM_OPTIONS[3];
 
     if (!principal || principal <= 0 || !months || months <= 0) return null;
 
-    const totalInterest = principal * (termOption.rate / 100) * months;
-    const totalPayable  = principal + totalInterest;
-    const totalPeriods  = Math.round(months * termOption.periodsPerMonth);
-    const perPayment    = totalPeriods > 0 ? totalPayable / totalPeriods : 0;
+    // Core interest (flat rate)
+    const totalInterest   = Math.round(principal * (termOption.rate / 100) * months * 100) / 100;
+
+    // Upfront fees (one-time, deducted from proceeds)
+    const serviceFee      = Math.round(principal * FEE_RATES.SERVICE_FEE     * 100) / 100;
+    const notarial        = Math.round(principal * FEE_RATES.NOTARIAL        * 100) / 100;
+    const riskManagement  = Math.round(principal * FEE_RATES.RISK_MANAGEMENT * 100) / 100;
+    const paf             = Math.round(principal * FEE_RATES.PAF             * 100) / 100;
+    const docStamps       = Math.round(totalInterest * FEE_RATES.DOC_STAMPS  * 100) / 100;
+
+    const totalFees       = serviceFee + notarial + riskManagement + paf + docStamps;
+    const loansReceivable = principal + totalInterest + totalFees;
+    const cashReleased    = principal; // net proceeds — fees deducted upfront
+
+    // Amortization based on Loans Receivable ÷ total payment count
+    const totalPeriods    = Math.round(months * termOption.periodsPerMonth);
+    const amortization    = totalPeriods > 0
+      ? Math.round((loansReceivable / totalPeriods) * 100) / 100
+      : 0;
 
     const periodLabel =
       formData.term === 'Daily'        ? 'day'           :
       formData.term === 'Weekly'       ? 'week'          :
       formData.term === 'Semi-monthly' ? '15-day period' : 'month';
 
-    return { rate: termOption.rate, totalInterest, totalPayable, totalPeriods, perPayment, periodLabel };
+    return {
+      rate: termOption.rate,
+      totalInterest,
+      serviceFee,
+      notarial,
+      riskManagement,
+      paf,
+      docStamps,
+      totalFees,
+      loansReceivable,
+      cashReleased,
+      totalPeriods,
+      amortization,
+      periodLabel,
+    };
   }, [formData.amount, formData.term, formData.term_months]);
 
   // ── File Handling ───────────────────────────────────────────────────────────
@@ -202,6 +254,8 @@ export default function ApplyLoanStep1() {
           id_type:            formData.id_type,
           collateral_type:    formData.collateral_type,
           collateral_notes:   formData.collateral_notes.trim(),
+          // Full breakdown passed to Step 2 for backend submission
+          breakdown,
         },
         uploadDocs: formData.docs
           .filter((d, idx) => {
@@ -277,7 +331,6 @@ export default function ApplyLoanStep1() {
         {/* ── Loan Amount & Term ── */}
         <section className="space-y-5 mb-10">
 
-          {/* ── Fixed: clamps at ₱500,000 live ── */}
           <Input
             label="REQUESTED AMOUNT"
             placeholder="0.00"
@@ -288,15 +341,8 @@ export default function ApplyLoanStep1() {
             onChange={(e) => {
               const raw = e.target.value;
               const num = Number(raw);
-              if (raw === '' || raw === '-') {
-                set('amount', raw);
-                return;
-              }
-              if (num > 500000) {
-                set('amount', '500000');
-              } else {
-                set('amount', raw);
-              }
+              if (raw === '' || raw === '-') { set('amount', raw); return; }
+              set('amount', num > 500000 ? '500000' : raw);
               if (errors.amount) setErrors(prev => ({ ...prev, amount: '' }));
             }}
             error={errors.amount}
@@ -321,7 +367,6 @@ export default function ApplyLoanStep1() {
             </select>
           </div>
 
-          {/* ── Fixed: clamps at 180 months live ── */}
           <Input
             label="LOAN DURATION (MONTHS)"
             placeholder="e.g. 12"
@@ -330,15 +375,8 @@ export default function ApplyLoanStep1() {
             onChange={(e) => {
               const raw = e.target.value;
               const num = Number(raw);
-              if (raw === '') {
-                set('term_months', raw);
-                return;
-              }
-              if (num > 180) {
-                set('term_months', '180');
-              } else {
-                set('term_months', raw);
-              }
+              if (raw === '') { set('term_months', raw); return; }
+              set('term_months', num > 180 ? '180' : raw);
               if (errors.term_months) setErrors(prev => ({ ...prev, term_months: '' }));
             }}
             error={errors.term_months}
@@ -347,10 +385,14 @@ export default function ApplyLoanStep1() {
             1 month minimum · 180 months (15 years) maximum
           </p>
 
-          {/* Live Breakdown Card */}
+          {/* ── Live Breakdown Card ── */}
           {breakdown ? (
-            <div className="rounded-2xl bg-primary/8 border border-primary/20 p-5 space-y-3">
-              <p className="text-[10px] font-bold tracking-widest text-primary uppercase">Loan Breakdown</p>
+            <div className="rounded-2xl bg-primary/8 border border-primary/20 p-5 space-y-4">
+              <p className="text-[10px] font-bold tracking-widest text-primary uppercase">
+                Loan Breakdown
+              </p>
+
+              {/* Interest Rate + Periods */}
               <div className="grid grid-cols-2 gap-y-3">
                 <div>
                   <p className="text-[10px] text-on-surface-variant uppercase tracking-wider">Interest Rate</p>
@@ -362,18 +404,54 @@ export default function ApplyLoanStep1() {
                     {breakdown.totalPeriods} {breakdown.periodLabel}{breakdown.totalPeriods !== 1 ? 's' : ''}
                   </p>
                 </div>
-                <div>
-                  <p className="text-[10px] text-on-surface-variant uppercase tracking-wider">Per Payment</p>
-                  <p className="text-sm font-bold text-primary">₱{fmt(breakdown.perPayment)}</p>
+              </div>
+
+              {/* Divider: Fees Section */}
+              <div className="border-t border-primary/15 pt-3 space-y-2">
+                <p className="text-[10px] font-bold tracking-widest text-on-surface-variant uppercase mb-2">
+                  Fees (Deducted from Proceeds)
+                </p>
+
+                {[
+                  { label: 'Interest Income',      value: breakdown.totalInterest   },
+                  { label: 'Service Fee (3%)',      value: breakdown.serviceFee      },
+                  { label: 'Notarial Fee (1%)',     value: breakdown.notarial        },
+                  { label: 'Risk Management (0.5%)',value: breakdown.riskManagement  },
+                  { label: 'PAF (0.5%)',            value: breakdown.paf             },
+                  { label: 'Documentary Stamps',    value: breakdown.docStamps       },
+                ].map(({ label, value }) => (
+                  <div key={label} className="flex justify-between items-center">
+                    <p className="text-xs text-on-surface-variant">{label}</p>
+                    <p className="text-xs font-medium text-on-surface">₱{fmt(value)}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Loans Receivable */}
+              <div className="border-t border-primary/15 pt-3 space-y-2">
+                <div className="flex justify-between items-center">
+                  <p className="text-xs font-bold text-on-surface-variant uppercase tracking-wider">
+                    Loans Receivable
+                  </p>
+                  <p className="text-sm font-extrabold text-on-surface">₱{fmt(breakdown.loansReceivable)}</p>
                 </div>
-                <div>
-                  <p className="text-[10px] text-on-surface-variant uppercase tracking-wider">Total Interest</p>
-                  <p className="text-sm font-semibold text-on-surface">₱{fmt(breakdown.totalInterest)}</p>
+                <div className="flex justify-between items-center">
+                  <p className="text-xs text-on-surface-variant">Net Proceeds (Cash Released)</p>
+                  <p className="text-xs font-semibold text-green-600">₱{fmt(breakdown.cashReleased)}</p>
                 </div>
               </div>
-              <div className="border-t border-primary/20 pt-3 flex justify-between items-center">
-                <p className="text-xs font-bold text-on-surface-variant uppercase tracking-wider">Total Payable</p>
-                <p className="text-base font-extrabold text-on-surface">₱{fmt(breakdown.totalPayable)}</p>
+
+              {/* Amortization — the key figure */}
+              <div className="rounded-xl bg-primary/10 px-4 py-3 flex justify-between items-center">
+                <div>
+                  <p className="text-[10px] text-primary font-bold uppercase tracking-wider">
+                    Amortization per {breakdown.periodLabel}
+                  </p>
+                  <p className="text-[10px] text-on-surface-variant mt-0.5">
+                    Based on Loans Receivable ÷ {breakdown.totalPeriods} payments
+                  </p>
+                </div>
+                <p className="text-lg font-extrabold text-primary">₱{fmt(breakdown.amortization)}</p>
               </div>
             </div>
           ) : (
