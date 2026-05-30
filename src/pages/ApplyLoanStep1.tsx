@@ -147,27 +147,27 @@ export default function ApplyLoanStep1() {
 
     if (!principal || principal <= 0 || !months || months <= 0) return null;
 
-    // Core flat-rate interest
-    const totalInterest  = Math.round(principal * (termOption.rate / 100) * months * 100) / 100;
+    // Core flat-rate interest — whole peso
+    const totalInterest  = Math.round(principal * (termOption.rate / 100) * months);
 
-    // One-time upfront fees based on principal
-    const serviceFee     = Math.round(principal * FEE_RATES.SERVICE_FEE     * 100) / 100;
-    const notarial       = Math.round(principal * FEE_RATES.NOTARIAL        * 100) / 100;
-    const riskManagement = Math.round(principal * FEE_RATES.RISK_MANAGEMENT * 100) / 100;
-    const paf            = Math.round(principal * FEE_RATES.PAF             * 100) / 100;
+    // One-time upfront fees — whole peso each
+    const serviceFee     = Math.round(principal * FEE_RATES.SERVICE_FEE);
+    const notarial       = Math.round(principal * FEE_RATES.NOTARIAL);
+    const riskManagement = Math.round(principal * FEE_RATES.RISK_MANAGEMENT);
+    const paf            = Math.round(principal * FEE_RATES.PAF);
 
-    // Doc stamps: term-specific rate applied to total interest
+    // Doc stamps: term-specific rate on total interest — whole peso
     const docStampsRate  = DOC_STAMPS_RATE[termOption.apiValue] ?? 0.15;
-    const docStamps      = Math.round(totalInterest * docStampsRate * 100) / 100;
+    const docStamps      = Math.round(totalInterest * docStampsRate);
 
-    const totalFees      = serviceFee + notarial + riskManagement + paf + docStamps;
+    const totalFees       = serviceFee + notarial + riskManagement + paf + docStamps;
     const loansReceivable = principal + totalInterest + totalFees;
-    const cashReleased   = principal; // net proceeds — all fees deducted upfront
+    const cashReleased    = principal;
 
-    // Amortization = Loans Receivable ÷ total payment count
-    const totalPeriods   = Math.round(months * termOption.periodsPerMonth);
-    const amortization   = totalPeriods > 0
-      ? Math.round((loansReceivable / totalPeriods) * 100) / 100
+    // Amortization: ceiled to nearest whole peso (matches voucher convention)
+    const totalPeriods  = Math.round(months * termOption.periodsPerMonth);
+    const amortization  = totalPeriods > 0
+      ? Math.ceil(loansReceivable / totalPeriods)
       : 0;
 
     const periodLabel =
@@ -263,7 +263,6 @@ export default function ApplyLoanStep1() {
           id_type:            formData.id_type,
           collateral_type:    formData.collateral_type,
           collateral_notes:   formData.collateral_notes.trim(),
-          // Full breakdown passed to Step 2 for backend submission
           breakdown,
         },
         uploadDocs: formData.docs
@@ -277,8 +276,9 @@ export default function ApplyLoanStep1() {
     });
   };
 
-  const fmt = (n: number) =>
-    n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // Whole-peso formatter — used for all breakdown card values
+  const fmtW = (n: number) =>
+    Math.round(n).toLocaleString('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
   // ── Block States ─────────────────────────────────────────────────────────────
 
@@ -421,16 +421,16 @@ export default function ApplyLoanStep1() {
                   Fees (Deducted from Proceeds)
                 </p>
                 {[
-                  { label: 'Interest Income',       value: breakdown.totalInterest   },
-                  { label: 'Service Fee (3%)',       value: breakdown.serviceFee      },
-                  { label: 'Notarial Fee (1%)',      value: breakdown.notarial        },
-                  { label: 'Risk Management (0.5%)', value: breakdown.riskManagement  },
-                  { label: 'PAF (0.5%)',             value: breakdown.paf             },
-                  { label: 'Documentary Stamps',     value: breakdown.docStamps       },
+                  { label: 'Interest Income',        value: breakdown.totalInterest   },
+                  { label: 'Service Fee (3%)',        value: breakdown.serviceFee      },
+                  { label: 'Notarial Fee (1%)',       value: breakdown.notarial        },
+                  { label: 'Risk Management (0.5%)',  value: breakdown.riskManagement  },
+                  { label: 'PAF (0.5%)',              value: breakdown.paf             },
+                  { label: 'Documentary Stamps',      value: breakdown.docStamps       },
                 ].map(({ label, value }) => (
                   <div key={label} className="flex justify-between items-center">
                     <p className="text-xs text-on-surface-variant">{label}</p>
-                    <p className="text-xs font-medium text-on-surface">₱{fmt(value)}</p>
+                    <p className="text-xs font-medium text-on-surface">₱{fmtW(value)}</p>
                   </div>
                 ))}
               </div>
@@ -441,11 +441,11 @@ export default function ApplyLoanStep1() {
                   <p className="text-xs font-bold text-on-surface-variant uppercase tracking-wider">
                     Loans Receivable
                   </p>
-                  <p className="text-sm font-extrabold text-on-surface">₱{fmt(breakdown.loansReceivable)}</p>
+                  <p className="text-sm font-extrabold text-on-surface">₱{fmtW(breakdown.loansReceivable)}</p>
                 </div>
                 <div className="flex justify-between items-center">
                   <p className="text-xs text-on-surface-variant">Net Proceeds (Cash Released)</p>
-                  <p className="text-xs font-semibold text-green-600">₱{fmt(breakdown.cashReleased)}</p>
+                  <p className="text-xs font-semibold text-green-600">₱{fmtW(breakdown.cashReleased)}</p>
                 </div>
               </div>
 
@@ -459,7 +459,7 @@ export default function ApplyLoanStep1() {
                     Based on Loans Receivable ÷ {breakdown.totalPeriods} payments
                   </p>
                 </div>
-                <p className="text-lg font-extrabold text-primary">₱{fmt(breakdown.amortization)}</p>
+                <p className="text-lg font-extrabold text-primary">₱{fmtW(breakdown.amortization)}</p>
               </div>
             </div>
           ) : (
