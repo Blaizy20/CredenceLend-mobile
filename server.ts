@@ -1520,27 +1520,6 @@ async function startServer() {
           error_code: "AMOUNT_TOO_LOW",
         });
 
-      // ── FIX: GrabPay stale source guard ───────────────────────────────────
-      if (paymongo_source_id) {
-        try {
-          const sourceCheck  = await fetch(
-            `https://api.paymongo.com/v1/sources/${paymongo_source_id}`,
-            { headers: PAYMONGO_HEADERS }
-          );
-          const sourceData   = await sourceCheck.json();
-          const sourceStatus = sourceData?.data?.attributes?.status;
-          if (sourceStatus && !['chargeable', 'paid'].includes(sourceStatus)) {
-            return res.status(400).json({
-              success:    false,
-              message:    "Payment session has expired or is invalid. Please try again.",
-              error_code: "SOURCE_INVALID_STATE",
-            });
-          }
-        } catch (sourceErr: any) {
-          console.warn("Source status check skipped:", sourceErr.message);
-        }
-      }
-
       const rawType          = paymongo_method_type ?? method;
       const normalizedMethod = normalizeMethod(String(rawType));
       const pmId             = paymongo_session_id ?? paymongo_source_id ?? paymongo_intent_id;
