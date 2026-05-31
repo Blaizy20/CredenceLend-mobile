@@ -121,30 +121,29 @@ function DetailRow({ icon, label, value, mono = false }: {
   );
 }
 
-/* ─── Bottom Sheet Base ──────────────────────────────────────────────── */
-// Same pattern as Profile.tsx logout/settings modals:
-// fixed bottom-0 left-0 right-0 max-w-md mx-auto — works reliably on mobile WebView.
-function BottomSheet({
-  show, onBackdropClick, children, maxHeight = '85vh',
+/* ─── Floating Card Modal (matches Profile logout style) ─────────────── */
+function FloatingModal({
+  show, onBackdropClick, children,
 }: {
-  show: boolean; onBackdropClick: () => void; children: React.ReactNode; maxHeight?: string;
+  show: boolean; onBackdropClick: () => void; children: React.ReactNode;
 }) {
   return (
     <AnimatePresence>
       {show && (
         <>
           <motion.div
-            key="bs-backdrop"
+            key="fm-backdrop"
             className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             onClick={onBackdropClick}
           />
           <motion.div
-            key="bs-sheet"
-            className="fixed bottom-0 left-0 right-0 z-50 bg-surface rounded-t-3xl shadow-2xl max-w-md mx-auto flex flex-col"
-            style={{ maxHeight }}
-            initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
-            transition={{ type: 'spring', damping: 30, stiffness: 320 }}
+            key="fm-card"
+            className="fixed inset-x-4 bottom-24 z-50 bg-surface rounded-3xl shadow-2xl max-w-md mx-auto overflow-hidden"
+            initial={{ opacity: 0, y: 40, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0,  scale: 1    }}
+            exit={{    opacity: 0, y: 40,  scale: 0.95 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
           >
             {children}
           </motion.div>
@@ -166,16 +165,11 @@ function DetailSheet({ tx, onClose }: { tx: Transaction | null; onClose: () => v
   const cfg = tx ? getMethodConfig(tx.method) : null;
 
   return (
-    <BottomSheet show={!!tx && !!cfg} onBackdropClick={onClose}>
+    <FloatingModal show={!!tx && !!cfg} onBackdropClick={onClose}>
       {tx && cfg && (
         <>
-          {/* Drag handle */}
-          <div className="flex justify-center pt-3 pb-1 shrink-0">
-            <div className="w-10 h-1 rounded-full bg-outline/20" />
-          </div>
-
           {/* Header */}
-          <div className="flex items-center justify-between px-6 pt-2 pb-4 shrink-0">
+          <div className="flex items-center justify-between px-6 pt-5 pb-4">
             <h2 className="text-base font-headline font-bold text-on-surface">Payment Details</h2>
             <button onClick={onClose}
               className="w-8 h-8 rounded-full bg-surface-container-high flex items-center justify-center active:scale-90 transition-transform">
@@ -184,7 +178,7 @@ function DetailSheet({ tx, onClose }: { tx: Transaction | null; onClose: () => v
           </div>
 
           {/* Amount hero */}
-          <div className="px-6 pb-5 shrink-0">
+          <div className="px-6 pb-4">
             <div className="bg-surface-container-low rounded-2xl p-4 flex items-center gap-4 border border-outline-variant/20">
               <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${cfg.bg}`}>
                 <span className={cfg.text}>{cfg.icon}</span>
@@ -204,8 +198,8 @@ function DetailSheet({ tx, onClose }: { tx: Transaction | null; onClose: () => v
             </div>
           </div>
 
-          {/* Scrollable details */}
-          <div className="px-6 pb-10 overflow-y-auto divide-y divide-outline-variant/10">
+          {/* Details */}
+          <div className="px-6 pb-6 divide-y divide-outline-variant/10 max-h-64 overflow-y-auto">
             <DetailRow icon={<Calendar size={13} />} label="Date"         value={formatFullDate(tx.created_at)} />
             <DetailRow icon={<BookOpen size={13} />} label="Time"         value={formatFullTime(tx.created_at)} />
             <DetailRow icon={<Hash     size={13} />} label="Reference No" value={tx.reference_no} mono />
@@ -215,7 +209,7 @@ function DetailSheet({ tx, onClose }: { tx: Transaction | null; onClose: () => v
           </div>
         </>
       )}
-    </BottomSheet>
+    </FloatingModal>
   );
 }
 
@@ -245,15 +239,10 @@ function FilterPanel({
   ];
 
   return (
-    <BottomSheet show={show} onBackdropClick={onClose}>
-
-      {/* Drag handle */}
-      <div className="flex justify-center pt-3 pb-1 shrink-0">
-        <div className="w-10 h-1 rounded-full bg-outline/20" />
-      </div>
+    <FloatingModal show={show} onBackdropClick={onClose}>
 
       {/* Header */}
-      <div className="flex items-center justify-between px-6 pt-2 pb-4 border-b border-outline-variant/10 shrink-0">
+      <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-outline-variant/10">
         <h2 className="text-base font-headline font-bold text-on-surface">Sort & Filter</h2>
         <div className="flex items-center gap-3">
           <button onClick={onReset}
@@ -268,7 +257,7 @@ function FilterPanel({
       </div>
 
       {/* Scrollable body */}
-      <div className="overflow-y-auto overscroll-contain flex-1 px-6 py-5 space-y-7">
+      <div className="px-6 py-5 space-y-6 max-h-[55vh] overflow-y-auto overscroll-contain">
 
         {/* ── Sort ── */}
         <div>
@@ -340,8 +329,8 @@ function FilterPanel({
 
       </div>
 
-      {/* Apply button — pb-10 matches Profile modal pattern, clears BottomNav */}
-      <div className="px-6 pt-4 pb-10 shrink-0 border-t border-outline-variant/10">
+      {/* Apply button */}
+      <div className="px-6 pt-4 pb-6 border-t border-outline-variant/10">
         <button
           onClick={onClose}
           className="w-full py-4 bg-primary text-on-primary font-bold rounded-full text-sm active:scale-95 transition-transform shadow-sm"
@@ -350,7 +339,7 @@ function FilterPanel({
         </button>
       </div>
 
-    </BottomSheet>
+    </FloatingModal>
   );
 }
 
