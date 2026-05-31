@@ -6,7 +6,7 @@ import {
   ReceiptText, FileDown, AlertCircle, RefreshCw,
   X, Banknote, CreditCard, Smartphone, QrCode, Building2,
   CheckCircle2, Hash, Calendar, FileText, BookOpen, ChevronRight,
-  SlidersHorizontal, ArrowUpDown, ChevronDown,
+  SlidersHorizontal, ArrowUpDown, ChevronDown, CalendarCheck,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { API_BASE } from '../lib/api';
@@ -33,22 +33,24 @@ type FilterMethod = 'ALL' | string;
 interface MethodConfig { label: string; icon: React.ReactNode; bg: string; text: string; badge: string; }
 
 const METHOD_CONFIG: Record<string, MethodConfig> = {
-  GCASH:     { label: 'GCash',         icon: <Smartphone size={18} />, bg: 'bg-blue-500/10',            text: 'text-blue-500',          badge: 'bg-blue-500/10 text-blue-600'                         },
-  MAYA:      { label: 'Maya',          icon: <Smartphone size={18} />, bg: 'bg-emerald-500/10',         text: 'text-emerald-500',       badge: 'bg-emerald-500/10 text-emerald-700'                   },
-  CASH:      { label: 'Cash',          icon: <Banknote   size={18} />, bg: 'bg-surface-container-high', text: 'text-on-surface-variant',badge: 'bg-surface-container-high text-on-surface-variant'    },
-  CARD:      { label: 'Card',          icon: <CreditCard size={18} />, bg: 'bg-violet-500/10',          text: 'text-violet-500',        badge: 'bg-violet-500/10 text-violet-700'                     },
-  BANK:      { label: 'Bank Transfer', icon: <Building2  size={18} />, bg: 'bg-indigo-500/10',          text: 'text-indigo-500',        badge: 'bg-indigo-500/10 text-indigo-700'                     },
-  BPI:       { label: 'BPI',           icon: <Building2  size={18} />, bg: 'bg-red-500/10',             text: 'text-red-500',           badge: 'bg-red-500/10 text-red-700'                           },
-  UNIONBANK: { label: 'UnionBank',     icon: <Building2  size={18} />, bg: 'bg-orange-500/10',          text: 'text-orange-500',        badge: 'bg-orange-500/10 text-orange-700'                     },
-  QRPH:      { label: 'QR Ph',         icon: <QrCode     size={18} />, bg: 'bg-teal-500/10',            text: 'text-teal-500',          badge: 'bg-teal-500/10 text-teal-700'                         },
-  GRAB_PAY:  { label: 'GrabPay',       icon: <Smartphone size={18} />, bg: 'bg-lime-500/10',            text: 'text-lime-600',          badge: 'bg-lime-500/10 text-lime-700'                         },
-  CHEQUE:    { label: 'Cheque',        icon: <FileText   size={18} />, bg: 'bg-amber-500/10',           text: 'text-amber-600',         badge: 'bg-amber-500/10 text-amber-700'                       },
-  OTHER:     { label: 'Other',         icon: <ReceiptText size={18}/>, bg: 'bg-surface-container-high', text: 'text-on-surface-variant',badge: 'bg-surface-container-high text-on-surface-variant'    },
+  GCASH:     { label: 'GCash',         icon: <Smartphone size={18} />, bg: 'bg-blue-500/10',            text: 'text-blue-500',          badge: 'bg-blue-500/10 text-blue-600'                      },
+  MAYA:      { label: 'Maya',          icon: <Smartphone size={18} />, bg: 'bg-emerald-500/10',         text: 'text-emerald-500',       badge: 'bg-emerald-500/10 text-emerald-700'                },
+  CASH:      { label: 'Cash',          icon: <Banknote   size={18} />, bg: 'bg-surface-container-high', text: 'text-on-surface-variant',badge: 'bg-surface-container-high text-on-surface-variant' },
+  CARD:      { label: 'Card',          icon: <CreditCard size={18} />, bg: 'bg-violet-500/10',          text: 'text-violet-500',        badge: 'bg-violet-500/10 text-violet-700'                  },
+  BANK:      { label: 'Bank Transfer', icon: <Building2  size={18} />, bg: 'bg-indigo-500/10',          text: 'text-indigo-500',        badge: 'bg-indigo-500/10 text-indigo-700'                  },
+  BPI:       { label: 'BPI',           icon: <Building2  size={18} />, bg: 'bg-red-500/10',             text: 'text-red-500',           badge: 'bg-red-500/10 text-red-700'                        },
+  UNIONBANK: { label: 'UnionBank',     icon: <Building2  size={18} />, bg: 'bg-orange-500/10',          text: 'text-orange-500',        badge: 'bg-orange-500/10 text-orange-700'                  },
+  QRPH:      { label: 'QR Ph',         icon: <QrCode     size={18} />, bg: 'bg-teal-500/10',            text: 'text-teal-500',          badge: 'bg-teal-500/10 text-teal-700'                      },
+  GRAB_PAY:  { label: 'GrabPay',       icon: <Smartphone size={18} />, bg: 'bg-lime-500/10',            text: 'text-lime-600',          badge: 'bg-lime-500/10 text-lime-700'                      },
+  CHEQUE:    { label: 'Cheque',        icon: <FileText   size={18} />, bg: 'bg-amber-500/10',           text: 'text-amber-600',         badge: 'bg-amber-500/10 text-amber-700'                    },
+  OTHER:     { label: 'Other',         icon: <ReceiptText size={18}/>, bg: 'bg-surface-container-high', text: 'text-on-surface-variant',badge: 'bg-surface-container-high text-on-surface-variant' },
 };
 const getMethodConfig = (method: string): MethodConfig =>
   METHOD_CONFIG[method?.toUpperCase()] ?? METHOD_CONFIG.OTHER;
 
 /* ─── Helpers ────────────────────────────────────────────────────────── */
+const toDateStr = (d: Date) => d.toISOString().slice(0, 10); // YYYY-MM-DD
+
 const groupByDate = (txs: Transaction[]) => {
   const groups: Record<string, Transaction[]> = {};
   txs.forEach(tx => {
@@ -121,7 +123,7 @@ function DetailRow({ icon, label, value, mono = false }: {
   );
 }
 
-/* ─── Floating Card Modal (matches Profile logout style) ─────────────── */
+/* ─── Floating Card Modal ─────────────────────────────────────────────── */
 function FloatingModal({
   show, onBackdropClick, children,
 }: {
@@ -168,7 +170,6 @@ function DetailSheet({ tx, onClose }: { tx: Transaction | null; onClose: () => v
     <FloatingModal show={!!tx && !!cfg} onBackdropClick={onClose}>
       {tx && cfg && (
         <>
-          {/* Header */}
           <div className="flex items-center justify-between px-6 pt-5 pb-4">
             <h2 className="text-base font-headline font-bold text-on-surface">Payment Details</h2>
             <button onClick={onClose}
@@ -176,8 +177,6 @@ function DetailSheet({ tx, onClose }: { tx: Transaction | null; onClose: () => v
               <X size={16} className="text-on-surface-variant" />
             </button>
           </div>
-
-          {/* Amount hero */}
           <div className="px-6 pb-4">
             <div className="bg-surface-container-low rounded-2xl p-4 flex items-center gap-4 border border-outline-variant/20">
               <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${cfg.bg}`}>
@@ -197,15 +196,13 @@ function DetailSheet({ tx, onClose }: { tx: Transaction | null; onClose: () => v
               </div>
             </div>
           </div>
-
-          {/* Details */}
           <div className="px-6 pb-6 divide-y divide-outline-variant/10 max-h-64 overflow-y-auto">
             <DetailRow icon={<Calendar size={13} />} label="Date"         value={formatFullDate(tx.created_at)} />
             <DetailRow icon={<BookOpen size={13} />} label="Time"         value={formatFullTime(tx.created_at)} />
             <DetailRow icon={<Hash     size={13} />} label="Reference No" value={tx.reference_no} mono />
             <DetailRow icon={<BookOpen size={13} />} label="Loan ID"      value={`LOAN #${tx.loan_id}`} />
-            {tx.or_no && <DetailRow icon={<FileText size={13} />} label="OR Number" value={`#${tx.or_no}`} mono />}
-            {tx.notes && <DetailRow icon={<FileText size={13} />} label="Notes"     value={tx.notes} />}
+            {tx.or_no  && <DetailRow icon={<FileText size={13} />} label="OR Number" value={`#${tx.or_no}`} mono />}
+            {tx.notes  && <DetailRow icon={<FileText size={13} />} label="Notes"     value={tx.notes} />}
           </div>
         </>
       )}
@@ -221,6 +218,7 @@ function FilterPanel({
   dateFrom, setDateFrom,
   dateTo, setDateTo,
   availableMethods,
+  minDate, maxDate,
   onReset,
 }: {
   show: boolean; onClose: () => void;
@@ -229,6 +227,8 @@ function FilterPanel({
   dateFrom: string; setDateFrom: (d: string) => void;
   dateTo: string; setDateTo: (d: string) => void;
   availableMethods: string[];
+  minDate: string; // earliest transaction date
+  maxDate: string; // latest transaction date (today cap)
   onReset: () => void;
 }) {
   const SORT_OPTIONS: { value: SortOption; label: string }[] = [
@@ -237,6 +237,64 @@ function FilterPanel({
     { value: 'amount_desc', label: 'Highest Amount' },
     { value: 'amount_asc',  label: 'Lowest Amount'  },
   ];
+
+  const today = toDateStr(new Date());
+
+  // Quick preset ranges
+  const setPreset = (preset: 'today' | 'week' | 'month' | 'all') => {
+    const now = new Date();
+    switch (preset) {
+      case 'today':
+        setDateFrom(today);
+        setDateTo(today);
+        break;
+      case 'week': {
+        const weekAgo = new Date(now);
+        weekAgo.setDate(now.getDate() - 6);
+        setDateFrom(toDateStr(weekAgo));
+        setDateTo(today);
+        break;
+      }
+      case 'month': {
+        const monthAgo = new Date(now);
+        monthAgo.setDate(now.getDate() - 29);
+        setDateFrom(toDateStr(monthAgo));
+        setDateTo(today);
+        break;
+      }
+      case 'all':
+        setDateFrom(minDate);
+        setDateTo(maxDate);
+        break;
+    }
+  };
+
+  // Guard: From can't exceed To, To can't precede From
+  const handleFromChange = (val: string) => {
+    setDateFrom(val);
+    if (dateTo && val > dateTo) setDateTo(val);
+  };
+  const handleToChange = (val: string) => {
+    setDateTo(val);
+    if (dateFrom && val < dateFrom) setDateFrom(val);
+  };
+
+  const isPresetActive = (preset: 'today' | 'week' | 'month' | 'all') => {
+    const now = new Date();
+    switch (preset) {
+      case 'today':  return dateFrom === today && dateTo === today;
+      case 'week': {
+        const d = new Date(now); d.setDate(now.getDate() - 6);
+        return dateFrom === toDateStr(d) && dateTo === today;
+      }
+      case 'month': {
+        const d = new Date(now); d.setDate(now.getDate() - 29);
+        return dateFrom === toDateStr(d) && dateTo === today;
+      }
+      case 'all':    return dateFrom === minDate && dateTo === maxDate;
+      default:       return false;
+    }
+  };
 
   return (
     <FloatingModal show={show} onBackdropClick={onClose}>
@@ -257,7 +315,7 @@ function FilterPanel({
       </div>
 
       {/* Scrollable body */}
-      <div className="px-6 py-5 space-y-6 max-h-[55vh] overflow-y-auto overscroll-contain">
+      <div className="px-6 py-5 space-y-6 max-h-[60vh] overflow-y-auto overscroll-contain">
 
         {/* ── Sort ── */}
         <div>
@@ -305,13 +363,40 @@ function FilterPanel({
         {/* ── Date Range ── */}
         <div>
           <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-3">Date Range</p>
+
+          {/* Quick presets */}
+          <div className="flex flex-wrap gap-2 mb-4">
+            {([
+              { key: 'today', label: 'Today' },
+              { key: 'week',  label: 'Last 7 Days' },
+              { key: 'month', label: 'Last 30 Days' },
+              { key: 'all',   label: 'All Time' },
+            ] as { key: 'today' | 'week' | 'month' | 'all'; label: string }[]).map(p => (
+              <button
+                key={p.key}
+                onClick={() => setPreset(p.key)}
+                className={`flex items-center gap-1.5 py-2 px-3.5 rounded-full text-xs font-bold border transition-all active:scale-95 ${
+                  isPresetActive(p.key)
+                    ? 'bg-primary/10 text-primary border-primary/30'
+                    : 'bg-surface-container-low text-on-surface-variant border-outline/15 hover:border-primary/30 hover:text-primary'
+                }`}
+              >
+                {p.key === 'today' && <CalendarCheck size={11} />}
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Manual pickers — clamped to transaction date range */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-[10px] text-on-surface-variant font-medium mb-1.5 block">From</label>
               <input
                 type="date"
                 value={dateFrom}
-                onChange={e => setDateFrom(e.target.value)}
+                min={minDate}
+                max={dateTo || maxDate}
+                onChange={e => handleFromChange(e.target.value)}
                 className="w-full bg-surface-container-low border border-outline/20 rounded-2xl px-3 py-3 text-sm text-on-surface font-medium focus:outline-none focus:border-primary/50 transition-colors"
               />
             </div>
@@ -320,11 +405,30 @@ function FilterPanel({
               <input
                 type="date"
                 value={dateTo}
-                onChange={e => setDateTo(e.target.value)}
+                min={dateFrom || minDate}
+                max={maxDate}
+                onChange={e => handleToChange(e.target.value)}
                 className="w-full bg-surface-container-low border border-outline/20 rounded-2xl px-3 py-3 text-sm text-on-surface font-medium focus:outline-none focus:border-primary/50 transition-colors"
               />
             </div>
           </div>
+
+          {/* Active range hint */}
+          {(dateFrom || dateTo) && (
+            <p className="mt-2 text-[10px] text-on-surface-variant text-center">
+              Showing transactions from{' '}
+              <span className="text-primary font-bold">{dateFrom || minDate}</span>
+              {' '}to{' '}
+              <span className="text-primary font-bold">{dateTo || maxDate}</span>
+            </p>
+          )}
+
+          {/* Date range hint — shows the actual span of transactions */}
+          {minDate && maxDate && (
+            <p className="mt-1.5 text-[9px] text-outline/50 text-center">
+              Your transactions span {minDate} — {maxDate}
+            </p>
+          )}
         </div>
 
       </div>
@@ -410,6 +514,16 @@ export default function Transactions() {
     [...new Set(transactions.map(t => t.method?.toUpperCase()).filter(Boolean))],
     [transactions]
   );
+
+  // ── Derive transaction date bounds ────────────────────────────────────
+  const { minDate, maxDate } = React.useMemo(() => {
+    if (transactions.length === 0) return { minDate: '', maxDate: '' };
+    const dates = transactions.map(t => t.created_at).sort();
+    return {
+      minDate: toDateStr(new Date(dates[0])),
+      maxDate: toDateStr(new Date()),          // cap at today — can't filter beyond now
+    };
+  }, [transactions]);
 
   const processed = React.useMemo(() => {
     let result = [...transactions];
@@ -553,8 +667,7 @@ export default function Transactions() {
                 <Calendar size={11} />
                 {dateFrom && dateTo
                   ? `${dateFrom} – ${dateTo}`
-                  : dateFrom ? `From ${dateFrom}` : `To ${dateTo}`
-                }
+                  : dateFrom ? `From ${dateFrom}` : `To ${dateTo}`}
                 <button onClick={() => { setDateFrom(''); setDateTo(''); }} className="hover:opacity-70 transition-opacity">
                   <X size={11} />
                 </button>
@@ -688,6 +801,8 @@ export default function Transactions() {
         dateFrom={dateFrom} setDateFrom={setDateFrom}
         dateTo={dateTo} setDateTo={setDateTo}
         availableMethods={availableMethods}
+        minDate={minDate}
+        maxDate={maxDate}
         onReset={handleResetFilters}
       />
 
