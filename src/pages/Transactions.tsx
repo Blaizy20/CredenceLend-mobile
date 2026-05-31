@@ -33,17 +33,17 @@ type FilterMethod = 'ALL' | string;
 interface MethodConfig { label: string; icon: React.ReactNode; bg: string; text: string; badge: string; }
 
 const METHOD_CONFIG: Record<string, MethodConfig> = {
-  GCASH:     { label: 'GCash',         icon: <Smartphone size={18} />, bg: 'bg-blue-500/10',    text: 'text-blue-500',    badge: 'bg-blue-500/10 text-blue-600'    },
-  MAYA:      { label: 'Maya',          icon: <Smartphone size={18} />, bg: 'bg-emerald-500/10', text: 'text-emerald-500', badge: 'bg-emerald-500/10 text-emerald-700' },
-  CASH:      { label: 'Cash',          icon: <Banknote   size={18} />, bg: 'bg-surface-container-high', text: 'text-on-surface-variant', badge: 'bg-surface-container-high text-on-surface-variant' },
-  CARD:      { label: 'Card',          icon: <CreditCard size={18} />, bg: 'bg-violet-500/10',  text: 'text-violet-500',  badge: 'bg-violet-500/10 text-violet-700'  },
-  BANK:      { label: 'Bank Transfer', icon: <Building2  size={18} />, bg: 'bg-indigo-500/10',  text: 'text-indigo-500',  badge: 'bg-indigo-500/10 text-indigo-700'  },
-  BPI:       { label: 'BPI',           icon: <Building2  size={18} />, bg: 'bg-red-500/10',     text: 'text-red-500',     badge: 'bg-red-500/10 text-red-700'        },
-  UNIONBANK: { label: 'UnionBank',     icon: <Building2  size={18} />, bg: 'bg-orange-500/10',  text: 'text-orange-500',  badge: 'bg-orange-500/10 text-orange-700'  },
-  QRPH:      { label: 'QR Ph',         icon: <QrCode     size={18} />, bg: 'bg-teal-500/10',    text: 'text-teal-500',    badge: 'bg-teal-500/10 text-teal-700'      },
-  GRAB_PAY:  { label: 'GrabPay',       icon: <Smartphone size={18} />, bg: 'bg-lime-500/10',    text: 'text-lime-600',    badge: 'bg-lime-500/10 text-lime-700'      },
-  CHEQUE:    { label: 'Cheque',        icon: <FileText   size={18} />, bg: 'bg-amber-500/10',   text: 'text-amber-600',   badge: 'bg-amber-500/10 text-amber-700'    },
-  OTHER:     { label: 'Other',         icon: <ReceiptText size={18}/>, bg: 'bg-surface-container-high', text: 'text-on-surface-variant', badge: 'bg-surface-container-high text-on-surface-variant' },
+  GCASH:     { label: 'GCash',         icon: <Smartphone size={18} />, bg: 'bg-blue-500/10',           text: 'text-blue-500',          badge: 'bg-blue-500/10 text-blue-600'                          },
+  MAYA:      { label: 'Maya',          icon: <Smartphone size={18} />, bg: 'bg-emerald-500/10',        text: 'text-emerald-500',       badge: 'bg-emerald-500/10 text-emerald-700'                    },
+  CASH:      { label: 'Cash',          icon: <Banknote   size={18} />, bg: 'bg-surface-container-high',text: 'text-on-surface-variant',badge: 'bg-surface-container-high text-on-surface-variant'     },
+  CARD:      { label: 'Card',          icon: <CreditCard size={18} />, bg: 'bg-violet-500/10',         text: 'text-violet-500',        badge: 'bg-violet-500/10 text-violet-700'                      },
+  BANK:      { label: 'Bank Transfer', icon: <Building2  size={18} />, bg: 'bg-indigo-500/10',         text: 'text-indigo-500',        badge: 'bg-indigo-500/10 text-indigo-700'                      },
+  BPI:       { label: 'BPI',           icon: <Building2  size={18} />, bg: 'bg-red-500/10',            text: 'text-red-500',           badge: 'bg-red-500/10 text-red-700'                            },
+  UNIONBANK: { label: 'UnionBank',     icon: <Building2  size={18} />, bg: 'bg-orange-500/10',         text: 'text-orange-500',        badge: 'bg-orange-500/10 text-orange-700'                      },
+  QRPH:      { label: 'QR Ph',         icon: <QrCode     size={18} />, bg: 'bg-teal-500/10',           text: 'text-teal-500',          badge: 'bg-teal-500/10 text-teal-700'                          },
+  GRAB_PAY:  { label: 'GrabPay',       icon: <Smartphone size={18} />, bg: 'bg-lime-500/10',           text: 'text-lime-600',          badge: 'bg-lime-500/10 text-lime-700'                          },
+  CHEQUE:    { label: 'Cheque',        icon: <FileText   size={18} />, bg: 'bg-amber-500/10',          text: 'text-amber-600',         badge: 'bg-amber-500/10 text-amber-700'                        },
+  OTHER:     { label: 'Other',         icon: <ReceiptText size={18}/>, bg: 'bg-surface-container-high',text: 'text-on-surface-variant',badge: 'bg-surface-container-high text-on-surface-variant'     },
 };
 const getMethodConfig = (method: string): MethodConfig =>
   METHOD_CONFIG[method?.toUpperCase()] ?? METHOD_CONFIG.OTHER;
@@ -65,8 +65,6 @@ function TransactionsSkeleton() {
     <div className="min-h-screen bg-background pb-32">
       <TopBar title="Transactions" showBack={false} />
       <main className="pt-24 px-6 max-w-md mx-auto space-y-6">
-
-        {/* Summary bar skeleton */}
         <div className="bg-surface-container-low rounded-2xl p-4 flex items-center justify-between border border-outline/15 animate-pulse">
           <div className="space-y-2">
             <div className="h-2.5 w-16 bg-surface-container-highest rounded-full" />
@@ -77,15 +75,11 @@ function TransactionsSkeleton() {
             <div className="h-6 w-10 bg-surface-container-highest rounded-full" />
           </div>
         </div>
-
-        {/* Filter bar skeleton */}
         <div className="flex gap-2 animate-pulse">
           <div className="h-9 w-24 bg-surface-container-highest rounded-full" />
           <div className="h-9 w-28 bg-surface-container-highest rounded-full" />
           <div className="h-9 w-20 bg-surface-container-highest rounded-full" />
         </div>
-
-        {/* Group skeleton */}
         <div className="space-y-6">
           {[1, 2].map(g => (
             <div key={g} className="space-y-3">
@@ -127,6 +121,42 @@ function DetailRow({ icon, label, value, mono = false }: {
   );
 }
 
+/* ─── Bottom Sheet Base ──────────────────────────────────────────────── */
+// Shared wrapper that correctly anchors sheets to the true bottom on mobile.
+// The key fix: the outer div is the full-screen overlay with flex-col + justify-end,
+// and the inner sheet has NO max-w / mx-auto on fixed — those break on mobile WebView.
+function BottomSheet({
+  show, onBackdropClick, children,
+}: {
+  show: boolean; onBackdropClick: () => void; children: React.ReactNode;
+}) {
+  return (
+    <AnimatePresence>
+      {show && (
+        // Full-screen flex overlay — this is what actually centers the sheet
+        <div className="fixed inset-0 z-50 flex flex-col justify-end">
+          {/* Backdrop */}
+          <motion.div
+            key="backdrop"
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={onBackdropClick}
+          />
+          {/* Sheet — full width, no centering hacks */}
+          <motion.div
+            key="sheet"
+            className="relative w-full bg-surface rounded-t-3xl shadow-2xl max-h-[85vh] flex flex-col"
+            initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+            transition={{ type: 'spring', damping: 30, stiffness: 320 }}
+          >
+            {children}
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
+  );
+}
+
 /* ─── Detail Sheet ───────────────────────────────────────────────────── */
 function DetailSheet({ tx, onClose }: { tx: Transaction | null; onClose: () => void }) {
   React.useEffect(() => {
@@ -139,60 +169,53 @@ function DetailSheet({ tx, onClose }: { tx: Transaction | null; onClose: () => v
   const cfg = tx ? getMethodConfig(tx.method) : null;
 
   return (
-    <AnimatePresence>
+    <BottomSheet show={!!tx && !!cfg} onBackdropClick={onClose}>
       {tx && cfg && (
         <>
-          <motion.div key="backdrop"
-            className="fixed inset-0 bg-black/40 z-40 backdrop-blur-sm"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            onClick={onClose}
-          />
-          <motion.div key="sheet"
-            className="fixed bottom-0 left-0 right-0 z-50 bg-surface rounded-t-3xl shadow-2xl max-w-md mx-auto"
-            initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
-            transition={{ type: 'spring', damping: 28, stiffness: 320 }}
-          >
-            <div className="flex justify-center pt-3 pb-1">
-              <div className="w-10 h-1 rounded-full bg-outline/20" />
-            </div>
-            <div className="flex items-center justify-between px-6 pt-2 pb-4">
-              <h2 className="text-base font-headline font-bold text-on-surface">Payment Details</h2>
-              <button onClick={onClose}
-                className="w-8 h-8 rounded-full bg-surface-container-high flex items-center justify-center active:scale-90 transition-transform">
-                <X size={16} className="text-on-surface-variant" />
-              </button>
-            </div>
-            <div className="px-6 pb-5">
-              <div className="bg-surface-container-low rounded-2xl p-4 flex items-center gap-4 border border-outline-variant/20">
-                <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${cfg.bg}`}>
-                  <span className={cfg.text}>{cfg.icon}</span>
-                </div>
-                <div className="flex-1">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-0.5">
-                    {cfg.label} Payment
-                  </p>
-                  <p className="text-2xl font-headline font-extrabold text-on-surface tracking-tight">
-                    −&thinsp;₱{Number(tx.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                  </p>
-                </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <CheckCircle2 size={14} className="text-green-500" />
-                  <span className="text-[10px] font-bold text-green-600 uppercase tracking-wider">Paid</span>
-                </div>
+          {/* Drag handle */}
+          <div className="flex justify-center pt-3 pb-1 shrink-0">
+            <div className="w-10 h-1 rounded-full bg-outline/20" />
+          </div>
+          {/* Header */}
+          <div className="flex items-center justify-between px-6 pt-2 pb-4 shrink-0">
+            <h2 className="text-base font-headline font-bold text-on-surface">Payment Details</h2>
+            <button onClick={onClose}
+              className="w-8 h-8 rounded-full bg-surface-container-high flex items-center justify-center active:scale-90 transition-transform">
+              <X size={16} className="text-on-surface-variant" />
+            </button>
+          </div>
+          {/* Amount hero */}
+          <div className="px-6 pb-5 shrink-0">
+            <div className="bg-surface-container-low rounded-2xl p-4 flex items-center gap-4 border border-outline-variant/20">
+              <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${cfg.bg}`}>
+                <span className={cfg.text}>{cfg.icon}</span>
+              </div>
+              <div className="flex-1">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-0.5">
+                  {cfg.label} Payment
+                </p>
+                <p className="text-2xl font-headline font-extrabold text-on-surface tracking-tight">
+                  −&thinsp;₱{Number(tx.amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                </p>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <CheckCircle2 size={14} className="text-green-500" />
+                <span className="text-[10px] font-bold text-green-600 uppercase tracking-wider">Paid</span>
               </div>
             </div>
-            <div className="px-6 pb-8 divide-y divide-outline-variant/10">
-              <DetailRow icon={<Calendar size={13} />} label="Date"         value={formatFullDate(tx.created_at)} />
-              <DetailRow icon={<BookOpen size={13} />} label="Time"         value={formatFullTime(tx.created_at)} />
-              <DetailRow icon={<Hash     size={13} />} label="Reference No" value={tx.reference_no} mono />
-              <DetailRow icon={<BookOpen size={13} />} label="Loan ID"      value={`LOAN #${tx.loan_id}`} />
-              {tx.or_no  && <DetailRow icon={<FileText size={13} />} label="OR Number" value={`#${tx.or_no}`} mono />}
-              {tx.notes  && <DetailRow icon={<FileText size={13} />} label="Notes"     value={tx.notes} />}
-            </div>
-          </motion.div>
+          </div>
+          {/* Details */}
+          <div className="px-6 pb-10 overflow-y-auto divide-y divide-outline-variant/10">
+            <DetailRow icon={<Calendar size={13} />} label="Date"         value={formatFullDate(tx.created_at)} />
+            <DetailRow icon={<BookOpen size={13} />} label="Time"         value={formatFullTime(tx.created_at)} />
+            <DetailRow icon={<Hash     size={13} />} label="Reference No" value={tx.reference_no} mono />
+            <DetailRow icon={<BookOpen size={13} />} label="Loan ID"      value={`LOAN #${tx.loan_id}`} />
+            {tx.or_no && <DetailRow icon={<FileText size={13} />} label="OR Number" value={`#${tx.or_no}`} mono />}
+            {tx.notes && <DetailRow icon={<FileText size={13} />} label="Notes"     value={tx.notes} />}
+          </div>
         </>
       )}
-    </AnimatePresence>
+    </BottomSheet>
   );
 }
 
@@ -215,113 +238,123 @@ function FilterPanel({
   onReset: () => void;
 }) {
   const SORT_OPTIONS: { value: SortOption; label: string }[] = [
-    { value: 'date_desc',   label: 'Newest First'    },
-    { value: 'date_asc',    label: 'Oldest First'    },
-    { value: 'amount_desc', label: 'Highest Amount'  },
-    { value: 'amount_asc',  label: 'Lowest Amount'   },
+    { value: 'date_desc',   label: 'Newest First'   },
+    { value: 'date_asc',    label: 'Oldest First'   },
+    { value: 'amount_desc', label: 'Highest Amount' },
+    { value: 'amount_asc',  label: 'Lowest Amount'  },
   ];
 
   return (
-    <AnimatePresence>
-      {show && (
-        <>
-          <motion.div key="fp-backdrop"
-            className="fixed inset-0 bg-black/40 z-40 backdrop-blur-sm"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            onClick={onClose}
-          />
-          <motion.div key="fp-panel"
-            className="fixed bottom-0 left-0 right-0 z-50 bg-surface rounded-t-3xl shadow-2xl max-w-md mx-auto max-h-[80vh] overflow-y-auto"
-            initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
-            transition={{ type: 'spring', damping: 28, stiffness: 320 }}
-          >
-            <div className="flex justify-center pt-3 pb-1">
-              <div className="w-10 h-1 rounded-full bg-outline/20" />
-            </div>
-            <div className="flex items-center justify-between px-6 pt-2 pb-4 border-b border-outline-variant/10">
-              <h2 className="text-base font-headline font-bold text-on-surface">Sort & Filter</h2>
-              <div className="flex items-center gap-2">
-                <button onClick={onReset}
-                  className="text-xs font-bold text-primary uppercase tracking-widest hover:opacity-70 transition-opacity">
-                  Reset
-                </button>
-                <button onClick={onClose}
-                  className="w-8 h-8 rounded-full bg-surface-container-high flex items-center justify-center active:scale-90 transition-transform">
-                  <X size={16} className="text-on-surface-variant" />
-                </button>
-              </div>
-            </div>
+    <BottomSheet show={show} onBackdropClick={onClose}>
+      {/* Drag handle */}
+      <div className="flex justify-center pt-3 pb-1 shrink-0">
+        <div className="w-10 h-1 rounded-full bg-outline/20" />
+      </div>
 
-            <div className="px-6 py-5 space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between px-6 pt-2 pb-4 border-b border-outline-variant/10 shrink-0">
+        <h2 className="text-base font-headline font-bold text-on-surface">Sort & Filter</h2>
+        <div className="flex items-center gap-3">
+          <button onClick={onReset}
+            className="text-xs font-bold text-primary uppercase tracking-widest active:opacity-60 transition-opacity">
+            Reset
+          </button>
+          <button onClick={onClose}
+            className="w-8 h-8 rounded-full bg-surface-container-high flex items-center justify-center active:scale-90 transition-transform">
+            <X size={16} className="text-on-surface-variant" />
+          </button>
+        </div>
+      </div>
 
-              {/* Sort */}
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-3">Sort By</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {SORT_OPTIONS.map(opt => (
-                    <button key={opt.value} onClick={() => setSort(opt.value)}
-                      className={`py-2.5 px-3 rounded-xl text-xs font-bold border transition-all ${
-                        sort === opt.value
-                          ? 'bg-primary text-on-primary border-primary'
-                          : 'bg-surface-container-low text-on-surface-variant border-outline/15 hover:border-primary/30'
-                      }`}>
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
+      {/* Scrollable body */}
+      <div className="overflow-y-auto overscroll-contain flex-1 px-6 py-5 space-y-7">
 
-              {/* Method filter */}
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-3">Payment Method</p>
-                <div className="flex flex-wrap gap-2">
-                  {['ALL', ...availableMethods].map(m => {
-                    const cfg = m === 'ALL' ? null : getMethodConfig(m);
-                    return (
-                      <button key={m} onClick={() => setFilterMethod(m)}
-                        className={`py-2 px-3 rounded-full text-xs font-bold border transition-all ${
-                          filterMethod === m
-                            ? 'bg-primary text-on-primary border-primary'
-                            : 'bg-surface-container-low text-on-surface-variant border-outline/15 hover:border-primary/30'
-                        }`}>
-                        {m === 'ALL' ? 'All Methods' : cfg?.label ?? m}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Date range */}
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-3">Date Range</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-[10px] text-on-surface-variant font-medium mb-1 block">From</label>
-                    <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-                      className="w-full bg-surface-container-low border border-outline/20 rounded-xl px-3 py-2.5 text-xs text-on-surface font-medium focus:outline-none focus:border-primary/50"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-on-surface-variant font-medium mb-1 block">To</label>
-                    <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-                      className="w-full bg-surface-container-low border border-outline/20 rounded-xl px-3 py-2.5 text-xs text-on-surface font-medium focus:outline-none focus:border-primary/50"
-                    />
-                  </div>
-                </div>
-              </div>
-
-            </div>
-
-            <div className="px-6 pb-8">
-              <button onClick={onClose}
-                className="w-full py-4 bg-primary text-on-primary font-bold rounded-full text-sm active:scale-95 transition-transform">
-                Apply Filters
+        {/* ── Sort ── */}
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-3">
+            Sort By
+          </p>
+          <div className="grid grid-cols-2 gap-2.5">
+            {SORT_OPTIONS.map(opt => (
+              <button
+                key={opt.value}
+                onClick={() => setSort(opt.value)}
+                className={`py-4 px-3 rounded-2xl text-sm font-bold border transition-all active:scale-95 ${
+                  sort === opt.value
+                    ? 'bg-primary text-on-primary border-primary shadow-sm'
+                    : 'bg-surface-container-low text-on-surface border-outline/15'
+                }`}
+              >
+                {opt.label}
               </button>
+            ))}
+          </div>
+        </div>
+
+        {/* ── Payment Method ── */}
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-3">
+            Payment Method
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {(['ALL', ...availableMethods] as string[]).map(m => {
+              const cfg = m === 'ALL' ? null : getMethodConfig(m);
+              return (
+                <button
+                  key={m}
+                  onClick={() => setFilterMethod(m)}
+                  className={`py-2.5 px-4 rounded-full text-sm font-bold border transition-all active:scale-95 ${
+                    filterMethod === m
+                      ? 'bg-primary text-on-primary border-primary shadow-sm'
+                      : 'bg-surface-container-low text-on-surface border-outline/15'
+                  }`}
+                >
+                  {m === 'ALL' ? 'All Methods' : cfg?.label ?? m}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ── Date Range ── */}
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-3">
+            Date Range
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-[10px] text-on-surface-variant font-medium mb-1.5 block">From</label>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={e => setDateFrom(e.target.value)}
+                className="w-full bg-surface-container-low border border-outline/20 rounded-2xl px-3 py-3 text-sm text-on-surface font-medium focus:outline-none focus:border-primary/50 transition-colors"
+              />
             </div>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+            <div>
+              <label className="text-[10px] text-on-surface-variant font-medium mb-1.5 block">To</label>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={e => setDateTo(e.target.value)}
+                className="w-full bg-surface-container-low border border-outline/20 rounded-2xl px-3 py-3 text-sm text-on-surface font-medium focus:outline-none focus:border-primary/50 transition-colors"
+              />
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      {/* Apply button — always pinned at bottom of sheet */}
+      <div className="px-6 pt-4 pb-8 shrink-0 border-t border-outline-variant/10">
+        <button
+          onClick={onClose}
+          className="w-full py-4 bg-primary text-on-primary font-bold rounded-full text-sm active:scale-95 transition-transform shadow-sm"
+        >
+          Apply Filters
+        </button>
+      </div>
+    </BottomSheet>
   );
 }
 
@@ -335,7 +368,6 @@ export default function Transactions() {
   const [selected, setSelected]         = React.useState<Transaction | null>(null);
   const [showFilter, setShowFilter]     = React.useState(false);
 
-  // ── Filter/sort state ───────────────────────────────────────────────
   const [sort,         setSort]         = React.useState<SortOption>('date_desc');
   const [filterMethod, setFilterMethod] = React.useState<FilterMethod>('ALL');
   const [dateFrom,     setDateFrom]     = React.useState('');
@@ -389,21 +421,15 @@ export default function Transactions() {
     setDateTo('');
   };
 
-  // ── Derived: unique methods from data ──────────────────────────────
   const availableMethods = React.useMemo(() =>
     [...new Set(transactions.map(t => t.method?.toUpperCase()).filter(Boolean))],
     [transactions]
   );
 
-  // ── Apply filter + sort ─────────────────────────────────────────────
   const processed = React.useMemo(() => {
     let result = [...transactions];
-
-    // Method filter
     if (filterMethod !== 'ALL')
       result = result.filter(t => t.method?.toUpperCase() === filterMethod);
-
-    // Date range filter
     if (dateFrom)
       result = result.filter(t => new Date(t.created_at) >= new Date(dateFrom));
     if (dateTo) {
@@ -411,8 +437,6 @@ export default function Transactions() {
       end.setHours(23, 59, 59, 999);
       result = result.filter(t => new Date(t.created_at) <= end);
     }
-
-    // Sort
     result.sort((a, b) => {
       switch (sort) {
         case 'date_asc':    return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
@@ -422,7 +446,6 @@ export default function Transactions() {
         default:            return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
       }
     });
-
     return result;
   }, [transactions, sort, filterMethod, dateFrom, dateTo]);
 
@@ -431,7 +454,6 @@ export default function Transactions() {
   const hasMore   = processed.length > 20;
   const totalPaid = processed.reduce((s, t) => s + Number(t.amount), 0);
 
-  // ── Active filter count badge ───────────────────────────────────────
   const activeFilterCount = [
     filterMethod !== 'ALL',
     dateFrom !== '',
@@ -510,13 +532,11 @@ export default function Transactions() {
         {/* ── Filter / Sort bar ── */}
         {transactions.length > 0 && (
           <div className="mb-6 flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide">
-
-            {/* Filter button */}
             <button onClick={() => setShowFilter(true)}
               className={`flex items-center gap-1.5 px-3 py-2 rounded-full border text-xs font-bold shrink-0 transition-all ${
                 activeFilterCount > 0
                   ? 'bg-primary text-on-primary border-primary'
-                  : 'bg-surface-container-low text-on-surface-variant border-outline/20 hover:border-primary/30'
+                  : 'bg-surface-container-low text-on-surface-variant border-outline/20'
               }`}>
               <SlidersHorizontal size={13} />
               Filters
@@ -527,15 +547,13 @@ export default function Transactions() {
               )}
             </button>
 
-            {/* Sort button */}
             <button onClick={() => setShowFilter(true)}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-outline/20 bg-surface-container-low text-on-surface-variant text-xs font-bold shrink-0 hover:border-primary/30 transition-all">
+              className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-outline/20 bg-surface-container-low text-on-surface-variant text-xs font-bold shrink-0 transition-all">
               <ArrowUpDown size={13} />
               {SORT_LABELS[sort]}
               <ChevronDown size={12} />
             </button>
 
-            {/* Active method chip */}
             {filterMethod !== 'ALL' && (
               <div className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-bold shrink-0">
                 {getMethodConfig(filterMethod).label}
@@ -545,7 +563,6 @@ export default function Transactions() {
               </div>
             )}
 
-            {/* Active date chip */}
             {(dateFrom || dateTo) && (
               <div className="flex items-center gap-1.5 px-3 py-2 rounded-full bg-primary/10 border border-primary/20 text-primary text-xs font-bold shrink-0">
                 <Calendar size={11} />
@@ -559,7 +576,6 @@ export default function Transactions() {
               </div>
             )}
 
-            {/* Reset all */}
             {(activeFilterCount > 0 || sort !== 'date_desc') && (
               <button onClick={handleResetFilters}
                 className="flex items-center gap-1 px-3 py-2 rounded-full border border-outline/20 text-on-surface-variant text-xs font-bold shrink-0 hover:border-red-400/40 hover:text-red-400 transition-all">
@@ -569,7 +585,7 @@ export default function Transactions() {
           </div>
         )}
 
-        {/* ── Empty state (no transactions at all) ── */}
+        {/* ── Empty: no transactions ── */}
         {transactions.length === 0 && (
           <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
             <div className="w-20 h-20 rounded-full bg-surface-container-high flex items-center justify-center mb-6">
@@ -582,7 +598,7 @@ export default function Transactions() {
           </div>
         )}
 
-        {/* ── Empty state (filters returned nothing) ── */}
+        {/* ── Empty: filters returned nothing ── */}
         {transactions.length > 0 && processed.length === 0 && (
           <div className="flex flex-col items-center justify-center min-h-[40vh] text-center gap-4">
             <div className="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center">
@@ -657,7 +673,6 @@ export default function Transactions() {
               </div>
             ))}
 
-            {/* Has more */}
             {hasMore && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="pt-2 pb-8">
                 <div className="bg-surface-container-high/30 rounded-3xl p-8 text-center border border-dashed border-outline-variant/50">
