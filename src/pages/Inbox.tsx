@@ -5,7 +5,7 @@ import { TopBar } from '../components/TopBar';
 import { BottomNav } from '../components/BottomNav';
 import {
   Inbox as InboxIcon, Bell, CheckCircle2, XCircle,
-  Clock, Loader2, AlertCircle, RefreshCw, Trash2,
+  Clock, AlertCircle, RefreshCw, Trash2,
   CheckCheck, ChevronRight,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -43,25 +43,25 @@ const NOTIF_CONFIG: Record<string, {
   iconBg: string;
 }> = {
   approved: {
-    icon:   (s) => <CheckCircle2 className="text-green-500"      size={s} />,
+    icon:   (s) => <CheckCircle2 className="text-green-500"  size={s} />,
     bg:     'bg-green-500/8',
     border: 'border-green-500/15',
     iconBg: 'bg-green-500/12',
   },
   denied: {
-    icon:   (s) => <XCircle className="text-red-500"             size={s} />,
+    icon:   (s) => <XCircle className="text-red-500"         size={s} />,
     bg:     'bg-red-500/8',
     border: 'border-red-500/15',
     iconBg: 'bg-red-500/12',
   },
   payment: {
-    icon:   (s) => <CheckCircle2 className="text-primary"        size={s} />,
+    icon:   (s) => <CheckCircle2 className="text-primary"    size={s} />,
     bg:     'bg-primary/8',
     border: 'border-primary/15',
     iconBg: 'bg-primary/12',
   },
   general: {
-    icon:   (s) => <Bell className="text-on-surface-variant"     size={s} />,
+    icon:   (s) => <Bell className="text-on-surface-variant" size={s} />,
     bg:     'bg-surface-container-high',
     border: 'border-outline-variant/10',
     iconBg: 'bg-surface-container-highest',
@@ -108,6 +108,57 @@ const formatTime = (dateStr: string): string => {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 };
 
+// ─── Skeleton ─────────────────────────────────────────────────────────────────
+
+function InboxSkeleton() {
+  return (
+    <div className="min-h-screen bg-background pb-32">
+      <TopBar title="Inbox" showBack={false} />
+      <main className="pt-24 px-4 max-w-md mx-auto">
+
+        {/* Header row */}
+        <div className="flex items-center justify-between mb-4 px-1 animate-pulse">
+          <div className="h-3 w-32 bg-surface-container-highest rounded-full" />
+          <div className="h-3 w-24 bg-surface-container-highest rounded-full" />
+        </div>
+
+        {/* Filter tabs */}
+        <div className="flex gap-2 mb-5 animate-pulse">
+          {[72, 60, 80, 48].map((w, i) => (
+            <div key={i} className="h-8 rounded-full bg-surface-container-highest shrink-0" style={{ width: w }} />
+          ))}
+        </div>
+
+        {/* Notification cards */}
+        <div className="space-y-3">
+          {[1, 2, 3, 4].map(i => (
+            <div key={i}
+              className="rounded-2xl border border-outline-variant/10 bg-surface-container-high p-4 flex items-start gap-4 animate-pulse">
+              {/* Icon placeholder */}
+              <div className="w-10 h-10 rounded-xl bg-surface-container-highest shrink-0" />
+              {/* Text lines */}
+              <div className="flex-1 space-y-2.5 pr-8">
+                <div className="flex justify-between items-start gap-2">
+                  <div className="h-3.5 bg-surface-container-highest rounded-full"
+                    style={{ width: `${55 + (i % 3) * 15}%` }} />
+                  <div className="h-2.5 w-10 bg-surface-container-highest rounded-full shrink-0" />
+                </div>
+                <div className="h-2.5 bg-surface-container-highest rounded-full w-full" />
+                <div className="h-2.5 bg-surface-container-highest rounded-full"
+                  style={{ width: `${60 + (i % 2) * 20}%` }} />
+                {/* Tap hint */}
+                <div className="h-2.5 w-28 bg-surface-container-highest rounded-full mt-1" />
+              </div>
+            </div>
+          ))}
+        </div>
+
+      </main>
+      <BottomNav />
+    </div>
+  );
+}
+
 // ─── Notification Card ────────────────────────────────────────────────────────
 
 function NotifCard({
@@ -126,11 +177,11 @@ function NotifCard({
   const dest     = getDestination(notif);
   const { main, reason } = parseMessage(notif);
 
-  const startX             = useRef(0);
-  const didSwipe           = useRef(false);
-  const [swipeDx, setSwipeDx]     = useState(0);
-  const [swiping, setSwiping]     = useState(false);
-  const [dismissed, setDismissed] = useState(false);
+  const startX                        = useRef(0);
+  const didSwipe                      = useRef(false);
+  const [swipeDx, setSwipeDx]         = useState(0);
+  const [swiping, setSwiping]         = useState(false);
+  const [dismissed, setDismissed]     = useState(false);
 
   const DISMISS_THRESHOLD = -80;
 
@@ -139,7 +190,6 @@ function NotifCard({
     setTimeout(() => onDismiss(notif.notification_id), 300);
   };
 
-  // ── Touch (mobile) ────────────────────────────────────────────────────────
   const handleTouchStart = (e: React.TouchEvent) => {
     startX.current   = e.touches[0].clientX;
     didSwipe.current = false;
@@ -154,14 +204,10 @@ function NotifCard({
   };
   const handleTouchEnd = () => {
     setSwiping(false);
-    if (swipeDx < DISMISS_THRESHOLD) {
-      triggerDismiss();
-    } else {
-      setSwipeDx(0);
-    }
+    if (swipeDx < DISMISS_THRESHOLD) triggerDismiss();
+    else setSwipeDx(0);
   };
 
-  // ── Mouse (web fallback) ──────────────────────────────────────────────────
   const handleMouseDown = (e: React.MouseEvent) => {
     startX.current   = e.clientX;
     didSwipe.current = false;
@@ -177,11 +223,8 @@ function NotifCard({
   };
   const handleMouseUp = () => {
     setSwiping(false);
-    if (swipeDx < DISMISS_THRESHOLD) {
-      triggerDismiss();
-    } else {
-      setSwipeDx(0);
-    }
+    if (swipeDx < DISMISS_THRESHOLD) triggerDismiss();
+    else setSwipeDx(0);
   };
 
   return (
@@ -198,14 +241,12 @@ function NotifCard({
       }}
       className="relative overflow-hidden rounded-2xl select-none"
     >
-      {/* Swipe-reveal red bg */}
       {swipeDx < -10 && (
         <div className="absolute inset-y-0 right-0 flex items-center justify-end px-5 bg-red-500/15 rounded-2xl pointer-events-none">
           <Trash2 size={20} className="text-red-500" />
         </div>
       )}
 
-      {/* Card */}
       <div
         style={{
           transform:  `translateX(${swipeDx}px)`,
@@ -221,12 +262,10 @@ function NotifCard({
         className={`relative p-4 rounded-2xl border flex items-start gap-4
           ${config.bg} ${config.border}`}
       >
-        {/* Unread dot */}
         {isUnread && (
           <span className="absolute top-3.5 right-10 w-2 h-2 rounded-full bg-primary" />
         )}
 
-        {/* Delete button */}
         <button
           onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => { e.stopPropagation(); triggerDismiss(); }}
@@ -237,12 +276,10 @@ function NotifCard({
           <Trash2 size={13} className="text-red-400" />
         </button>
 
-        {/* Icon */}
         <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${config.iconBg}`}>
           {config.icon(20)}
         </div>
 
-        {/* Content */}
         <div
           className="flex-1 min-w-0 pr-8 cursor-pointer"
           onClick={() => {
@@ -250,7 +287,6 @@ function NotifCard({
             onClick(notif);
           }}
         >
-          {/* Title + time */}
           <div className="flex items-start justify-between gap-2 mb-1">
             <p className={`text-sm leading-tight
               ${isUnread
@@ -265,21 +301,14 @@ function NotifCard({
             </div>
           </div>
 
-          {/* Main message */}
-          <p className="text-xs text-on-surface-variant leading-relaxed">
-            {main}
-          </p>
+          <p className="text-xs text-on-surface-variant leading-relaxed">{main}</p>
 
-          {/* Denial reason highlight box — no emoji */}
           {reason && (
             <div className="mt-2 px-3 py-2 bg-red-500/8 border border-red-500/15 rounded-xl">
-              <p className="text-[11px] font-semibold text-red-500 leading-relaxed">
-                {reason}
-              </p>
+              <p className="text-[11px] font-semibold text-red-500 leading-relaxed">{reason}</p>
             </div>
           )}
 
-          {/* Tap hint */}
           {dest && (
             <div className="flex items-center gap-1 mt-2">
               <span className="text-[10px] font-semibold text-primary uppercase tracking-wider">
@@ -312,7 +341,6 @@ export default function Inbox() {
     loadNotifications(user.customer_id);
   }, []);
 
-  // ── Mark all read only when user leaves the inbox page ───────────────────
   useEffect(() => {
     return () => {
       try {
@@ -328,7 +356,6 @@ export default function Inbox() {
     };
   }, []);
 
-  // ── Load — preserve is_read state, sort newest first ────────────────────
   const loadNotifications = async (cid: number) => {
     setLoading(true);
     setError('');
@@ -337,12 +364,10 @@ export default function Inbox() {
       const data = await res.json();
       if (!res.ok) { setError(data?.message || 'Failed to load notifications.'); return; }
       const notifs: Notification[] = Array.isArray(data) ? data : [];
-      // Sort newest first so latest unread appears at top
       notifs.sort((a, b) =>
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
       setNotifications(notifs);
-      // Do NOT mark as read here — user must see unread items first
     } catch {
       setError('Unable to load notifications. Check your connection and try again.');
     } finally {
@@ -368,7 +393,6 @@ export default function Inbox() {
     if (dest) navigate(dest);
   };
 
-  // ── Filtered list ─────────────────────────────────────────────────────────
   const filtered = notifications.filter(n => {
     const type = n.type?.toLowerCase() ?? 'general';
     if (activeTab === 'unread')   return n.is_read === 0 || n.is_read === false;
@@ -388,6 +412,9 @@ export default function Inbox() {
     return notifications.length;
   };
 
+  // ── Skeleton ────────────────────────────────────────────────────────────────
+  if (loading) return <InboxSkeleton />;
+
   return (
     <div className="min-h-screen bg-background pb-32">
       <TopBar title="Inbox" showBack={false} />
@@ -395,7 +422,7 @@ export default function Inbox() {
       <main className="pt-24 px-4 max-w-md mx-auto">
 
         {/* ── Header Row ── */}
-        {!loading && !error && notifications.length > 0 && (
+        {!error && notifications.length > 0 && (
           <div className="flex items-center justify-between mb-4 px-1">
             <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
               {notifications.length} Notification{notifications.length !== 1 ? 's' : ''}
@@ -418,7 +445,7 @@ export default function Inbox() {
         )}
 
         {/* ── Filter Tabs ── */}
-        {!loading && !error && notifications.length > 0 && (
+        {!error && notifications.length > 0 && (
           <div className="flex gap-2 mb-5 overflow-x-auto pb-1 scrollbar-hide">
             {FILTER_TABS.map(tab => {
               const isActive = activeTab === tab.key;
@@ -449,23 +476,14 @@ export default function Inbox() {
           </div>
         )}
 
-        {/* ── Loading ── */}
-        {loading && (
-          <div className="flex justify-center items-center py-24">
-            <Loader2 className="text-primary animate-spin" size={36} />
-          </div>
-        )}
-
         {/* ── Error ── */}
-        {!loading && error && (
+        {error && (
           <div className="flex flex-col items-center justify-center min-h-[60vh] text-center gap-4">
             <div className="w-20 h-20 rounded-full bg-red-500/10 flex items-center justify-center">
               <AlertCircle className="text-red-500" size={36} />
             </div>
             <div>
-              <h2 className="text-lg font-headline font-bold text-on-surface">
-                Something went wrong
-              </h2>
+              <h2 className="text-lg font-headline font-bold text-on-surface">Something went wrong</h2>
               <p className="text-on-surface-variant text-sm mt-1 max-w-xs">{error}</p>
             </div>
             <button
@@ -479,14 +497,12 @@ export default function Inbox() {
         )}
 
         {/* ── Empty (no notifications at all) ── */}
-        {!loading && !error && notifications.length === 0 && (
+        {!error && notifications.length === 0 && (
           <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
             <div className="w-20 h-20 rounded-full bg-surface-container-high flex items-center justify-center mb-6">
               <InboxIcon className="text-outline/40" size={40} />
             </div>
-            <h2 className="text-xl font-headline font-bold text-on-surface">
-              No messages yet
-            </h2>
+            <h2 className="text-xl font-headline font-bold text-on-surface">No messages yet</h2>
             <p className="text-on-surface-variant text-sm mt-2">
               Loan updates and notifications will appear here.
             </p>
@@ -494,7 +510,7 @@ export default function Inbox() {
         )}
 
         {/* ── Empty (filtered tab has nothing) ── */}
-        {!loading && !error && notifications.length > 0 && filtered.length === 0 && (
+        {!error && notifications.length > 0 && filtered.length === 0 && (
           <div className="flex flex-col items-center justify-center py-24 text-center">
             <div className="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center mb-4">
               <InboxIcon className="text-outline/40" size={28} />
@@ -512,7 +528,7 @@ export default function Inbox() {
         )}
 
         {/* ── Notifications List ── */}
-        {!loading && !error && filtered.length > 0 && (
+        {!error && filtered.length > 0 && (
           <div className="space-y-3">
             <p className="text-[9px] text-on-surface-variant/50 text-center mb-2">
               Swipe left or tap the trash icon to dismiss
