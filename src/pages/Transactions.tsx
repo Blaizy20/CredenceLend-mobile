@@ -33,17 +33,17 @@ type FilterMethod = 'ALL' | string;
 interface MethodConfig { label: string; icon: React.ReactNode; bg: string; text: string; badge: string; }
 
 const METHOD_CONFIG: Record<string, MethodConfig> = {
-  GCASH:     { label: 'GCash',         icon: <Smartphone size={18} />, bg: 'bg-blue-500/10',           text: 'text-blue-500',          badge: 'bg-blue-500/10 text-blue-600'                          },
-  MAYA:      { label: 'Maya',          icon: <Smartphone size={18} />, bg: 'bg-emerald-500/10',        text: 'text-emerald-500',       badge: 'bg-emerald-500/10 text-emerald-700'                    },
-  CASH:      { label: 'Cash',          icon: <Banknote   size={18} />, bg: 'bg-surface-container-high',text: 'text-on-surface-variant',badge: 'bg-surface-container-high text-on-surface-variant'     },
-  CARD:      { label: 'Card',          icon: <CreditCard size={18} />, bg: 'bg-violet-500/10',         text: 'text-violet-500',        badge: 'bg-violet-500/10 text-violet-700'                      },
-  BANK:      { label: 'Bank Transfer', icon: <Building2  size={18} />, bg: 'bg-indigo-500/10',         text: 'text-indigo-500',        badge: 'bg-indigo-500/10 text-indigo-700'                      },
-  BPI:       { label: 'BPI',           icon: <Building2  size={18} />, bg: 'bg-red-500/10',            text: 'text-red-500',           badge: 'bg-red-500/10 text-red-700'                            },
-  UNIONBANK: { label: 'UnionBank',     icon: <Building2  size={18} />, bg: 'bg-orange-500/10',         text: 'text-orange-500',        badge: 'bg-orange-500/10 text-orange-700'                      },
-  QRPH:      { label: 'QR Ph',         icon: <QrCode     size={18} />, bg: 'bg-teal-500/10',           text: 'text-teal-500',          badge: 'bg-teal-500/10 text-teal-700'                          },
-  GRAB_PAY:  { label: 'GrabPay',       icon: <Smartphone size={18} />, bg: 'bg-lime-500/10',           text: 'text-lime-600',          badge: 'bg-lime-500/10 text-lime-700'                          },
-  CHEQUE:    { label: 'Cheque',        icon: <FileText   size={18} />, bg: 'bg-amber-500/10',          text: 'text-amber-600',         badge: 'bg-amber-500/10 text-amber-700'                        },
-  OTHER:     { label: 'Other',         icon: <ReceiptText size={18}/>, bg: 'bg-surface-container-high',text: 'text-on-surface-variant',badge: 'bg-surface-container-high text-on-surface-variant'     },
+  GCASH:     { label: 'GCash',         icon: <Smartphone size={18} />, bg: 'bg-blue-500/10',            text: 'text-blue-500',          badge: 'bg-blue-500/10 text-blue-600'                         },
+  MAYA:      { label: 'Maya',          icon: <Smartphone size={18} />, bg: 'bg-emerald-500/10',         text: 'text-emerald-500',       badge: 'bg-emerald-500/10 text-emerald-700'                   },
+  CASH:      { label: 'Cash',          icon: <Banknote   size={18} />, bg: 'bg-surface-container-high', text: 'text-on-surface-variant',badge: 'bg-surface-container-high text-on-surface-variant'    },
+  CARD:      { label: 'Card',          icon: <CreditCard size={18} />, bg: 'bg-violet-500/10',          text: 'text-violet-500',        badge: 'bg-violet-500/10 text-violet-700'                     },
+  BANK:      { label: 'Bank Transfer', icon: <Building2  size={18} />, bg: 'bg-indigo-500/10',          text: 'text-indigo-500',        badge: 'bg-indigo-500/10 text-indigo-700'                     },
+  BPI:       { label: 'BPI',           icon: <Building2  size={18} />, bg: 'bg-red-500/10',             text: 'text-red-500',           badge: 'bg-red-500/10 text-red-700'                           },
+  UNIONBANK: { label: 'UnionBank',     icon: <Building2  size={18} />, bg: 'bg-orange-500/10',          text: 'text-orange-500',        badge: 'bg-orange-500/10 text-orange-700'                     },
+  QRPH:      { label: 'QR Ph',         icon: <QrCode     size={18} />, bg: 'bg-teal-500/10',            text: 'text-teal-500',          badge: 'bg-teal-500/10 text-teal-700'                         },
+  GRAB_PAY:  { label: 'GrabPay',       icon: <Smartphone size={18} />, bg: 'bg-lime-500/10',            text: 'text-lime-600',          badge: 'bg-lime-500/10 text-lime-700'                         },
+  CHEQUE:    { label: 'Cheque',        icon: <FileText   size={18} />, bg: 'bg-amber-500/10',           text: 'text-amber-600',         badge: 'bg-amber-500/10 text-amber-700'                       },
+  OTHER:     { label: 'Other',         icon: <ReceiptText size={18}/>, bg: 'bg-surface-container-high', text: 'text-on-surface-variant',badge: 'bg-surface-container-high text-on-surface-variant'    },
 };
 const getMethodConfig = (method: string): MethodConfig =>
   METHOD_CONFIG[method?.toUpperCase()] ?? METHOD_CONFIG.OTHER;
@@ -122,37 +122,33 @@ function DetailRow({ icon, label, value, mono = false }: {
 }
 
 /* ─── Bottom Sheet Base ──────────────────────────────────────────────── */
-// Shared wrapper that correctly anchors sheets to the true bottom on mobile.
-// The key fix: the outer div is the full-screen overlay with flex-col + justify-end,
-// and the inner sheet has NO max-w / mx-auto on fixed — those break on mobile WebView.
+// Same pattern as Profile.tsx logout/settings modals:
+// fixed bottom-0 left-0 right-0 max-w-md mx-auto — works reliably on mobile WebView.
 function BottomSheet({
-  show, onBackdropClick, children,
+  show, onBackdropClick, children, maxHeight = '85vh',
 }: {
-  show: boolean; onBackdropClick: () => void; children: React.ReactNode;
+  show: boolean; onBackdropClick: () => void; children: React.ReactNode; maxHeight?: string;
 }) {
   return (
     <AnimatePresence>
       {show && (
-        // Full-screen flex overlay — this is what actually centers the sheet
-        <div className="fixed inset-0 z-50 flex flex-col justify-end">
-          {/* Backdrop */}
+        <>
           <motion.div
-            key="backdrop"
-            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            key="bs-backdrop"
+            className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             onClick={onBackdropClick}
           />
-          {/* Sheet — full width, no centering hacks */}
           <motion.div
-            key="sheet"
-            className="relative w-full bg-surface rounded-t-3xl shadow-2xl flex flex-col"
-            style={{ maxHeight: 'calc(100vh - env(safe-area-inset-top, 0px) - 64px)' }}
+            key="bs-sheet"
+            className="fixed bottom-0 left-0 right-0 z-50 bg-surface rounded-t-3xl shadow-2xl max-w-md mx-auto flex flex-col"
+            style={{ maxHeight }}
             initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
             transition={{ type: 'spring', damping: 30, stiffness: 320 }}
           >
             {children}
           </motion.div>
-        </div>
+        </>
       )}
     </AnimatePresence>
   );
@@ -177,6 +173,7 @@ function DetailSheet({ tx, onClose }: { tx: Transaction | null; onClose: () => v
           <div className="flex justify-center pt-3 pb-1 shrink-0">
             <div className="w-10 h-1 rounded-full bg-outline/20" />
           </div>
+
           {/* Header */}
           <div className="flex items-center justify-between px-6 pt-2 pb-4 shrink-0">
             <h2 className="text-base font-headline font-bold text-on-surface">Payment Details</h2>
@@ -185,6 +182,7 @@ function DetailSheet({ tx, onClose }: { tx: Transaction | null; onClose: () => v
               <X size={16} className="text-on-surface-variant" />
             </button>
           </div>
+
           {/* Amount hero */}
           <div className="px-6 pb-5 shrink-0">
             <div className="bg-surface-container-low rounded-2xl p-4 flex items-center gap-4 border border-outline-variant/20">
@@ -205,7 +203,8 @@ function DetailSheet({ tx, onClose }: { tx: Transaction | null; onClose: () => v
               </div>
             </div>
           </div>
-          {/* Details */}
+
+          {/* Scrollable details */}
           <div className="px-6 pb-10 overflow-y-auto divide-y divide-outline-variant/10">
             <DetailRow icon={<Calendar size={13} />} label="Date"         value={formatFullDate(tx.created_at)} />
             <DetailRow icon={<BookOpen size={13} />} label="Time"         value={formatFullTime(tx.created_at)} />
@@ -247,6 +246,7 @@ function FilterPanel({
 
   return (
     <BottomSheet show={show} onBackdropClick={onClose}>
+
       {/* Drag handle */}
       <div className="flex justify-center pt-3 pb-1 shrink-0">
         <div className="w-10 h-1 rounded-full bg-outline/20" />
@@ -272,9 +272,7 @@ function FilterPanel({
 
         {/* ── Sort ── */}
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-3">
-            Sort By
-          </p>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-3">Sort By</p>
           <div className="grid grid-cols-2 gap-2.5">
             {SORT_OPTIONS.map(opt => (
               <button
@@ -294,9 +292,7 @@ function FilterPanel({
 
         {/* ── Payment Method ── */}
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-3">
-            Payment Method
-          </p>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-3">Payment Method</p>
           <div className="flex flex-wrap gap-2">
             {(['ALL', ...availableMethods] as string[]).map(m => {
               const cfg = m === 'ALL' ? null : getMethodConfig(m);
@@ -319,9 +315,7 @@ function FilterPanel({
 
         {/* ── Date Range ── */}
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-3">
-            Date Range
-          </p>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-3">Date Range</p>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-[10px] text-on-surface-variant font-medium mb-1.5 block">From</label>
@@ -346,9 +340,8 @@ function FilterPanel({
 
       </div>
 
-      {/* Apply button — clears the BottomNav (≈64px) + safe area */}
-      <div className="px-6 pt-4 shrink-0 border-t border-outline-variant/10"
-        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 80px)' }}>
+      {/* Apply button — pb-10 matches Profile modal pattern, clears BottomNav */}
+      <div className="px-6 pt-4 pb-10 shrink-0 border-t border-outline-variant/10">
         <button
           onClick={onClose}
           className="w-full py-4 bg-primary text-on-primary font-bold rounded-full text-sm active:scale-95 transition-transform shadow-sm"
@@ -356,6 +349,7 @@ function FilterPanel({
           Apply Filters
         </button>
       </div>
+
     </BottomSheet>
   );
 }
