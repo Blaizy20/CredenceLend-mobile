@@ -145,7 +145,8 @@ function BottomSheet({
           {/* Sheet — full width, no centering hacks */}
           <motion.div
             key="sheet"
-            className="relative w-full bg-surface rounded-t-3xl shadow-2xl max-h-[85vh] flex flex-col"
+            className="relative w-full bg-surface rounded-t-3xl shadow-2xl flex flex-col"
+            style={{ maxHeight: 'calc(100vh - env(safe-area-inset-top, 0px) - 64px)' }}
             initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
             transition={{ type: 'spring', damping: 30, stiffness: 320 }}
           >
@@ -345,8 +346,9 @@ function FilterPanel({
 
       </div>
 
-      {/* Apply button — always pinned at bottom of sheet */}
-      <div className="px-6 pt-4 pb-8 shrink-0 border-t border-outline-variant/10">
+      {/* Apply button — clears the BottomNav (≈64px) + safe area */}
+      <div className="px-6 pt-4 shrink-0 border-t border-outline-variant/10"
+        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 80px)' }}>
         <button
           onClick={onClose}
           className="w-full py-4 bg-primary text-on-primary font-bold rounded-full text-sm active:scale-95 transition-transform shadow-sm"
