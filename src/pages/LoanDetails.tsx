@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Percent, Clock, ChevronRight, CheckCircle, AlertCircle, X, ArrowRight } from 'lucide-react';
+import { Percent, Clock, ChevronRight, CheckCircle, AlertCircle, X, ArrowRight, CalendarClock } from 'lucide-react';
 import { TopBar } from '../components/TopBar';
 import { BottomNav } from '../components/BottomNav';
 import { cn } from '@/src/lib/utils';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { loansAPI } from '../lib/api';
 import LoanDocuments from './LoanDocuments';
 
@@ -36,10 +36,7 @@ function LoanDetailsSkeleton() {
     <div className="min-h-screen bg-background pb-32">
       <TopBar title="Loan Details" />
       <main className="pt-20 px-4 space-y-6 max-w-lg mx-auto">
-
-        {/* Hero card */}
-        <div className="rounded-3xl bg-surface-container-high p-6 aspect-[16/10] flex flex-col justify-between
-          shadow-xl animate-pulse">
+        <div className="rounded-3xl bg-surface-container-high p-6 aspect-[16/10] flex flex-col justify-between shadow-xl animate-pulse">
           <div className="flex justify-between items-start">
             <div className="h-3 w-32 bg-surface-container-highest rounded-full" />
             <div className="h-6 w-20 bg-surface-container-highest rounded-full" />
@@ -58,29 +55,23 @@ function LoanDetailsSkeleton() {
             </div>
           </div>
         </div>
-
-        {/* Loan info */}
         <div className="bg-surface-container-low p-5 rounded-2xl space-y-4 animate-pulse">
           <div className="h-2.5 w-28 bg-surface-container-highest rounded-full" />
-          {[1, 2, 3, 4].map(i => (
+          {[1,2,3,4].map(i => (
             <div key={i} className="flex justify-between">
               <div className="h-3 w-24 bg-surface-container-highest rounded-full" />
               <div className="h-3 w-28 bg-surface-container-highest rounded-full" />
             </div>
           ))}
         </div>
-
-        {/* Stats grid */}
         <div className="grid grid-cols-2 gap-4">
-          {[1, 2].map(i => (
+          {[1,2].map(i => (
             <div key={i} className="bg-surface-container p-5 rounded-2xl space-y-4 min-h-[110px] animate-pulse">
               <div className="h-2.5 w-16 bg-surface-container-highest rounded-full" />
               <div className="h-6 w-20 bg-surface-container-highest rounded-full" />
             </div>
           ))}
         </div>
-
-        {/* Progress */}
         <div className="bg-surface-container-low p-6 rounded-3xl space-y-4 animate-pulse">
           <div className="flex justify-between">
             <div className="h-3 w-28 bg-surface-container-highest rounded-full" />
@@ -92,17 +83,15 @@ function LoanDetailsSkeleton() {
             <div className="h-2.5 w-24 bg-surface-container-highest rounded-full" />
           </div>
         </div>
-
-        {/* Schedule */}
         <div className="space-y-3 animate-pulse">
           <div className="h-5 w-32 bg-surface-container-highest rounded-full" />
           <div className="bg-surface-container-low rounded-3xl overflow-hidden">
             <div className="grid grid-cols-3 px-5 py-4 gap-4 border-b border-surface-bright/10">
-              {[1, 2, 3].map(i => (
+              {[1,2,3].map(i => (
                 <div key={i} className="h-2.5 bg-surface-container-highest rounded-full" />
               ))}
             </div>
-            {[1, 2, 3, 4, 5].map(i => (
+            {[1,2,3,4,5].map(i => (
               <div key={i} className="grid grid-cols-3 px-5 py-4 gap-4 border-b border-surface-bright/10 last:border-b-0">
                 <div className="h-3 w-20 bg-surface-container-highest rounded-full" />
                 <div className="h-3 w-16 bg-surface-container-highest rounded-full" />
@@ -111,7 +100,6 @@ function LoanDetailsSkeleton() {
             ))}
           </div>
         </div>
-
       </main>
       <BottomNav />
     </div>
@@ -130,7 +118,6 @@ export default function LoanDetails() {
   const [showAllSchedule, setShowAllSchedule] = useState(false);
   const [showAllPayments, setShowAllPayments] = useState(false);
 
-  // Schedule pagination — show 5 upcoming + already-paid context
   const SCHEDULE_PAGE_SIZE = 5;
 
   useEffect(() => {
@@ -184,9 +171,10 @@ export default function LoanDetails() {
   const totalPayable = Number(loan.total_payable     ?? principal);
   const remainingBal = Number(loan.remaining_balance ?? totalPayable);
   const paidAmount   = totalPayable - remainingBal;
-  const progress     = totalPayable > 0 ? (paidAmount / totalPayable) * 100 : 0;
+  const progress     = totalPayable > 0 ? Math.min((paidAmount / totalPayable) * 100, 100) : 0;
   const isFullyPaid  = loan.status?.toLowerCase() === 'closed' || remainingBal <= 0;
   const isOverdue    = loan.status?.toLowerCase() === 'overdue';
+  const isClosed     = loan.status?.toLowerCase() === 'closed';
   const paymentTerm  = loan.payment_term ?? '';
 
   const totalTermCount = getTermCount(paymentTerm, termMonths);
@@ -223,16 +211,19 @@ export default function LoanDetails() {
       ? new Date(loan.activated_at)
       : loan.created_at ? new Date(loan.created_at) : new Date();
 
-    const totalPaid         = Math.max(0, totalPayable - remainingBal);
-    const paidTerms         = amountPerTerm > 0
-      ? Math.min(Math.floor(totalPaid / amountPerTerm), totalTermCount) : 0;
-    const creditTowardCurrent = parseFloat((totalPaid - paidTerms * amountPerTerm).toFixed(2));
+    // Use base totalPayable (without late fee) for schedule math
+    const basePaid        = Math.max(0, Math.min(paidAmount, totalPayable));
+    const paidTerms       = amountPerTerm > 0
+      ? Math.min(Math.floor(basePaid / amountPerTerm), totalTermCount) : 0;
+    const creditTowardCurrent = parseFloat((basePaid - paidTerms * amountPerTerm).toFixed(2));
     const upcomingTermDue     = parseFloat(Math.max(0, amountPerTerm - creditTowardCurrent).toFixed(2));
-    const allPaid             = remainingBal <= 0 || paidTerms >= totalTermCount;
+    const allPaid             = isClosed || remainingBal <= 0;
 
-    // Detect overpay
+    // Overpay only valid when loan is fully closed
     const expectedTotal = amountPerTerm * totalTermCount;
-    const overpay       = parseFloat(Math.max(0, totalPaid - expectedTotal).toFixed(2));
+    const overpay       = isClosed
+      ? parseFloat(Math.max(0, basePaid - expectedTotal).toFixed(2))
+      : 0;
 
     const schedule = [];
 
@@ -265,10 +256,11 @@ export default function LoanDetails() {
         status:    isPaid ? 'PAID' : 'PENDING',
         isUpcoming,
         isOverpay: false,
+        termIndex: i + 1,
       });
     }
 
-    // ── Overpay row — appended at bottom, separated ────────────────────────
+    // Overpay row — only appended when loan is closed and overpay > 0
     if (overpay > 0) {
       schedule.push({
         date:      '—',
@@ -277,6 +269,7 @@ export default function LoanDetails() {
         status:    'OVERPAY',
         isUpcoming: false,
         isOverpay:  true,
+        termIndex:  totalTermCount + 1,
       });
     }
 
@@ -285,28 +278,32 @@ export default function LoanDetails() {
 
   const fullSchedule = generateFullSchedule();
 
-  // ── Paginated view: show last 2 paid + all upcoming, or all if expanded ───
+  // ── Schedule display logic ─────────────────────────────────────────────────
   const getDisplayedSchedule = () => {
-    if (showAllSchedule) return fullSchedule.filter(s => !s.isOverpay);
-
     const regularRows = fullSchedule.filter(s => !s.isOverpay);
     const upcomingIdx = regularRows.findIndex(s => s.isUpcoming);
 
-    if (upcomingIdx === -1) {
-      // All paid — just show last SCHEDULE_PAGE_SIZE
-      return regularRows.slice(-SCHEDULE_PAGE_SIZE);
+    if (showAllSchedule) {
+      // Expanded: show 1 paid row for context + upcoming + all future pending
+      if (upcomingIdx === -1) return regularRows.slice(-SCHEDULE_PAGE_SIZE);
+      const start = Math.max(0, upcomingIdx - 1);
+      return regularRows.slice(start);
     }
 
-    // Show 2 paid rows before upcoming + upcoming + next (SCHEDULE_PAGE_SIZE - 1) pending
+    // Collapsed: show 2 paid + upcoming + next few pending
+    if (upcomingIdx === -1) return regularRows.slice(-SCHEDULE_PAGE_SIZE);
     const start = Math.max(0, upcomingIdx - 2);
     const end   = Math.min(regularRows.length, upcomingIdx + SCHEDULE_PAGE_SIZE - 1);
     return regularRows.slice(start, end);
   };
 
   const displayedSchedule = getDisplayedSchedule();
-  const overpayRow        = fullSchedule.find(s => s.isOverpay);
-  const nextPayment       = fullSchedule.find(s => s.isUpcoming);
-  const hiddenCount       = fullSchedule.filter(s => !s.isOverpay).length - displayedSchedule.length;
+  const overpayRow         = fullSchedule.find(s => s.isOverpay);
+  const nextPayment        = fullSchedule.find(s => s.isUpcoming);
+  const regularRows        = fullSchedule.filter(s => !s.isOverpay);
+  const paidCount          = regularRows.filter(s => s.status === 'PAID').length;
+  const pendingCount       = regularRows.filter(s => s.status === 'PENDING').length;
+  const hiddenCount        = regularRows.length - displayedSchedule.length;
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   const fmt = (n: number) =>
@@ -497,6 +494,15 @@ export default function LoanDetails() {
             <span>₱ {fmt(paidAmount)} Paid</span>
             <span>₱ {fmt(totalPayable)} Total</span>
           </div>
+          {/* ── Additional: paid/pending installment counter ── */}
+          <div className="mt-3 flex gap-3">
+            <span className="text-[10px] text-green-500 font-bold bg-green-500/10 px-2.5 py-1 rounded-full">
+              {paidCount} paid
+            </span>
+            <span className="text-[10px] text-on-surface-variant font-bold bg-surface-bright/20 px-2.5 py-1 rounded-full">
+              {pendingCount} remaining
+            </span>
+          </div>
         </section>
 
         {/* ── Payment History ── */}
@@ -539,7 +545,8 @@ export default function LoanDetails() {
               {payments.length > 3 && (
                 <button
                   onClick={() => setShowAllPayments(true)}
-                  className="w-full py-3 text-[11px] font-bold text-on-surface-variant uppercase tracking-widest text-center hover:bg-white/5 transition-colors border-t border-surface-bright/10"
+                  className="w-full py-3 text-[11px] font-bold text-on-surface-variant uppercase tracking-widest text-center
+                    hover:bg-white/5 transition-colors border-t border-surface-bright/10"
                 >
                   +{payments.length - 3} more payment{payments.length - 3 !== 1 ? 's' : ''} — View All
                 </button>
@@ -549,23 +556,27 @@ export default function LoanDetails() {
         )}
 
         {/* ── Loan Schedule ── */}
-        {(loan.status?.toLowerCase() === 'active' || isOverdue) && fullSchedule.length > 0 && (
+        {(loan.status?.toLowerCase() === 'active' || isOverdue || isClosed) && fullSchedule.length > 0 && (
           <section className="space-y-4">
             <div className="flex items-center justify-between px-2">
               <div>
                 <h3 className="font-headline font-bold text-lg tracking-tight">Loan Schedule</h3>
-                {!showAllSchedule && hiddenCount > 0 && (
-                  <p className="text-[10px] text-on-surface-variant mt-0.5">
-                    Showing {displayedSchedule.length} of {fullSchedule.filter(s => !s.isOverpay).length} installments
-                  </p>
-                )}
+                <p className="text-[10px] text-on-surface-variant mt-0.5">
+                  {showAllSchedule
+                    ? `Showing ${displayedSchedule.length} upcoming of ${pendingCount} remaining`
+                    : `Showing ${displayedSchedule.length} of ${totalTermCount} installments`
+                  }
+                </p>
               </div>
-              {totalTermCount > SCHEDULE_PAGE_SIZE && (
+              {pendingCount > 0 && (
                 <button
                   onClick={() => setShowAllSchedule(!showAllSchedule)}
                   className="text-primary text-xs font-bold uppercase tracking-widest flex items-center gap-1"
                 >
-                  {showAllSchedule ? 'Show Less' : `View All (${totalTermCount})`}
+                  {showAllSchedule
+                    ? 'Show Less'
+                    : `View Pending (${pendingCount})`
+                  }
                   <ChevronRight
                     size={14}
                     className={cn('transition-transform', showAllSchedule && 'rotate-90')}
@@ -583,74 +594,86 @@ export default function LoanDetails() {
                     <th className="px-5 py-4 text-[10px] font-bold uppercase tracking-widest text-on-surface-variant text-right">Status</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-surface-bright/10">
-                  {displayedSchedule.map((item, i) => (
-                    <tr
-                      key={i}
-                      className={cn(
-                        'transition-colors',
-                        item.status === 'PAID'
-                          ? 'bg-green-500/5 opacity-60'
-                          : item.isUpcoming && isOverdue
-                            ? 'bg-orange-500/5'
-                            : item.isUpcoming
-                              ? 'bg-primary/5'
-                              : 'hover:bg-white/5'
-                      )}
-                    >
-                      <td className="px-5 py-4">
-                        <p className={cn(
-                          'text-sm font-semibold',
-                          item.status === 'PAID' ? 'line-through text-on-surface-variant' : 'text-on-surface'
-                        )}>
-                          {item.date}
-                        </p>
-                        {item.isUpcoming && (
-                          <p className={cn(
-                            'text-[9px] font-bold uppercase tracking-widest mt-1',
-                            isOverdue ? 'text-orange-500' : 'text-primary'
-                          )}>
-                            {isOverdue ? 'Overdue' : 'Upcoming'}
-                          </p>
+                <AnimatePresence initial={false}>
+                  <tbody className="divide-y divide-surface-bright/10">
+                    {displayedSchedule.map((item, i) => (
+                      <motion.tr
+                        key={`${item.termIndex}-${item.status}`}
+                        initial={{ opacity: 0, y: -6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -6 }}
+                        transition={{ duration: 0.18, delay: i * 0.03 }}
+                        className={cn(
+                          'transition-colors',
+                          item.status === 'PAID'
+                            ? 'bg-green-500/5 opacity-60'
+                            : item.isUpcoming && isOverdue
+                              ? 'bg-orange-500/5'
+                              : item.isUpcoming
+                                ? 'bg-primary/5'
+                                : 'hover:bg-white/5'
                         )}
-                      </td>
-                      <td className="px-5 py-4">
-                        <p className={cn(
-                          'text-sm font-headline font-bold tabular-nums',
-                          item.status === 'PAID'
-                            ? 'line-through text-on-surface-variant'
-                            : item.isUpcoming && isOverdue
-                              ? 'text-orange-500'
-                              : item.isUpcoming
-                                ? 'text-primary'
-                                : 'text-on-surface'
-                        )}>
-                          {item.amount}
-                        </p>
-                      </td>
-                      <td className="px-5 py-4 text-right">
-                        <span className={cn(
-                          'inline-flex items-center gap-1.5 text-[10px] font-bold px-2.5 py-1 rounded-full border tracking-widest uppercase',
-                          item.status === 'PAID'
-                            ? 'text-green-600 bg-green-500/10 border-green-500/20'
-                            : item.isUpcoming && isOverdue
-                              ? 'text-orange-500 bg-orange-500/10 border-orange-500/20'
-                              : item.isUpcoming
-                                ? 'text-primary bg-primary/10 border-primary/20'
-                                : 'text-outline bg-transparent border-outline/20'
-                        )}>
-                          {item.status === 'PAID' && (
-                            <CheckCircle size={11} fill="currentColor" className="text-green-600" />
+                      >
+                        <td className="px-5 py-4">
+                          <p className={cn(
+                            'text-sm font-semibold',
+                            item.status === 'PAID' ? 'line-through text-on-surface-variant' : 'text-on-surface'
+                          )}>
+                            {item.date}
+                          </p>
+                          {item.isUpcoming && (
+                            <p className={cn(
+                              'text-[9px] font-bold uppercase tracking-widest mt-1',
+                              isOverdue ? 'text-orange-500' : 'text-primary'
+                            )}>
+                              {isOverdue ? 'Overdue' : 'Upcoming'}
+                            </p>
                           )}
-                          {item.isUpcoming && isOverdue ? 'OVERDUE' : item.status}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
+                          {/* ── Additional: show term number ── */}
+                          {item.status !== 'PAID' && (
+                            <p className="text-[9px] text-on-surface-variant mt-0.5">
+                              #{item.termIndex} of {totalTermCount}
+                            </p>
+                          )}
+                        </td>
+                        <td className="px-5 py-4">
+                          <p className={cn(
+                            'text-sm font-headline font-bold tabular-nums',
+                            item.status === 'PAID'
+                              ? 'line-through text-on-surface-variant'
+                              : item.isUpcoming && isOverdue
+                                ? 'text-orange-500'
+                                : item.isUpcoming
+                                  ? 'text-primary'
+                                  : 'text-on-surface'
+                          )}>
+                            {item.amount}
+                          </p>
+                        </td>
+                        <td className="px-5 py-4 text-right">
+                          <span className={cn(
+                            'inline-flex items-center gap-1.5 text-[10px] font-bold px-2.5 py-1 rounded-full border tracking-widest uppercase',
+                            item.status === 'PAID'
+                              ? 'text-green-600 bg-green-500/10 border-green-500/20'
+                              : item.isUpcoming && isOverdue
+                                ? 'text-orange-500 bg-orange-500/10 border-orange-500/20'
+                                : item.isUpcoming
+                                  ? 'text-primary bg-primary/10 border-primary/20'
+                                  : 'text-outline bg-transparent border-outline/20'
+                          )}>
+                            {item.status === 'PAID' && (
+                              <CheckCircle size={11} fill="currentColor" className="text-green-600" />
+                            )}
+                            {item.isUpcoming && isOverdue ? 'OVERDUE' : item.status}
+                          </span>
+                        </td>
+                      </motion.tr>
+                    ))}
+                  </tbody>
+                </AnimatePresence>
               </table>
 
-              {/* ── Show more / less controls ─────────────────────────────── */}
+              {/* ── Show more/less controls ── */}
               {!showAllSchedule && hiddenCount > 0 && (
                 <button
                   onClick={() => setShowAllSchedule(true)}
@@ -658,10 +681,10 @@ export default function LoanDetails() {
                     hover:bg-white/5 transition-colors border-t border-surface-bright/10 flex items-center justify-center gap-1"
                 >
                   <ChevronRight size={13} className="rotate-90" />
-                  {hiddenCount} more installment{hiddenCount !== 1 ? 's' : ''}
+                  {pendingCount - 1} more upcoming installment{pendingCount - 1 !== 1 ? 's' : ''}
                 </button>
               )}
-              {showAllSchedule && totalTermCount > SCHEDULE_PAGE_SIZE && (
+              {showAllSchedule && pendingCount > SCHEDULE_PAGE_SIZE && (
                 <button
                   onClick={() => setShowAllSchedule(false)}
                   className="w-full py-3 text-[11px] font-bold text-on-surface-variant uppercase tracking-widest text-center
@@ -672,8 +695,20 @@ export default function LoanDetails() {
               )}
             </div>
 
-            {/* ── Overpay row — separated below the main schedule ───────── */}
-            {overpayRow && (
+            {/* ── Next payment reminder chip ── */}
+            {nextPayment && !isOverdue && (
+              <div className="flex items-center gap-2 px-1">
+                <CalendarClock size={13} className="text-primary shrink-0" />
+                <p className="text-[11px] text-on-surface-variant">
+                  Next installment of{' '}
+                  <span className="text-primary font-bold">{nextPayment.amount}</span>{' '}
+                  due on <span className="font-semibold text-on-surface">{nextPayment.date}</span>
+                </p>
+              </div>
+            )}
+
+            {/* ── Overpay row — only shown when loan is closed ── */}
+            {overpayRow && isClosed && (
               <div className="bg-primary/5 border border-primary/20 rounded-2xl px-5 py-4 flex items-center justify-between">
                 <div>
                   <p className="text-xs font-bold text-primary uppercase tracking-widest">Overpayment Credit</p>
