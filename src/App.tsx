@@ -27,7 +27,7 @@ import { ToastProvider } from './components/ToastNotification'; // ← add this
 
 export default function App() {
   return (
-    <ToastProvider> {/* ← wrap everything */}
+    <ToastProvider>
       <Router>
         <Routes>
           <Route path="/" element={<Navigate to="/login" replace />} />
@@ -51,6 +51,6 @@ export default function App() {
           <Route path="/loan/:id/pay/confirm" element={<PaymentGateway />} />
         </Routes>
       </Router>
-    </ToastProvider> {/* ← close here */}
+    </ToastProvider>
   );
 }
