@@ -23,7 +23,7 @@ import PaymentSuccess from './pages/PaymentSuccess';
 import Profile from './pages/Profile';
 import Inbox from './pages/Inbox';
 import Transactions from './pages/Transactions';
-import { ToastProvider } from './components/ToastNotification'; // ← add this
+import { ToastProvider } from './pages/ToastNotification';
 
 export default function App() {
   return (
