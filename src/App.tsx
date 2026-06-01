@@ -4,7 +4,7 @@
  */
 
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import Login from './pages/Login';
 import ForgotPassword from './pages/ForgotPassword';
 import RegisterStep1 from './pages/RegisterStep1';
@@ -23,12 +23,12 @@ import PaymentSuccess from './pages/PaymentSuccess';
 import Profile from './pages/Profile';
 import Inbox from './pages/Inbox';
 import Transactions from './pages/Transactions';
-import { ToastProvider } from '@/src/components/ToastNotification';
+import { ToastProvider } from './components/ToastNotification';
 
 export default function App() {
   return (
-    <ToastProvider>
-      <Router>
+    <Router>
+      <ToastProvider>
         <Routes>
           <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="/login" element={<Login />} />
@@ -48,9 +48,8 @@ export default function App() {
           <Route path="/profile" element={<Profile />} />
           <Route path="/inbox" element={<Inbox />} />
           <Route path="/transactions" element={<Transactions />} />
-          <Route path="/loan/:id/pay/confirm" element={<PaymentGateway />} />
         </Routes>
-      </Router>
-    </ToastProvider>
+      </ToastProvider>
+    </Router>
   );
 }
