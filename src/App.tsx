@@ -23,31 +23,34 @@ import PaymentSuccess from './pages/PaymentSuccess';
 import Profile from './pages/Profile';
 import Inbox from './pages/Inbox';
 import Transactions from './pages/Transactions';
+import { ToastProvider } from './components/ToastNotification'; // ← add this
 
 export default function App() {
   return (
-    <Router>
-      <Routes>
-        <Route path="/" element={<Navigate to="/login" replace />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/forgot-password" element={<ForgotPassword />} />
-        <Route path="/register" element={<RegisterStep1 />} />
-        <Route path="/register/step2" element={<RegisterStep2 />} />
-        <Route path="/register/step3" element={<RegisterStep3 />} />
-        <Route path="/register/step4" element={<RegisterStep4 />} />
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/track" element={<TrackLoan />} />
-        <Route path="/loan/:id" element={<LoanDetails />} />
-        <Route path="/apply" element={<ApplyLoanStep1 />} />
-        <Route path="/apply/step2" element={<ApplyLoanStep2 />} />
-        <Route path="/loan/:id/pay" element={<PaymentOptions />} />
-        <Route path="/loan/:id/pay/confirm" element={<Payment />} />
-        <Route path="/loan/:id/pay/success" element={<PaymentSuccess />} />
-        <Route path="/profile" element={<Profile />} />
-        <Route path="/inbox" element={<Inbox />} />
-        <Route path="/transactions" element={<Transactions />} />
-        <Route path="/loan/:id/pay/confirm" element={<PaymentGateway />} />
-      </Routes>
-    </Router>
+    <ToastProvider> {/* ← wrap everything */}
+      <Router>
+        <Routes>
+          <Route path="/" element={<Navigate to="/login" replace />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/register" element={<RegisterStep1 />} />
+          <Route path="/register/step2" element={<RegisterStep2 />} />
+          <Route path="/register/step3" element={<RegisterStep3 />} />
+          <Route path="/register/step4" element={<RegisterStep4 />} />
+          <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/track" element={<TrackLoan />} />
+          <Route path="/loan/:id" element={<LoanDetails />} />
+          <Route path="/apply" element={<ApplyLoanStep1 />} />
+          <Route path="/apply/step2" element={<ApplyLoanStep2 />} />
+          <Route path="/loan/:id/pay" element={<PaymentOptions />} />
+          <Route path="/loan/:id/pay/confirm" element={<Payment />} />
+          <Route path="/loan/:id/pay/success" element={<PaymentSuccess />} />
+          <Route path="/profile" element={<Profile />} />
+          <Route path="/inbox" element={<Inbox />} />
+          <Route path="/transactions" element={<Transactions />} />
+          <Route path="/loan/:id/pay/confirm" element={<PaymentGateway />} />
+        </Routes>
+      </Router>
+    </ToastProvider> {/* ← close here */}
   );
 }
