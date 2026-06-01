@@ -56,7 +56,7 @@ export default function PaymentSuccess() {
   const [paidAmount, setPaidAmount]    = useState<number>(0);
   const [paidMethod, setPaidMethod]    = useState<string>('');
   const hasRun                         = useRef(false);
-  const toastFired                     = useRef(false); // guard: only fire once
+  const toastFired                     = useRef(false);
 
   useEffect(() => {
     if (hasRun.current) return;
@@ -201,7 +201,6 @@ export default function PaymentSuccess() {
       localStorage.removeItem(SS_PENDING_KEY);
       setStatus('done');
 
-      // ── Fire toast once payment is fully confirmed and recorded ──
       if (!toastFired.current) {
         toastFired.current = true;
         showToast({
@@ -281,18 +280,26 @@ export default function PaymentSuccess() {
           <div className="text-center space-y-1.5">
             <p className="font-bold text-on-surface text-sm">Return to the App</p>
             <p className="text-on-surface-variant text-xs leading-relaxed">
-              Your payment has been recorded. You may now{' '}
-              <span className="font-semibold text-on-surface">close this tab</span>{' '}
-              and return to <span className="text-primary font-semibold">CredenceLend</span> to view your updated loan balance.
+              Your payment has been recorded. Tap the button below to return to{' '}
+              <span className="text-primary font-semibold">CredenceLend</span> and view your updated loan balance.
             </p>
           </div>
+
+          {/* ── Deep link back to app ── */}
           <button
-            onClick={() => window.close()}
-            className="w-full flex items-center justify-center gap-2 py-3 rounded-full bg-surface-container-highest text-on-surface-variant text-xs font-bold active:scale-95 transition-transform"
+            onClick={() => {
+              window.location.href = 'credencelend://app/dashboard';
+            }}
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-full bg-primary text-on-primary text-xs font-bold active:scale-95 transition-transform"
           >
-            <X size={14} />
-            Close This Tab
+            <Smartphone size={14} />
+            Return to CredenceLend
           </button>
+
+          {/* ── Fallback manual instruction ── */}
+          <p className="text-[10px] text-on-surface-variant text-center leading-relaxed">
+            If the app doesn't open, close this tab manually and reopen CredenceLend.
+          </p>
         </motion.div>
         <motion.div
           initial={{ opacity: 0 }}
