@@ -64,6 +64,7 @@ const getDestination = (toast: ToastPayload): string | null => {
 };
 
 // ─── Duration ─────────────────────────────────────────────────────────────────
+
 const DURATION_MS = 4500;
 
 // ─── Single Toast ─────────────────────────────────────────────────────────────
@@ -71,23 +72,23 @@ const DURATION_MS = 4500;
 function Toast({
   toast,
   onDismiss,
+  navigate,
 }: {
   toast:     ToastPayload;
   onDismiss: (id: number) => void;
+  navigate:  (path: string) => void;
 }) {
-  const navigate  = useNavigate();
-  const cfg       = getToastConfig(toast.type);
-  const dest      = getDestination(toast);
+  const cfg  = getToastConfig(toast.type);
+  const dest = getDestination(toast);
 
-  // Controls the width of the drain bar (100 → 0)
   const [barWidth, setBarWidth] = useState(100);
   const [paused,   setPaused]   = useState(false);
 
-  const startTimeRef   = useRef<number>(Date.now());
-  const elapsedRef     = useRef<number>(0);
-  const rafRef         = useRef<number | null>(null);
+  const startTimeRef = useRef<number>(Date.now());
+  const elapsedRef   = useRef<number>(0);
+  const rafRef       = useRef<number | null>(null);
 
-  // ── Drain animation via rAF so pausing works correctly ───────────────────
+  // ── Drain animation via rAF ───────────────────────────────────────────────
   useEffect(() => {
     const tick = () => {
       if (!paused) {
@@ -194,10 +195,11 @@ export const useToast = () => React.useContext(ToastContext);
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ToastPayload[]>([]);
   const counterRef          = useRef(0);
+  const navigate            = useNavigate();
 
   const showToast = (payload: Omit<ToastPayload, 'id'>) => {
     const id = ++counterRef.current;
-    setToasts(prev => [{ ...payload, id }, ...prev].slice(0, 3)); // max 3 stacked
+    setToasts(prev => [{ ...payload, id }, ...prev].slice(0, 3));
   };
 
   const dismiss = (id: number) => {
@@ -214,7 +216,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         <div className="mt-4 space-y-2.5 pointer-events-auto">
           <AnimatePresence mode="sync">
             {toasts.map(t => (
-              <Toast key={t.id} toast={t} onDismiss={dismiss} />
+              <Toast key={t.id} toast={t} onDismiss={dismiss} navigate={navigate} />
             ))}
           </AnimatePresence>
         </div>
