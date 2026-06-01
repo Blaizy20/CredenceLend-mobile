@@ -4,6 +4,7 @@ import { CheckCircle2, LayoutDashboard, Receipt, Loader2, AlertTriangle, Smartph
 import { motion } from 'motion/react';
 import { Button } from '../components/Button';
 import { API_BASE } from '../lib/api';
+import { useToast } from '../components/ToastNotification';
 
 type Status = 'verifying' | 'recording' | 'done' | 'failed' | 'external';
 
@@ -47,6 +48,7 @@ export default function PaymentSuccess() {
   const navigate                       = useNavigate();
   const { id }                         = useParams();
   const [searchParams]                 = useSearchParams();
+  const { showToast }                  = useToast();
   const [status, setStatus]            = useState<Status>('verifying');
   const [error, setError]              = useState('');
   const [dbPaymentId, setDbPaymentId]  = useState<number | null>(null);
@@ -54,6 +56,7 @@ export default function PaymentSuccess() {
   const [paidAmount, setPaidAmount]    = useState<number>(0);
   const [paidMethod, setPaidMethod]    = useState<string>('');
   const hasRun                         = useRef(false);
+  const toastFired                     = useRef(false); // guard: only fire once
 
   useEffect(() => {
     if (hasRun.current) return;
@@ -62,11 +65,8 @@ export default function PaymentSuccess() {
     let user: any = null;
     try { user = JSON.parse(localStorage.getItem('user') || 'null'); } catch {}
 
-    // ✅ FIX: read session_id from URL — Payment.tsx now always puts it here
     const urlSessionId = searchParams.get('session_id') ?? '';
 
-    // Seed localStorage with the URL session_id so handleSuccess() can find it
-    // This covers the external browser tab case where localStorage was empty
     if (urlSessionId && urlSessionId !== 'PENDING') {
       try {
         const existing = JSON.parse(localStorage.getItem(SS_PENDING_KEY) || '{}');
@@ -80,13 +80,10 @@ export default function PaymentSuccess() {
     }
 
     if (!user?.customer_id) {
-      // External browser tab — Capacitor opened PayMongo in the system browser
       if (urlSessionId && urlSessionId !== 'PENDING') {
-        // ✅ FIX: we have a real session_id from the URL, proceed to verify + record
         handleSuccess();
         return;
       }
-      // Truly no session data — show the close-tab screen
       setStatus('external');
       return;
     }
@@ -96,9 +93,8 @@ export default function PaymentSuccess() {
 
   async function handleSuccess() {
     try {
-      // ✅ FIX: read session_id from URL first, then fall back to localStorage
       let sessionId = searchParams.get('session_id') ?? '';
-      if (sessionId === 'PENDING') sessionId = ''; // ignore placeholder
+      if (sessionId === 'PENDING') sessionId = '';
 
       let sourceId  = searchParams.get('id')                ?? '';
       let intentId  = searchParams.get('payment_intent_id') ?? '';
@@ -108,7 +104,6 @@ export default function PaymentSuccess() {
         const storedRaw = localStorage.getItem(SS_PENDING_KEY);
         if (storedRaw) {
           const stored = JSON.parse(storedRaw);
-          // ✅ FIX: only fall back to stored session_id if URL didn't have one
           if (!sessionId && stored.session_id) sessionId = stored.session_id;
           if (!amount && stored.amount)         amount    = Number(stored.amount);
         }
@@ -205,6 +200,20 @@ export default function PaymentSuccess() {
       if (data.pm_payment_id) setPmPaymentId(data.pm_payment_id);
       localStorage.removeItem(SS_PENDING_KEY);
       setStatus('done');
+
+      // ── Fire toast once payment is fully confirmed and recorded ──
+      if (!toastFired.current) {
+        toastFired.current = true;
+        showToast({
+          title:   'Payment Confirmed',
+          message: amount > 0
+            ? `₱${amount.toLocaleString(undefined, { minimumFractionDigits: 2 })} recorded via ${methodLabel[resolvedMethod] ?? resolvedMethod}.`
+            : 'Your payment has been recorded successfully.',
+          type:    'payment',
+          loan_id: Number(id),
+        });
+      }
+
     } catch (err: any) {
       setError(err.message || 'An unexpected error occurred.');
       setStatus('failed');
@@ -233,12 +242,9 @@ export default function PaymentSuccess() {
         animate={{ opacity: 1 }}
         className="fixed inset-0 z-50 bg-background flex flex-col items-center justify-center px-8 text-center"
       >
-        {/* Ambient glow */}
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-primary/10 rounded-full blur-[120px]" />
         </div>
-
-        {/* Icon */}
         <motion.div
           initial={{ scale: 0, rotate: -20 }}
           animate={{ scale: 1, rotate: 0 }}
@@ -247,8 +253,6 @@ export default function PaymentSuccess() {
         >
           <CheckCircle2 className="text-green-500" size={48} />
         </motion.div>
-
-        {/* Heading */}
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
@@ -265,8 +269,6 @@ export default function PaymentSuccess() {
             Your payment was processed successfully.
           </p>
         </motion.div>
-
-        {/* Close tab instruction card */}
         <motion.div
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
@@ -292,8 +294,6 @@ export default function PaymentSuccess() {
             Close This Tab
           </button>
         </motion.div>
-
-        {/* Pulse dots */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -395,7 +395,7 @@ export default function PaymentSuccess() {
     );
   }
 
-  // ── Success screen (in-app / logged-in browser) ───────────────────────────
+  // ── Success screen ────────────────────────────────────────────────────────
   return (
     <motion.div
       initial={{ opacity: 0 }}

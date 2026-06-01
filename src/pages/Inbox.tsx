@@ -9,6 +9,7 @@ import {
   CheckCheck, ChevronRight,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { useToast } from '../components/ToastNotification';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,6 +36,8 @@ const FILTER_TABS: { key: FilterTab; label: string }[] = [
 
 const LOAN_TYPES    = new Set(['approved', 'denied', 'general']);
 const PAYMENT_TYPES = new Set(['payment']);
+
+const POLL_INTERVAL_MS = 15_000; // poll every 15 seconds
 
 const NOTIF_CONFIG: Record<string, {
   icon:   (size: number) => JSX.Element;
@@ -115,28 +118,20 @@ function InboxSkeleton() {
     <div className="min-h-screen bg-background pb-32">
       <TopBar title="Inbox" showBack={false} />
       <main className="pt-24 px-4 max-w-md mx-auto">
-
-        {/* Header row */}
         <div className="flex items-center justify-between mb-4 px-1 animate-pulse">
           <div className="h-3 w-32 bg-surface-container-highest rounded-full" />
           <div className="h-3 w-24 bg-surface-container-highest rounded-full" />
         </div>
-
-        {/* Filter tabs */}
         <div className="flex gap-2 mb-5 animate-pulse">
           {[72, 60, 80, 48].map((w, i) => (
             <div key={i} className="h-8 rounded-full bg-surface-container-highest shrink-0" style={{ width: w }} />
           ))}
         </div>
-
-        {/* Notification cards */}
         <div className="space-y-3">
           {[1, 2, 3, 4].map(i => (
             <div key={i}
               className="rounded-2xl border border-outline-variant/10 bg-surface-container-high p-4 flex items-start gap-4 animate-pulse">
-              {/* Icon placeholder */}
               <div className="w-10 h-10 rounded-xl bg-surface-container-highest shrink-0" />
-              {/* Text lines */}
               <div className="flex-1 space-y-2.5 pr-8">
                 <div className="flex justify-between items-start gap-2">
                   <div className="h-3.5 bg-surface-container-highest rounded-full"
@@ -146,13 +141,11 @@ function InboxSkeleton() {
                 <div className="h-2.5 bg-surface-container-highest rounded-full w-full" />
                 <div className="h-2.5 bg-surface-container-highest rounded-full"
                   style={{ width: `${60 + (i % 2) * 20}%` }} />
-                {/* Tap hint */}
                 <div className="h-2.5 w-28 bg-surface-container-highest rounded-full mt-1" />
               </div>
             </div>
           ))}
         </div>
-
       </main>
       <BottomNav />
     </div>
@@ -326,12 +319,19 @@ function NotifCard({
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function Inbox() {
-  const navigate = useNavigate();
+  const navigate      = useNavigate();
+  const { showToast } = useToast();
+
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading]             = useState(true);
   const [error, setError]                 = useState('');
   const [activeTab, setActiveTab]         = useState<FilterTab>('unread');
   const [customerId, setCustomerId]       = useState<number | null>(null);
+
+  // Track highest known notification_id so we only toast truly new ones
+  const knownMaxIdRef  = useRef<number>(0);
+  const isFirstLoad    = useRef<boolean>(true);
+  const pollTimerRef   = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     let user: any = null;
@@ -339,6 +339,15 @@ export default function Inbox() {
     if (!user?.customer_id) { navigate('/login', { replace: true }); return; }
     setCustomerId(user.customer_id);
     loadNotifications(user.customer_id);
+
+    // Start polling for new notifications
+    pollTimerRef.current = setInterval(() => {
+      pollNewNotifications(user.customer_id);
+    }, POLL_INTERVAL_MS);
+
+    return () => {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+    };
   }, []);
 
   useEffect(() => {
@@ -368,10 +377,55 @@ export default function Inbox() {
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
       setNotifications(notifs);
+
+      // Seed the known max ID — don't toast on initial load
+      if (notifs.length > 0) {
+        knownMaxIdRef.current = Math.max(...notifs.map(n => n.notification_id));
+      }
+      isFirstLoad.current = false;
     } catch {
       setError('Unable to load notifications. Check your connection and try again.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ── Poll silently and toast only brand-new notifications ─────────────────
+  const pollNewNotifications = async (cid: number) => {
+    try {
+      const res  = await fetch(`${API_BASE}/api/notifications/${cid}`);
+      const data = await res.json();
+      if (!res.ok) return;
+
+      const notifs: Notification[] = Array.isArray(data) ? data : [];
+      notifs.sort((a, b) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+
+      // Find notifications newer than what we already know
+      const newNotifs = notifs.filter(n => n.notification_id > knownMaxIdRef.current);
+
+      if (newNotifs.length > 0) {
+        // Update the list and bump the known max ID
+        setNotifications(notifs);
+        knownMaxIdRef.current = Math.max(...notifs.map(n => n.notification_id));
+
+        // Toast the most recent new notification only (avoid stacking multiple)
+        const latest = newNotifs[0];
+        const type   = latest.type?.toLowerCase() as 'approved' | 'denied' | 'payment' | 'general';
+        showToast({
+          title:   latest.title,
+          message: latest.message.length > 80
+            ? latest.message.slice(0, 77) + '…'
+            : latest.message,
+          type:    (['approved', 'denied', 'payment', 'general'].includes(type)
+            ? type
+            : 'general'),
+          loan_id: latest.loan_id,
+        });
+      }
+    } catch {
+      // Fail silently — polling should never crash the UI
     }
   };
 
@@ -412,7 +466,6 @@ export default function Inbox() {
     return notifications.length;
   };
 
-  // ── Skeleton ────────────────────────────────────────────────────────────────
   if (loading) return <InboxSkeleton />;
 
   return (
@@ -421,7 +474,6 @@ export default function Inbox() {
 
       <main className="pt-24 px-4 max-w-md mx-auto">
 
-        {/* ── Header Row ── */}
         {!error && notifications.length > 0 && (
           <div className="flex items-center justify-between mb-4 px-1">
             <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant">
@@ -444,7 +496,6 @@ export default function Inbox() {
           </div>
         )}
 
-        {/* ── Filter Tabs ── */}
         {!error && notifications.length > 0 && (
           <div className="flex gap-2 mb-5 overflow-x-auto pb-1 scrollbar-hide">
             {FILTER_TABS.map(tab => {
@@ -476,7 +527,6 @@ export default function Inbox() {
           </div>
         )}
 
-        {/* ── Error ── */}
         {error && (
           <div className="flex flex-col items-center justify-center min-h-[60vh] text-center gap-4">
             <div className="w-20 h-20 rounded-full bg-red-500/10 flex items-center justify-center">
@@ -496,7 +546,6 @@ export default function Inbox() {
           </div>
         )}
 
-        {/* ── Empty (no notifications at all) ── */}
         {!error && notifications.length === 0 && (
           <div className="flex flex-col items-center justify-center min-h-[60vh] text-center">
             <div className="w-20 h-20 rounded-full bg-surface-container-high flex items-center justify-center mb-6">
@@ -509,7 +558,6 @@ export default function Inbox() {
           </div>
         )}
 
-        {/* ── Empty (filtered tab has nothing) ── */}
         {!error && notifications.length > 0 && filtered.length === 0 && (
           <div className="flex flex-col items-center justify-center py-24 text-center">
             <div className="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center mb-4">
@@ -527,7 +575,6 @@ export default function Inbox() {
           </div>
         )}
 
-        {/* ── Notifications List ── */}
         {!error && filtered.length > 0 && (
           <div className="space-y-3">
             <p className="text-[9px] text-on-surface-variant/50 text-center mb-2">

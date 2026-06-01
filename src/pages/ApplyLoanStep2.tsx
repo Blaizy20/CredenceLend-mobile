@@ -10,6 +10,7 @@ import { Button }  from '../components/Button';
 import { Input }   from '../components/Input';
 import { motion, AnimatePresence } from 'motion/react';
 import type { LoanBreakdown } from './ApplyLoanStep1';
+import { useToast } from '../components/ToastNotification';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -65,12 +66,12 @@ const API = import.meta.env.VITE_API_URL ?? '';
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function ApplyLoanStep2() {
-  const navigate   = useNavigate();
-  const location   = useLocation();
-  const step1      = location.state?.step1;
+  const navigate        = useNavigate();
+  const location        = useLocation();
+  const { showToast }   = useToast();
+  const step1           = location.state?.step1;
   const uploadDocs: UploadDoc[] = location.state?.uploadDocs ?? [];
 
-  // Use the breakdown computed in Step 1 — single source of truth
   const breakdown: LoanBreakdown | null = step1?.breakdown ?? null;
 
   React.useEffect(() => {
@@ -101,11 +102,9 @@ export default function ApplyLoanStep2() {
     ci_required:          boolean;
   } | null>(null);
 
-  // Whole-peso formatter — consistent with Step 1 breakdown display
   const fmtW = (n: number) =>
     Math.round(n).toLocaleString('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
-  // Two-decimal formatter — used only for principal amount input display
   const fmt = (n: number) =>
     n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -217,7 +216,6 @@ export default function ApplyLoanStep2() {
         id_type:          step1.id_type,
         collateral_type:  step1.collateral_type,
         collateral_notes: step1.collateral_notes,
-        // Pass all breakdown fields to backend for storage
         ...(breakdown && {
           loans_receivable:  breakdown.loansReceivable,
           service_fee:       breakdown.serviceFee,
@@ -265,12 +263,25 @@ export default function ApplyLoanStep2() {
         }
       }
 
+      const instantReason = result.data?.instant_reason ?? '';
+
       setSuccessData({
-        instant_reason:       result.data?.instant_reason       ?? '',
+        instant_reason:       instantReason,
         missing_requirements: result.data?.missing_requirements ?? [],
         ci_required:          result.data?.ci_required          ?? false,
       });
       setUploadProgress('');
+
+      // ── Fire toast once application is fully submitted ──
+      showToast({
+        title:   'Application Submitted',
+        message: instantReason && REASON_MESSAGES[instantReason]
+          ? REASON_MESSAGES[instantReason]
+          : `₱${fmt(Number(step1.principal_amount))} loan is now under review.`,
+        type:    'general',
+        loan_id: loanId ?? null,
+      });
+
       setTimeout(() => setSuccessStep('done'), 600);
 
     } catch (err: any) {
@@ -304,10 +315,9 @@ export default function ApplyLoanStep2() {
           </div>
         </div>
 
-        {/* ── Loan Summary (uses Step 1 breakdown — single source of truth) ── */}
+        {/* ── Loan Summary ── */}
         <div className="mb-8 p-4 bg-surface-container-high rounded-xl space-y-2 border border-outline-variant/10">
           <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-2">Loan Summary</p>
-
           <div className="flex justify-between text-sm">
             <span className="text-on-surface-variant">Principal Amount</span>
             <span className="font-bold text-on-surface">₱{fmt(Number(step1.principal_amount))}</span>
@@ -322,7 +332,6 @@ export default function ApplyLoanStep2() {
             <span className="text-on-surface-variant">Interest Rate</span>
             <span className="font-bold text-primary">{step1.interest_rate}% / month</span>
           </div>
-
           {breakdown && (
             <>
               <div className="flex justify-between text-sm">
@@ -349,7 +358,6 @@ export default function ApplyLoanStep2() {
                 <span className="text-on-surface-variant">Documentary Stamps</span>
                 <span className="font-bold text-on-surface">₱{fmtW(breakdown.docStamps)}</span>
               </div>
-
               <div className="border-t border-outline-variant/10 pt-2 space-y-1.5">
                 <div className="flex justify-between text-sm">
                   <span className="text-on-surface-variant font-bold">Loans Receivable</span>
@@ -362,18 +370,16 @@ export default function ApplyLoanStep2() {
               </div>
             </>
           )}
-
           <div className="flex justify-between text-sm">
             <span className="text-on-surface-variant">Collateral</span>
             <span className="font-bold text-on-surface">{step1.collateral_type}</span>
           </div>
-          {step1.collateral_notes ? (
+          {step1.collateral_notes && (
             <div className="flex justify-between text-sm">
               <span className="text-on-surface-variant">Collateral Notes</span>
               <span className="font-bold text-on-surface text-right max-w-[55%]">{step1.collateral_notes}</span>
             </div>
-          ) : null}
-
+          )}
           {breakdown && (
             <div className="border-t border-outline-variant/10 pt-2 flex justify-between text-sm">
               <span className="text-on-surface-variant">Amortization / {periodLabel}</span>
@@ -521,7 +527,6 @@ export default function ApplyLoanStep2() {
                 {/* Loan details */}
                 <div className="mb-5 p-4 bg-surface-container-high border border-outline-variant rounded-2xl space-y-3">
                   <p className="text-[10px] font-bold uppercase tracking-widest text-primary mb-3">Loan Details</p>
-
                   <div className="flex justify-between text-sm">
                     <span className="text-on-surface-variant">Principal Amount</span>
                     <span className="font-bold text-on-surface">₱{fmt(Number(step1.principal_amount))}</span>
@@ -536,7 +541,6 @@ export default function ApplyLoanStep2() {
                     <span className="text-on-surface-variant">Interest Rate</span>
                     <span className="font-bold text-on-surface">{step1.interest_rate}% / month</span>
                   </div>
-
                   {breakdown && (
                     <>
                       <div className="border-t border-outline-variant/20 my-1" />
@@ -564,7 +568,6 @@ export default function ApplyLoanStep2() {
                       </div>
                     </>
                   )}
-
                   <div className="flex justify-between text-sm">
                     <span className="text-on-surface-variant">Collateral</span>
                     <span className="font-bold text-on-surface">{step1.collateral_type}</span>
@@ -575,7 +578,6 @@ export default function ApplyLoanStep2() {
                       <span className="font-bold text-on-surface text-right max-w-[55%]">{step1.collateral_notes}</span>
                     </div>
                   )}
-
                   {breakdown && (
                     <>
                       <div className="border-t border-outline-variant my-1" />
