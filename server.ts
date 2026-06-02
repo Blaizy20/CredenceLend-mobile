@@ -1109,19 +1109,10 @@ async function startServer() {
         `SELECT l.loan_id, l.reference_no, l.principal_amount, l.interest_rate,
                 l.payment_term, l.term_months, l.total_payable, l.amount_per_term,
                 l.remaining_balance, l.status, l.due_date, l.activated_at,
-                l.denial_reason, l.created_at, l.is_active, c.tenant_id,
-
-                l.aml_flag_id,
-                f.flag_reason,
-                f.flag_status,
-                f.flagged_amount,
-                f.created_at  AS flagged_at
-
-         FROM loans l
-         JOIN customers c ON c.customer_id = l.customer_id
-         LEFT JOIN aml_flags f ON f.flag_id = l.aml_flag_id
-         WHERE l.customer_id = ? AND l.is_active = 1
-         ORDER BY l.created_at DESC`,
+                l.denial_reason,
+                l.created_at, l.is_active, c.tenant_id
+         FROM loans l JOIN customers c ON c.customer_id = l.customer_id
+         WHERE l.customer_id = ? AND l.is_active = 1 ORDER BY l.created_at DESC`,
         [customerId]
       );
 
@@ -1144,16 +1135,6 @@ async function startServer() {
           message: (ref) => `Congratulations! Your loan (${ref}) has been fully paid.`,
           type:    "payment",
         },
-        flagged: {
-            title:   'Loan Flagged for Review',
-            message: (ref) => `Your loan (${ref}) has been flagged for compliance review. Payments are temporarily on hold.`,
-            type:    'general',
-          },
-          under_investigation: {
-             title:   'Loan Under Investigation',
-             message: (ref) => `Your loan (${ref}) is currently under compliance investigation. Please contact your branch.`,
-             type:    'general',
-           },
       };
 
       for (const loan of rows) {
