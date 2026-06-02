@@ -303,6 +303,16 @@ export default function ApplyLoanStep2() {
 
   const periodLabel = PERIOD_LABELS[step1.payment_term] ?? 'month';
 
+  // ── Shared fee rows — used in both Loan Summary and Confirm sheet ─────────
+  const feeRows = breakdown ? [
+    { label: 'Interest Income',        value: fmtW(breakdown.totalInterest)   },
+    { label: 'Service Fee (3%)',        value: fmtW(breakdown.serviceFee)      },
+    { label: 'Notarial Fee (1%)',       value: fmtW(breakdown.notarial)        },
+    { label: 'Risk Management (0.5%)', value: fmtW(breakdown.riskManagement)  },
+    { label: 'PAF (0.5%)',             value: fmtW(breakdown.paf)             },
+    { label: 'Documentary Stamps',     value: fmtW(breakdown.docStamps)       },
+  ] : [];
+
   return (
     <div className="min-h-screen bg-background pb-12">
       <TopBar title="Co-maker Details" />
@@ -325,6 +335,7 @@ export default function ApplyLoanStep2() {
         {/* ── Loan Summary ── */}
         <div className="mb-8 p-4 bg-surface-container-high rounded-xl space-y-2 border border-outline-variant/10">
           <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-2">Loan Summary</p>
+
           <div className="flex justify-between text-sm">
             <span className="text-on-surface-variant">Principal Amount</span>
             <span className="font-bold text-on-surface">₱{fmt(Number(step1.principal_amount))}</span>
@@ -339,44 +350,32 @@ export default function ApplyLoanStep2() {
             <span className="text-on-surface-variant">Interest Rate</span>
             <span className="font-bold text-primary">{step1.interest_rate}% / month</span>
           </div>
+
           {breakdown && (
             <>
-              <div className="flex justify-between text-sm">
-                <span className="text-on-surface-variant">Interest Income</span>
-                <span className="font-bold text-on-surface">₱{fmtW(breakdown.totalInterest)}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-on-surface-variant">Service Fee</span>
-                <span className="font-bold text-on-surface">₱{fmtW(breakdown.serviceFee)}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-on-surface-variant">Notarial Fee</span>
-                <span className="font-bold text-on-surface">₱{fmtW(breakdown.notarial)}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-on-surface-variant">Risk Management</span>
-                <span className="font-bold text-on-surface">₱{fmtW(breakdown.riskManagement)}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-on-surface-variant">PAF</span>
-                <span className="font-bold text-on-surface">₱{fmtW(breakdown.paf)}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-on-surface-variant">Documentary Stamps</span>
-                <span className="font-bold text-on-surface">₱{fmtW(breakdown.docStamps)}</span>
-              </div>
+              {/* Fee rows */}
+              {feeRows.map(({ label, value }) => (
+                <div key={label} className="flex justify-between text-sm">
+                  <span className="text-on-surface-variant">{label}</span>
+                  <span className="font-bold text-on-surface">₱{value}</span>
+                </div>
+              ))}
+
+              {/* Totals */}
               <div className="border-t border-outline-variant/10 pt-2 space-y-1.5">
                 <div className="flex justify-between text-sm">
                   <span className="text-on-surface-variant font-bold">Loans Receivable</span>
                   <span className="font-extrabold text-on-surface">₱{fmtW(breakdown.loansReceivable)}</span>
                 </div>
+                {/* ✅ Synced: cashReleased = principal only (fees deducted from proceeds) */}
                 <div className="flex justify-between text-sm">
-                  <span className="text-on-surface-variant">Net Proceeds</span>
+                  <span className="text-on-surface-variant">Net Proceeds (Cash Released)</span>
                   <span className="font-bold text-green-600">₱{fmtW(breakdown.cashReleased)}</span>
                 </div>
               </div>
             </>
           )}
+
           <div className="flex justify-between text-sm">
             <span className="text-on-surface-variant">Collateral</span>
             <span className="font-bold text-on-surface">{step1.collateral_type}</span>
@@ -387,10 +386,17 @@ export default function ApplyLoanStep2() {
               <span className="font-bold text-on-surface text-right max-w-[55%]">{step1.collateral_notes}</span>
             </div>
           )}
+
+          {/* ✅ Synced: amortization label now consistent with Step 1 */}
           {breakdown && (
-            <div className="border-t border-outline-variant/10 pt-2 flex justify-between text-sm">
-              <span className="text-on-surface-variant">Amortization / {periodLabel}</span>
-              <span className="font-extrabold text-primary text-base">₱{fmtW(breakdown.amortization)}</span>
+            <div className="border-t border-outline-variant/10 pt-2 space-y-0.5">
+              <div className="flex justify-between text-sm">
+                <span className="text-on-surface-variant">Amortization / {periodLabel}</span>
+                <span className="font-extrabold text-primary text-base">₱{fmtW(breakdown.amortization)}</span>
+              </div>
+              <p className="text-[10px] text-on-surface-variant text-right">
+                (Principal + Interest) ÷ {breakdown.totalPeriods} payments
+              </p>
             </div>
           )}
         </div>
@@ -549,17 +555,12 @@ export default function ApplyLoanStep2() {
                     <span className="text-on-surface-variant">Interest Rate</span>
                     <span className="font-bold text-on-surface">{step1.interest_rate}% / month</span>
                   </div>
+
                   {breakdown && (
                     <>
                       <div className="border-t border-outline-variant/20 my-1" />
-                      {[
-                        ['Interest Income',       fmtW(breakdown.totalInterest)  ],
-                        ['Service Fee (3%)',       fmtW(breakdown.serviceFee)     ],
-                        ['Notarial Fee (1%)',      fmtW(breakdown.notarial)       ],
-                        ['Risk Management (0.5%)', fmtW(breakdown.riskManagement) ],
-                        ['PAF (0.5%)',             fmtW(breakdown.paf)            ],
-                        ['Documentary Stamps',     fmtW(breakdown.docStamps)      ],
-                      ].map(([label, value]) => (
+                      {/* ✅ Synced: using shared feeRows array — single source of truth */}
+                      {feeRows.map(({ label, value }) => (
                         <div key={label} className="flex justify-between text-sm">
                           <span className="text-on-surface-variant">{label}</span>
                           <span className="font-bold text-on-surface">₱{value}</span>
@@ -570,12 +571,14 @@ export default function ApplyLoanStep2() {
                         <span className="text-on-surface-variant font-bold">Loans Receivable</span>
                         <span className="font-extrabold text-on-surface">₱{fmtW(breakdown.loansReceivable)}</span>
                       </div>
+                      {/* ✅ Synced: label updated to match Step 1 */}
                       <div className="flex justify-between text-sm">
-                        <span className="text-on-surface-variant">Net Proceeds</span>
+                        <span className="text-on-surface-variant">Net Proceeds (Cash Released)</span>
                         <span className="font-bold text-green-600">₱{fmtW(breakdown.cashReleased)}</span>
                       </div>
                     </>
                   )}
+
                   <div className="flex justify-between text-sm">
                     <span className="text-on-surface-variant">Collateral</span>
                     <span className="font-bold text-on-surface">{step1.collateral_type}</span>
@@ -586,6 +589,8 @@ export default function ApplyLoanStep2() {
                       <span className="font-bold text-on-surface text-right max-w-[55%]">{step1.collateral_notes}</span>
                     </div>
                   )}
+
+                  {/* ✅ Synced: amortization sublabel matches Step 1 convention */}
                   {breakdown && (
                     <>
                       <div className="border-t border-outline-variant my-1" />
@@ -593,6 +598,9 @@ export default function ApplyLoanStep2() {
                         <span className="text-on-surface-variant">Amortization / {periodLabel}</span>
                         <span className="font-extrabold text-primary text-base">₱{fmtW(breakdown.amortization)}</span>
                       </div>
+                      <p className="text-[10px] text-on-surface-variant text-right">
+                        (Principal + Interest) ÷ {breakdown.totalPeriods} payments
+                    </p>
                     </>
                   )}
                 </div>

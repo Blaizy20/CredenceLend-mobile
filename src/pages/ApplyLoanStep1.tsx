@@ -9,21 +9,35 @@ import { loansAPI } from '../lib/api';
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const TERM_OPTIONS = [
-  { label: 'Daily',        apiValue: 'daily',       rate: 2.75, periodsPerMonth: 23.5   },
+  { label: 'Daily',        apiValue: 'daily',       rate: 2.75, periodsPerMonth: 23.5 },
   { label: 'Weekly',       apiValue: 'weekly',      rate: 3.0,  periodsPerMonth: 4    },
   { label: 'Semi-monthly', apiValue: 'semi_monthly',rate: 3.5,  periodsPerMonth: 2    },
   { label: 'Monthly',      apiValue: 'monthly',     rate: 4.0,  periodsPerMonth: 1    },
 ];
 
 const FEE_RATES = {
-  SERVICE_FEE:     0.0300, // 3.00% of principal
-  NOTARIAL:        0.0100, // 1.00% of principal
-  RISK_MANAGEMENT: 0.0050, // 0.50% of principal
-  PAF:             0.0050, // 0.50% of principal
+  SERVICE_FEE:     0.0300,
+  NOTARIAL:        0.0100,
+  RISK_MANAGEMENT: 0.0050,
+  PAF:             0.0050,
 };
 
-// ❌ REMOVED: DOC_STAMPS_RATE constant (was 14% of interest — incorrect)
-// ✅ Doc stamps = 12% of (interest + service fee) — verified from all disbursement vouchers
+// ─── Amount-based term tiers ──────────────────────────────────────────────────
+// Sourced from tenant feedback — adjust thresholds as needed
+const LOAN_TERM_TIERS = [
+  { minAmount: 1_000,   maxAmount: 9_999,   maxMonths: 3,  label: '₱1K–₱9,999'       },
+  { minAmount: 10_000,  maxAmount: 49_999,  maxMonths: 4,  label: '₱10K–₱49,999'     },
+  { minAmount: 50_000,  maxAmount: 99_999,  maxMonths: 6,  label: '₱50K–₱99,999'     },
+  { minAmount: 100_000, maxAmount: 499_999, maxMonths: 8,  label: '₱100K–₱499,999'   },
+  { minAmount: 500_000, maxAmount: 999_999, maxMonths: 12, label: '₱500K–₱999,999'   },
+];
+
+function getMaxMonths(principal: number): number {
+  const tier = LOAN_TERM_TIERS.find(
+    t => principal >= t.minAmount && principal <= t.maxAmount
+  );
+  return tier?.maxMonths ?? 6;
+}
 
 const COLLATERAL_TYPES = [
   'ORCR (Vehicle)',
@@ -121,7 +135,7 @@ export default function ApplyLoanStep1() {
   const [formData, setFormData] = useState<Step1Data>({
     amount:           '',
     term:             'Monthly',
-    term_months:      '12',
+    term_months:      '1',
     id_type:          "Driver's License",
     collateral_type:  '',
     collateral_notes: '',
@@ -133,6 +147,13 @@ export default function ApplyLoanStep1() {
   const set = (field: keyof Omit<Step1Data, 'docs'>, value: string) =>
     setFormData(prev => ({ ...prev, [field]: value }));
 
+  // ── Derived max months for current amount ────────────────────────────────────
+  const currentMaxMonths = useMemo(() => {
+    const amt = Number(formData.amount);
+    if (!amt || amt <= 0) return null;
+    return getMaxMonths(amt);
+  }, [formData.amount]);
+
   // ── Live Breakdown ──────────────────────────────────────────────────────────
 
   const breakdown = useMemo((): LoanBreakdown | null => {
@@ -142,29 +163,18 @@ export default function ApplyLoanStep1() {
 
     if (!principal || principal <= 0 || !months || months <= 0) return null;
 
-    // Core flat-rate interest — whole peso
     const totalInterest  = Math.round(principal * (termOption.rate / 100) * months);
-
-    // One-time upfront fees — whole peso each
     const serviceFee     = Math.round(principal * FEE_RATES.SERVICE_FEE);
     const notarial       = Math.round(principal * FEE_RATES.NOTARIAL);
     const riskManagement = Math.round(principal * FEE_RATES.RISK_MANAGEMENT);
     const paf            = Math.round(principal * FEE_RATES.PAF);
-
-    // ✅ FIX 1: Doc stamps = 12% of (interest + service fee)
-    // Verified against all 4 disbursement vouchers — exact 1:1 match
-    const docStamps = Math.round((totalInterest + serviceFee) * 0.12);
+    const docStamps      = Math.round((totalInterest + serviceFee) * 0.12);
 
     const totalFees       = serviceFee + notarial + riskManagement + paf + docStamps;
     const loansReceivable = principal + totalInterest + totalFees;
     const cashReleased    = principal;
 
     const totalPeriods = Math.round(months * termOption.periodsPerMonth);
-
-    // ✅ FIX 2: Amortization base is (principal + interest) only — NOT full loansReceivable
-    // Upfront fees (notarial, risk, PAF, doc stamps) are deducted from proceeds,
-    // the borrower does not repay them in periodic installments.
-    // floor() matches the voucher convention (699 = floor(11200/16))
     const amortization = totalPeriods > 0
       ? Math.floor((principal + totalInterest) / totalPeriods)
       : 0;
@@ -222,10 +232,13 @@ export default function ApplyLoanStep1() {
     else if (amt > 500000)
       newErrors.amount = 'Maximum loan amount is ₱500,000.';
 
-    if (!formData.term_months || isNaN(months) || months < 1)
+    if (!formData.term_months || isNaN(months) || months < 1) {
       newErrors.term_months = 'Please enter a valid number of months.';
-    else if (months > 180)
-      newErrors.term_months = 'Maximum term is 180 months (15 years).';
+    } else if (!isNaN(amt) && amt > 0) {
+      const maxMonths = getMaxMonths(amt);
+      if (months > maxMonths)
+        newErrors.term_months = `Maximum term for this amount is ${maxMonths} month${maxMonths !== 1 ? 's' : ''}.`;
+    }
 
     if (!formData.collateral_type)
       newErrors.collateral_type = 'Please select a collateral type.';
@@ -275,7 +288,6 @@ export default function ApplyLoanStep1() {
     });
   };
 
-  // Whole-peso formatter — used for all breakdown card values
   const fmtW = (n: number) =>
     Math.round(n).toLocaleString('en-PH', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
@@ -350,8 +362,16 @@ export default function ApplyLoanStep1() {
               const raw = e.target.value;
               const num = Number(raw);
               if (raw === '' || raw === '-') { set('amount', raw); return; }
-              set('amount', num > 500000 ? '500000' : raw);
+              const capped = num > 500000 ? '500000' : raw;
+              set('amount', capped);
+              // Auto-correct term_months if it now exceeds the new tier's max
+              const newMax = getMaxMonths(Number(capped));
+              const currentMonths = parseInt(formData.term_months, 10);
+              if (!isNaN(currentMonths) && currentMonths > newMax) {
+                set('term_months', String(newMax));
+              }
               if (errors.amount) setErrors(prev => ({ ...prev, amount: '' }));
+              if (errors.term_months) setErrors(prev => ({ ...prev, term_months: '' }));
             }}
             error={errors.amount}
           />
@@ -377,21 +397,63 @@ export default function ApplyLoanStep1() {
 
           <Input
             label="LOAN DURATION (MONTHS)"
-            placeholder="e.g. 12"
+            placeholder="e.g. 4"
             type="number"
             value={formData.term_months}
             onChange={(e) => {
               const raw = e.target.value;
               const num = Number(raw);
+              const maxMonths = getMaxMonths(Number(formData.amount));
               if (raw === '') { set('term_months', raw); return; }
-              set('term_months', num > 180 ? '180' : raw);
+              set('term_months', num > maxMonths ? String(maxMonths) : raw);
               if (errors.term_months) setErrors(prev => ({ ...prev, term_months: '' }));
             }}
             error={errors.term_months}
           />
-          <p className="text-xs text-on-surface-variant -mt-3 ml-1">
-            1 month minimum · 180 months (15 years) maximum
-          </p>
+
+          {/* Dynamic hint — shows tier max when amount is entered */}
+          {currentMaxMonths ? (
+            <div className="flex items-center justify-between -mt-3 ml-1 mr-1">
+              <p className="text-xs text-on-surface-variant">
+                1 month minimum
+              </p>
+              <p className="text-xs font-semibold text-primary">
+                Max {currentMaxMonths} months for ₱{Number(formData.amount).toLocaleString('en-PH')}
+              </p>
+            </div>
+          ) : (
+            <p className="text-xs text-on-surface-variant -mt-3 ml-1">
+              1 month minimum · Max term depends on loan amount
+            </p>
+          )}
+
+          {/* Term Tiers Reference */}
+          <div className="rounded-xl bg-surface-container-low border border-outline-variant/20 px-4 py-3">
+            <p className="text-[10px] font-bold tracking-widest text-on-surface-variant uppercase mb-2">
+              Maximum Term Guide
+            </p>
+            <div className="space-y-1.5">
+              {LOAN_TERM_TIERS.map((tier) => {
+                const amt = Number(formData.amount);
+                const isActive = amt >= tier.minAmount && amt <= tier.maxAmount;
+                return (
+                  <div
+                    key={tier.label}
+                    className={`flex justify-between items-center rounded-lg px-2 py-1 transition-colors ${
+                      isActive ? 'bg-primary/10' : ''
+                    }`}
+                  >
+                    <p className={`text-xs ${isActive ? 'text-primary font-semibold' : 'text-on-surface-variant'}`}>
+                      {tier.label}
+                    </p>
+                    <p className={`text-xs font-bold ${isActive ? 'text-primary' : 'text-on-surface-variant'}`}>
+                      {tier.maxMonths} mo.
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
 
           {/* ── Live Breakdown Card ── */}
           {breakdown ? (
