@@ -421,7 +421,7 @@ async function sendComakerEmail(
     ${infoBlock(accent, [
       { label: 'Borrower',      value: borrowerName                              },
       { label: 'Reference No.', value: referenceNo                               },
-      { label: 'Loan Amount',   value: \`&#8369;\${formattedAmount}\`, highlight: true },
+      { label: 'Loan Amount',   value: `&#8369;\${formattedAmount}\`, highlight: true },
       { label: 'Status',        value: 'PENDING REVIEW'                          },
     ])}
     <p style="margin:20px 0 0;font-size:13px;color:#888;line-height:1.6;">

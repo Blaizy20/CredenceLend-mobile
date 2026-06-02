@@ -125,6 +125,7 @@ export default function ApplyLoanStep2() {
       return;
     }
     setComakerFiles(prev => ({ ...prev, [code]: file }));
+    if (errors[code]) setErrors(prev => ({ ...prev, [code]: '' }));
   };
 
   // ── Validation ────────────────────────────────────────────────────────────
@@ -144,10 +145,17 @@ export default function ApplyLoanStep2() {
     else if (!/^09\d{9}$/.test(formData.contact_no))
       newErrors.contact_no = 'Please enter a valid PH number (09XXXXXXXXX).';
 
+    if (!formData.email.trim()) newErrors.email = 'Email address is required.';
+    else if (!/\S+@\S+\.\S+/.test(formData.email.trim()))
+      newErrors.email = 'Please enter a valid email address.';
+
     if (!formData.province.trim()) newErrors.province = 'Province is required.';
     if (!formData.city.trim())     newErrors.city     = 'City is required.';
     if (!formData.barangay.trim()) newErrors.barangay = 'Barangay is required.';
     if (!formData.street.trim())   newErrors.street   = 'Street is required.';
+
+    if (!comakerFiles.COMAKER_INFO) newErrors.COMAKER_INFO = 'Co-maker Info Sheet is required.';
+    if (!comakerFiles.COMAKER_ID)   newErrors.COMAKER_ID   = 'Co-maker Valid ID is required.';
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -233,7 +241,7 @@ export default function ApplyLoanStep2() {
           full_name:    `${formData.first_name} ${formData.last_name}`.trim(),
           phone_number: formData.contact_no,
           relationship: 'Co-maker',
-          email:        formData.email || undefined,
+          email:        formData.email,
           address:      `${formData.street}, ${formData.barangay}, ${formData.city}, ${formData.province}`,
         }],
         notes: 'Submitted from CredenceLend Mobile',
@@ -272,7 +280,6 @@ export default function ApplyLoanStep2() {
       });
       setUploadProgress('');
 
-      // ── Fire toast once application is fully submitted ──
       showToast({
         title:   'Application Submitted',
         message: instantReason && REASON_MESSAGES[instantReason]
@@ -417,7 +424,7 @@ export default function ApplyLoanStep2() {
               handleChange('contact_no', digits);
             }}
             error={errors.contact_no} />
-          <Input label="Email Address (Optional)" placeholder="juan@example.com" type="email"
+          <Input label="Email Address" placeholder="juan@example.com" type="email"
             value={formData.email} onChange={(e) => handleChange('email', e.target.value)} error={errors.email} />
         </section>
 
@@ -443,39 +450,40 @@ export default function ApplyLoanStep2() {
         <section className="space-y-4 mb-10">
           <div className="flex items-center gap-2 mb-2">
             <div className="w-1 h-6 bg-primary rounded-full" />
-            <h2 className="font-headline font-bold text-lg text-on-surface">
-              Co-maker Documents
-              <span className="ml-2 text-on-surface-variant text-sm font-normal">— optional</span>
-            </h2>
+            <h2 className="font-headline font-bold text-lg text-on-surface">Co-maker Documents</h2>
           </div>
           {COMAKER_DOCS.map(doc => {
             const file = comakerFiles[doc.code];
+            const err  = errors[doc.code];
             return (
-              <div key={doc.code}
-                className={`flex items-center justify-between p-4 rounded-xl border transition-colors ${
-                  file ? 'bg-primary/5 border-primary/25' : 'bg-surface-container-low border-white/5'
-                }`}
-              >
-                <div className="flex items-center gap-3 flex-1 min-w-0 mr-3">
-                  <Camera className={file ? 'text-primary' : 'text-outline'} size={20} />
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{doc.label}</p>
-                    <p className="text-xs text-on-surface-variant truncate">{doc.hint}</p>
+              <div key={doc.code}>
+                <div className={`flex items-center justify-between p-4 rounded-xl border transition-colors ${
+                  err  ? 'bg-secondary-container border-secondary' :
+                  file ? 'bg-primary/5 border-primary/25' :
+                         'bg-surface-container-low border-white/5'
+                }`}>
+                  <div className="flex items-center gap-3 flex-1 min-w-0 mr-3">
+                    <Camera className={file ? 'text-primary' : err ? 'text-secondary' : 'text-outline'} size={20} />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{doc.label}</p>
+                      <p className="text-xs text-on-surface-variant truncate">{doc.hint}</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                    <input type="file" accept="image/*,application/pdf"
+                      style={{ display: 'none' }} id={`comaker_${doc.code}`}
+                      onChange={e => handleComakerFile(e, doc.code)} />
+                    <label htmlFor={`comaker_${doc.code}`}
+                      className="bg-primary text-on-primary text-[10px] font-bold px-3 py-2 rounded-lg uppercase tracking-wider cursor-pointer whitespace-nowrap">
+                      {file ? 'REPLACE' : 'CHOOSE FILE'}
+                    </label>
+                    {file
+                      ? <span className="text-[10px] text-green-600 max-w-[80px] truncate">✓ {file.name}</span>
+                      : <span className="text-[10px] text-outline">No file</span>
+                    }
                   </div>
                 </div>
-                <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                  <input type="file" accept="image/*,application/pdf"
-                    style={{ display: 'none' }} id={`comaker_${doc.code}`}
-                    onChange={e => handleComakerFile(e, doc.code)} />
-                  <label htmlFor={`comaker_${doc.code}`}
-                    className="bg-primary text-on-primary text-[10px] font-bold px-3 py-2 rounded-lg uppercase tracking-wider cursor-pointer whitespace-nowrap">
-                    {file ? 'REPLACE' : 'CHOOSE FILE'}
-                  </label>
-                  {file
-                    ? <span className="text-[10px] text-green-600 max-w-[80px] truncate">✓ {file.name}</span>
-                    : <span className="text-[10px] text-outline">No file</span>
-                  }
-                </div>
+                {err && <p className="text-xs text-secondary mt-1 ml-1">{err}</p>}
               </div>
             );
           })}
@@ -603,12 +611,10 @@ export default function ApplyLoanStep2() {
                     <span className="text-on-surface-variant">Contact No.</span>
                     <span className="font-bold text-on-surface font-mono">{formData.contact_no}</span>
                   </div>
-                  {formData.email && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-on-surface-variant">Email</span>
-                      <span className="font-bold text-on-surface">{formData.email}</span>
-                    </div>
-                  )}
+                  <div className="flex justify-between text-sm">
+                    <span className="text-on-surface-variant">Email</span>
+                    <span className="font-bold text-on-surface">{formData.email}</span>
+                  </div>
                 </div>
 
                 {/* Address */}
