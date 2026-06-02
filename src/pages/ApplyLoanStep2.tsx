@@ -19,6 +19,18 @@ const COMAKER_DOCS = [
   { code: 'COMAKER_ID',   label: 'Co-maker Valid ID',   hint: "Clear photo of co-maker's ID"  },
 ];
 
+const RELATIONSHIP_OPTIONS = [
+  'Co-maker',
+  'Spouse',
+  'Parent',
+  'Sibling',
+  'Child',
+  'Relative',
+  'Friend',
+  'Business Partner',
+  'Other',
+];
+
 const TERM_LABELS: Record<string, string> = {
   daily:        'Daily',
   weekly:       'Weekly',
@@ -43,14 +55,15 @@ const REASON_MESSAGES: Record<string, string> = {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface CoMakerForm {
-  first_name: string;
-  last_name:  string;
-  contact_no: string;
-  email:      string;
-  province:   string;
-  city:       string;
-  barangay:   string;
-  street:     string;
+  first_name:   string;
+  last_name:    string;
+  contact_no:   string;
+  email:        string;
+  relationship: string; // ✅ added
+  province:     string;
+  city:         string;
+  barangay:     string;
+  street:       string;
 }
 
 interface UploadDoc {
@@ -79,8 +92,15 @@ export default function ApplyLoanStep2() {
   }, [step1]);
 
   const [formData, setFormData] = useState<CoMakerForm>({
-    first_name: '', last_name: '', contact_no: '',
-    email: '', province: '', city: '', barangay: '', street: '',
+    first_name:   '',
+    last_name:    '',
+    contact_no:   '',
+    email:        '',
+    relationship: 'Co-maker', // ✅ sensible default
+    province:     '',
+    city:         '',
+    barangay:     '',
+    street:       '',
   });
 
   const [comakerFiles, setComakerFiles] = useState<Record<string, File | null>>({
@@ -148,6 +168,8 @@ export default function ApplyLoanStep2() {
     if (!formData.email.trim()) newErrors.email = 'Email address is required.';
     else if (!/\S+@\S+\.\S+/.test(formData.email.trim()))
       newErrors.email = 'Please enter a valid email address.';
+
+    if (!formData.relationship) newErrors.relationship = 'Please select a relationship.'; // ✅
 
     if (!formData.province.trim()) newErrors.province = 'Province is required.';
     if (!formData.city.trim())     newErrors.city     = 'City is required.';
@@ -240,7 +262,7 @@ export default function ApplyLoanStep2() {
         comakers: [{
           full_name:    `${formData.first_name} ${formData.last_name}`.trim(),
           phone_number: formData.contact_no,
-          relationship: 'Co-maker',
+          relationship: formData.relationship, // ✅ was hardcoded 'Co-maker'
           email:        formData.email,
           address:      `${formData.street}, ${formData.barangay}, ${formData.city}, ${formData.province}`,
         }],
@@ -303,7 +325,7 @@ export default function ApplyLoanStep2() {
 
   const periodLabel = PERIOD_LABELS[step1.payment_term] ?? 'month';
 
-  // ── Shared fee rows — used in both Loan Summary and Confirm sheet ─────────
+  // ── Shared fee rows ───────────────────────────────────────────────────────
   const feeRows = breakdown ? [
     { label: 'Interest Income',        value: fmtW(breakdown.totalInterest)   },
     { label: 'Service Fee (3%)',        value: fmtW(breakdown.serviceFee)      },
@@ -335,7 +357,6 @@ export default function ApplyLoanStep2() {
         {/* ── Loan Summary ── */}
         <div className="mb-8 p-4 bg-surface-container-high rounded-xl space-y-2 border border-outline-variant/10">
           <p className="text-[10px] font-bold uppercase tracking-widest text-on-surface-variant mb-2">Loan Summary</p>
-
           <div className="flex justify-between text-sm">
             <span className="text-on-surface-variant">Principal Amount</span>
             <span className="font-bold text-on-surface">₱{fmt(Number(step1.principal_amount))}</span>
@@ -350,24 +371,19 @@ export default function ApplyLoanStep2() {
             <span className="text-on-surface-variant">Interest Rate</span>
             <span className="font-bold text-primary">{step1.interest_rate}% / month</span>
           </div>
-
           {breakdown && (
             <>
-              {/* Fee rows */}
               {feeRows.map(({ label, value }) => (
                 <div key={label} className="flex justify-between text-sm">
                   <span className="text-on-surface-variant">{label}</span>
                   <span className="font-bold text-on-surface">₱{value}</span>
                 </div>
               ))}
-
-              {/* Totals */}
               <div className="border-t border-outline-variant/10 pt-2 space-y-1.5">
                 <div className="flex justify-between text-sm">
                   <span className="text-on-surface-variant font-bold">Loans Receivable</span>
                   <span className="font-extrabold text-on-surface">₱{fmtW(breakdown.loansReceivable)}</span>
                 </div>
-                {/* ✅ Synced: cashReleased = principal only (fees deducted from proceeds) */}
                 <div className="flex justify-between text-sm">
                   <span className="text-on-surface-variant">Net Proceeds (Cash Released)</span>
                   <span className="font-bold text-green-600">₱{fmtW(breakdown.cashReleased)}</span>
@@ -375,7 +391,6 @@ export default function ApplyLoanStep2() {
               </div>
             </>
           )}
-
           <div className="flex justify-between text-sm">
             <span className="text-on-surface-variant">Collateral</span>
             <span className="font-bold text-on-surface">{step1.collateral_type}</span>
@@ -386,8 +401,6 @@ export default function ApplyLoanStep2() {
               <span className="font-bold text-on-surface text-right max-w-[55%]">{step1.collateral_notes}</span>
             </div>
           )}
-
-          {/* ✅ Synced: amortization label now consistent with Step 1 */}
           {breakdown && (
             <div className="border-t border-outline-variant/10 pt-2 space-y-0.5">
               <div className="flex justify-between text-sm">
@@ -401,7 +414,7 @@ export default function ApplyLoanStep2() {
           )}
         </div>
 
-        {/* Personal Info */}
+        {/* ── Co-maker Personal Info ── */}
         <section className="space-y-6 mb-10">
           <div className="flex items-center gap-2 mb-2">
             <div className="w-1 h-6 bg-primary rounded-full" />
@@ -431,10 +444,33 @@ export default function ApplyLoanStep2() {
             }}
             error={errors.contact_no} />
           <Input label="Email Address" placeholder="juan@example.com" type="email"
-            value={formData.email} onChange={(e) => handleChange('email', e.target.value)} error={errors.email} />
+            value={formData.email}
+            onChange={(e) => handleChange('email', e.target.value)}
+            error={errors.email} />
+
+          {/* ✅ Relationship to Borrower */}
+          <div className="space-y-2">
+            <label className="block text-[10px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">
+              RELATIONSHIP TO BORROWER <span className="text-error">*</span>
+            </label>
+            <select
+              value={formData.relationship}
+              onChange={(e) => handleChange('relationship', e.target.value)}
+              className={`w-full bg-surface-container-highest border-none focus:ring-2 focus:ring-primary/50 rounded-xl py-4 px-4 text-on-surface font-medium transition-all appearance-none ${
+                errors.relationship ? 'ring-2 ring-error/50' : ''
+              }`}
+            >
+              {RELATIONSHIP_OPTIONS.map(r => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+            {errors.relationship && (
+              <p className="text-xs text-error ml-1">{errors.relationship}</p>
+            )}
+          </div>
         </section>
 
-        {/* Address */}
+        {/* ── Co-maker Address ── */}
         <section className="space-y-6 mb-10">
           <div className="flex items-center gap-2 mb-2">
             <div className="w-1 h-6 bg-primary rounded-full" />
@@ -452,7 +488,7 @@ export default function ApplyLoanStep2() {
             value={formData.street} onChange={(e) => handleChange('street', e.target.value)} error={errors.street} />
         </section>
 
-        {/* Co-maker Documents */}
+        {/* ── Co-maker Documents ── */}
         <section className="space-y-4 mb-10">
           <div className="flex items-center gap-2 mb-2">
             <div className="w-1 h-6 bg-primary rounded-full" />
@@ -555,11 +591,9 @@ export default function ApplyLoanStep2() {
                     <span className="text-on-surface-variant">Interest Rate</span>
                     <span className="font-bold text-on-surface">{step1.interest_rate}% / month</span>
                   </div>
-
                   {breakdown && (
                     <>
                       <div className="border-t border-outline-variant/20 my-1" />
-                      {/* ✅ Synced: using shared feeRows array — single source of truth */}
                       {feeRows.map(({ label, value }) => (
                         <div key={label} className="flex justify-between text-sm">
                           <span className="text-on-surface-variant">{label}</span>
@@ -571,14 +605,12 @@ export default function ApplyLoanStep2() {
                         <span className="text-on-surface-variant font-bold">Loans Receivable</span>
                         <span className="font-extrabold text-on-surface">₱{fmtW(breakdown.loansReceivable)}</span>
                       </div>
-                      {/* ✅ Synced: label updated to match Step 1 */}
                       <div className="flex justify-between text-sm">
                         <span className="text-on-surface-variant">Net Proceeds (Cash Released)</span>
                         <span className="font-bold text-green-600">₱{fmtW(breakdown.cashReleased)}</span>
                       </div>
                     </>
                   )}
-
                   <div className="flex justify-between text-sm">
                     <span className="text-on-surface-variant">Collateral</span>
                     <span className="font-bold text-on-surface">{step1.collateral_type}</span>
@@ -589,8 +621,6 @@ export default function ApplyLoanStep2() {
                       <span className="font-bold text-on-surface text-right max-w-[55%]">{step1.collateral_notes}</span>
                     </div>
                   )}
-
-                  {/* ✅ Synced: amortization sublabel matches Step 1 convention */}
                   {breakdown && (
                     <>
                       <div className="border-t border-outline-variant my-1" />
@@ -600,7 +630,7 @@ export default function ApplyLoanStep2() {
                       </div>
                       <p className="text-[10px] text-on-surface-variant text-right">
                         (Principal + Interest) ÷ {breakdown.totalPeriods} payments
-                    </p>
+                      </p>
                     </>
                   )}
                 </div>
@@ -622,6 +652,11 @@ export default function ApplyLoanStep2() {
                   <div className="flex justify-between text-sm">
                     <span className="text-on-surface-variant">Email</span>
                     <span className="font-bold text-on-surface">{formData.email}</span>
+                  </div>
+                  {/* ✅ Relationship shown in confirm sheet */}
+                  <div className="flex justify-between text-sm">
+                    <span className="text-on-surface-variant">Relationship</span>
+                    <span className="font-bold text-on-surface">{formData.relationship}</span>
                   </div>
                 </div>
 
