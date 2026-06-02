@@ -22,13 +22,8 @@ const FEE_RATES = {
   PAF:             0.0050, // 0.50% of principal
 };
 
-// Doc stamps rate is term-specific (reverse-engineered from disbursement vouchers)
-const DOC_STAMPS_RATE: Record<string, number> = {
-  daily:        0.14,
-  weekly:       0.14,
-  semi_monthly: 0.14,
-  monthly:      0.14,
-};
+// ❌ REMOVED: DOC_STAMPS_RATE constant (was 14% of interest — incorrect)
+// ✅ Doc stamps = 12% of (interest + service fee) — verified from all disbursement vouchers
 
 const COLLATERAL_TYPES = [
   'ORCR (Vehicle)',
@@ -156,18 +151,22 @@ export default function ApplyLoanStep1() {
     const riskManagement = Math.round(principal * FEE_RATES.RISK_MANAGEMENT);
     const paf            = Math.round(principal * FEE_RATES.PAF);
 
-    // Doc stamps: term-specific rate on total interest — whole peso
-    const docStampsRate  = DOC_STAMPS_RATE[termOption.apiValue] ?? 0.15;
-    const docStamps      = Math.round(totalInterest * docStampsRate);
+    // ✅ FIX 1: Doc stamps = 12% of (interest + service fee)
+    // Verified against all 4 disbursement vouchers — exact 1:1 match
+    const docStamps = Math.round((totalInterest + serviceFee) * 0.12);
 
     const totalFees       = serviceFee + notarial + riskManagement + paf + docStamps;
     const loansReceivable = principal + totalInterest + totalFees;
     const cashReleased    = principal;
 
-    // Amortization: ceiled to nearest whole peso (matches voucher convention)
-    const totalPeriods  = Math.round(months * termOption.periodsPerMonth);
+    const totalPeriods = Math.round(months * termOption.periodsPerMonth);
+
+    // ✅ FIX 2: Amortization base is (principal + interest) only — NOT full loansReceivable
+    // Upfront fees (notarial, risk, PAF, doc stamps) are deducted from proceeds,
+    // the borrower does not repay them in periodic installments.
+    // floor() matches the voucher convention (699 = floor(11200/16))
     const amortization = totalPeriods > 0
-      ? Math.round((loansReceivable / totalPeriods) * 100) / 100
+      ? Math.floor((principal + totalInterest) / totalPeriods)
       : 0;
 
     const periodLabel =
@@ -456,7 +455,7 @@ export default function ApplyLoanStep1() {
                     Amortization per {breakdown.periodLabel}
                   </p>
                   <p className="text-[10px] text-on-surface-variant mt-0.5">
-                    Based on Loans Receivable ÷ {breakdown.totalPeriods} payments
+                    Based on (Principal + Interest) ÷ {breakdown.totalPeriods} payments
                   </p>
                 </div>
                 <p className="text-lg font-extrabold text-primary">₱{fmtW(breakdown.amortization)}</p>
