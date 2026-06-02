@@ -396,6 +396,64 @@ async function sendLoanStatusEmail(
   }
 }
 
+// ── Email: Co-maker Notification ──────────────────────────────────────────────
+async function sendComakerEmail(
+  toEmail:      string,
+  comakerName:  string,
+  borrowerName: string,
+  referenceNo:  string,
+  amount:       number,
+  brand:        string,
+  branch:       string | null
+): Promise<void> {
+  const accent          = "#01696f";
+  const formattedAmount = amount.toLocaleString('en-PH', { minimumFractionDigits: 2 });
+
+  const content = `
+    <h2 style="margin:0 0 8px;font-size:20px;font-weight:700;color:${accent};">
+      Co-maker Notification
+    </h2>
+    <p style="margin:0 0 20px;font-size:14px;color:#555;line-height:1.6;">
+      Hi <strong>${comakerName}</strong>, you have been listed as a
+      <strong>co-maker</strong> for the following loan application submitted
+      through <strong>${brand}</strong>. Please keep this email for your records.
+    </p>
+    ${infoBlock(accent, [
+      { label: 'Borrower',      value: borrowerName                              },
+      { label: 'Reference No.', value: referenceNo                               },
+      { label: 'Loan Amount',   value: \`&#8369;\${formattedAmount}\`, highlight: true },
+      { label: 'Status',        value: 'PENDING REVIEW'                          },
+    ])}
+    <p style="margin:20px 0 0;font-size:13px;color:#888;line-height:1.6;">
+      As a co-maker, you are acknowledging that you are aware of this loan
+      application. If you have questions, please contact
+      <strong>${brand}</strong> directly.
+    </p>`;
+
+  const response = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'accept':       'application/json',
+      'api-key':      process.env.BREVO_API_KEY ?? '',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      sender: {
+        name:  `${brand} via CredenceLend`,
+        email: process.env.BREVO_SENDER_EMAIL ?? '',
+      },
+      to:          [{ email: toEmail }],
+      subject:     `${brand} — Co-maker Notice (${referenceNo})`,
+      htmlContent: emailWrapper(brand, branch, accent, content),
+    }),
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    console.warn('Co-maker email skipped:', err);
+  }
+}
+
 async function startServer() {
   const REQUIRED_ENV = [
     "DB_HOST", "DB_PORT", "DB_NAME", "DB_USER", "DB_PASSWORD",
@@ -848,9 +906,9 @@ async function startServer() {
       const fallbackTotal     = Number((amount + totalInterestCalc).toFixed(2));
       const termCount         = getTermCount(payment_term, months);
 
-      const total_payable   = loans_receivable   ? Number(Number(loans_receivable).toFixed(2))   : fallbackTotal;
-      const amount_per_term = amortization        ? Number(Number(amortization).toFixed(2))        : Number((total_payable / termCount).toFixed(2));
-      const totalPeriods    = total_periods       ? Number(total_periods)                          : termCount;
+      const total_payable   = loans_receivable ? Number(Number(loans_receivable).toFixed(2)) : fallbackTotal;
+      const amount_per_term = amortization     ? Number(Number(amortization).toFixed(2))     : Number((total_payable / termCount).toFixed(2));
+      const totalPeriods    = total_periods    ? Number(total_periods)                        : termCount;
 
       const [loanResult] = await pool.query<ResultSetHeader>(
         `INSERT INTO loans (
@@ -866,18 +924,19 @@ async function startServer() {
           payment_term, months, total_payable, amount_per_term, total_payable,
           id_type ?? null, collateral_type, collateral_notes ?? null,
           totalPeriods,
-          service_fee      ? Number(service_fee)      : null,
-          notarial_fee     ? Number(notarial_fee)      : null,
-          risk_management  ? Number(risk_management)   : null,
-          paf              ? Number(paf)               : null,
-          doc_stamps       ? Number(doc_stamps)        : null,
-          total_fees       ? Number(total_fees)        : null,
-          total_interest   ? Number(total_interest)    : null,
-          cash_released    ? Number(cash_released)     : null,
+          service_fee     ? Number(service_fee)     : null,
+          notarial_fee    ? Number(notarial_fee)     : null,
+          risk_management ? Number(risk_management)  : null,
+          paf             ? Number(paf)              : null,
+          doc_stamps      ? Number(doc_stamps)       : null,
+          total_fees      ? Number(total_fees)       : null,
+          total_interest  ? Number(total_interest)   : null,
+          cash_released   ? Number(cash_released)    : null,
         ]
       );
       const loan_id = loanResult.insertId;
 
+      // ── Insert co-makers ──────────────────────────────────────────────────
       if (Array.isArray(comakers) && comakers.length > 0) {
         for (const cm of comakers) {
           try {
@@ -901,6 +960,32 @@ async function startServer() {
         }
       }
 
+      // ── Fire-and-forget: co-maker notification emails ─────────────────────
+      if (Array.isArray(comakers) && comakers.length > 0) {
+        void (async () => {
+          try {
+            const [custRows] = await pool.query<RowDataPacket[]>(
+              `SELECT first_name, last_name FROM customers WHERE customer_id = ? LIMIT 1`,
+              [customer_id]
+            );
+            const borrowerName = custRows.length > 0
+              ? `${custRows[0].first_name} ${custRows[0].last_name}`.trim()
+              : 'the borrower';
+
+            const { brand, branch } = await getTenantBranding(resolvedTenantId);
+
+            for (const cm of comakers) {
+              const cmEmail = cm.email ? String(cm.email).trim() : '';
+              if (!cmEmail) continue;
+              const cmName = String(cm.full_name ?? '').trim() || 'Co-maker';
+              await sendComakerEmail(cmEmail, cmName, borrowerName, reference_no, amount, brand, branch);
+            }
+          } catch (cmEmailErr: any) {
+            console.warn('Co-maker email skipped:', cmEmailErr.message);
+          }
+        })();
+      }
+
       await insertNotification(
         customer_id, resolvedTenantId,
         "Loan Application Received",
@@ -909,119 +994,112 @@ async function startServer() {
         loan_id
       );
 
-          // ── Fire-and-forget: loan voucher email ───────────────────────────────
-          void (async () => {
-            try {
-              const [custRows] = await pool.query<RowDataPacket[]>(
-                `SELECT first_name, email FROM customers WHERE customer_id = ? LIMIT 1`,
-                [customer_id]
-              );
-              if (custRows.length > 0 && custRows[0].email) {
-                const { brand, branch } = await getTenantBranding(resolvedTenantId);
-                const accent            = "#01696f";
+      // ── Fire-and-forget: loan voucher email ───────────────────────────────
+      void (async () => {
+        try {
+          const [custRows] = await pool.query<RowDataPacket[]>(
+            `SELECT first_name, email FROM customers WHERE customer_id = ? LIMIT 1`,
+            [customer_id]
+          );
+          if (custRows.length > 0 && custRows[0].email) {
+            const { brand, branch } = await getTenantBranding(resolvedTenantId);
+            const accent            = "#01696f";
 
-                const fmt = (n: number) => n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                const fmtW = (n: number) => Math.round(n).toLocaleString('en-PH');
+            const fmt  = (n: number) => n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const fmtW = (n: number) => Math.round(n).toLocaleString('en-PH');
 
-                const TERM_LABELS: Record<string, string> = {
-                  daily: 'Daily', weekly: 'Weekly',
-                  semi_monthly: 'Semi-monthly', monthly: 'Monthly',
-                };
-                const PERIOD_LABELS: Record<string, string> = {
-                  daily: 'day', weekly: 'week',
-                  semi_monthly: '15-day period', monthly: 'month',
-                };
-                const termLabel   = TERM_LABELS[payment_term]  ?? payment_term;
-                const periodLabel = PERIOD_LABELS[payment_term] ?? 'month';
+            const TERM_LABELS: Record<string, string> = {
+              daily: 'Daily', weekly: 'Weekly',
+              semi_monthly: 'Semi-monthly', monthly: 'Monthly',
+            };
+            const PERIOD_LABELS: Record<string, string> = {
+              daily: 'day', weekly: 'week',
+              semi_monthly: '15-day period', monthly: 'month',
+            };
+            const termLabel   = TERM_LABELS[payment_term]  ?? payment_term;
+            const periodLabel = PERIOD_LABELS[payment_term] ?? 'month';
 
-                const content = `
-                  <h2 style="margin:0 0 4px;font-size:20px;font-weight:700;color:${accent};">
-                    Loan Application Received
-                  </h2>
-                  <p style="margin:0 0 20px;font-size:14px;color:#555;line-height:1.6;">
-                    Hi <strong>${custRows[0].first_name}</strong>, your loan application has been submitted
-                    and is now <strong>pending review</strong>. Below is your official loan breakdown voucher.
-                  </p>
+            const content = `
+              <h2 style="margin:0 0 4px;font-size:20px;font-weight:700;color:${accent};">
+                Loan Application Received
+              </h2>
+              <p style="margin:0 0 20px;font-size:14px;color:#555;line-height:1.6;">
+                Hi <strong>${custRows[0].first_name}</strong>, your loan application has been submitted
+                and is now <strong>pending review</strong>. Below is your official loan breakdown voucher.
+              </p>
+              ${infoBlock(accent, [
+                { label: 'Reference No.',  value: reference_no },
+                { label: 'Date Applied',   value: new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' }) },
+                { label: 'Payment Term',   value: `${termLabel} · ${months} Month${months > 1 ? 's' : ''}` },
+                { label: 'Status',         value: 'PENDING REVIEW', highlight: true },
+              ])}
+              <p style="margin:16px 0 6px;font-size:11px;font-weight:700;color:#aaa;letter-spacing:0.08em;text-transform:uppercase;">
+                Loan Breakdown
+              </p>
+              ${infoBlock(accent, [
+                { label: 'Principal Amount',       value: `&#8369;${fmt(amount)}`                                                },
+                { label: 'Interest Income',        value: `&#8369;${fmtW(Number(total_interest  ?? amount * (rate/100) * months))}` },
+                { label: 'Service Fee (3%)',        value: `&#8369;${fmtW(Number(service_fee     ?? 0))}`                        },
+                { label: 'Notarial Fee (1%)',       value: `&#8369;${fmtW(Number(notarial_fee    ?? 0))}`                        },
+                { label: 'Risk Management (0.5%)',  value: `&#8369;${fmtW(Number(risk_management ?? 0))}`                        },
+                { label: 'PAF (0.5%)',              value: `&#8369;${fmtW(Number(paf             ?? 0))}`                        },
+                { label: 'Documentary Stamps',      value: `&#8369;${fmtW(Number(doc_stamps      ?? 0))}`                        },
+              ])}
+              <p style="margin:16px 0 6px;font-size:11px;font-weight:700;color:#aaa;letter-spacing:0.08em;text-transform:uppercase;">
+                Summary
+              </p>
+              ${infoBlock(accent, [
+                { label: 'Loans Receivable',              value: `&#8369;${fmt(total_payable)}`,   highlight: true },
+                { label: 'Net Proceeds',                  value: `&#8369;${fmt(amount)}`                          },
+                { label: `Amortization / ${periodLabel}`, value: `&#8369;${fmt(amount_per_term)}`, highlight: true },
+                { label: 'Total Installments',            value: `${totalPeriods} ${termLabel.toLowerCase()} payment${totalPeriods > 1 ? 's' : ''}` },
+              ])}
+              <p style="margin:20px 0 0;font-size:13px;color:#888;line-height:1.6;">
+                You will receive another notification once your application has been reviewed.
+                Please keep this email as your official application record.
+              </p>`;
 
-                  <!-- Reference & Status -->
-                  ${infoBlock(accent, [
-                    { label: 'Reference No.',  value: reference_no                    },
-                    { label: 'Date Applied',   value: new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' }) },
-                    { label: 'Payment Term',   value: `${termLabel} · ${months} Month${months > 1 ? 's' : ''}` },
-                    { label: 'Status',         value: 'PENDING REVIEW', highlight: true },
-                  ])}
-
-                  <!-- Loan Breakdown -->
-                  <p style="margin:16px 0 6px;font-size:11px;font-weight:700;color:#aaa;letter-spacing:0.08em;text-transform:uppercase;">
-                    Loan Breakdown
-                  </p>
-                  ${infoBlock(accent, [
-                    { label: 'Principal Amount',      value: `&#8369;${fmt(amount)}`                                              },
-                    { label: 'Interest Income',       value: `&#8369;${fmtW(Number(total_interest  ?? amount * (rate/100) * months))}` },
-                    { label: 'Service Fee (3%)',       value: `&#8369;${fmtW(Number(service_fee     ?? 0))}`                      },
-                    { label: 'Notarial Fee (1%)',      value: `&#8369;${fmtW(Number(notarial_fee    ?? 0))}`                      },
-                    { label: 'Risk Management (0.5%)', value: `&#8369;${fmtW(Number(risk_management ?? 0))}`                      },
-                    { label: 'PAF (0.5%)',             value: `&#8369;${fmtW(Number(paf             ?? 0))}`                      },
-                    { label: 'Documentary Stamps',     value: `&#8369;${fmtW(Number(doc_stamps      ?? 0))}`                      },
-                  ])}
-
-                  <!-- Totals -->
-                  <p style="margin:16px 0 6px;font-size:11px;font-weight:700;color:#aaa;letter-spacing:0.08em;text-transform:uppercase;">
-                    Summary
-                  </p>
-                  ${infoBlock(accent, [
-                    { label: 'Loans Receivable', value: `&#8369;${fmt(total_payable)}`,   highlight: true  },
-                    { label: 'Net Proceeds',     value: `&#8369;${fmt(amount)}`,                           },
-                    { label: `Amortization / ${periodLabel}`, value: `&#8369;${fmt(amount_per_term)}`, highlight: true },
-                    { label: 'Total Installments', value: `${totalPeriods} ${termLabel.toLowerCase()} payment${totalPeriods > 1 ? 's' : ''}` },
-                  ])}
-
-                  <p style="margin:20px 0 0;font-size:13px;color:#888;line-height:1.6;">
-                    You will receive another notification once your application has been reviewed.
-                    Please keep this email as your official application record.
-                  </p>`;
-
-                await fetch('https://api.brevo.com/v3/smtp/email', {
-                  method: 'POST',
-                  headers: {
-                    'accept':       'application/json',
-                    'api-key':      process.env.BREVO_API_KEY ?? '',
-                    'content-type': 'application/json',
-                  },
-                  body: JSON.stringify({
-                    sender: {
-                      name:  `${brand} via CredenceLend`,
-                      email: process.env.BREVO_SENDER_EMAIL ?? '',
-                    },
-                    to:          [{ email: custRows[0].email }],
-                    subject:     `${brand} — Loan Application Voucher (${reference_no})`,
-                    htmlContent: emailWrapper(brand, branch, accent, content),
-                  }),
-                });
-              }
-            } catch (emailErr: any) {
-              console.warn('Voucher email skipped:', emailErr.message);
-            }
-          })();
-
-          try {
-            await pool.query(
-              `INSERT INTO loan_status_cache (loan_id, last_status) VALUES (?, 'PENDING')
-               ON DUPLICATE KEY UPDATE last_status = 'PENDING'`,
-              [loan_id]
-            );
-          } catch (cacheErr: any) { console.warn("Status cache seed skipped:", cacheErr.message); }
-
-          res.status(201).json({
-            success: true,
-            message: "Your loan application has been submitted successfully.",
-            loan:    { loan_id, reference_no, total_payable, amount_per_term, status: "PENDING" },
-          });
-        } catch (err: any) {
-          console.error("Loan apply error:", err);
-          res.status(500).json({ success: false, message: "Failed to submit loan application.", error: err.message });
+            await fetch('https://api.brevo.com/v3/smtp/email', {
+              method: 'POST',
+              headers: {
+                'accept':       'application/json',
+                'api-key':      process.env.BREVO_API_KEY ?? '',
+                'content-type': 'application/json',
+              },
+              body: JSON.stringify({
+                sender: {
+                  name:  `${brand} via CredenceLend`,
+                  email: process.env.BREVO_SENDER_EMAIL ?? '',
+                },
+                to:          [{ email: custRows[0].email }],
+                subject:     `${brand} — Loan Application Voucher (${reference_no})`,
+                htmlContent: emailWrapper(brand, branch, accent, content),
+              }),
+            });
+          }
+        } catch (emailErr: any) {
+          console.warn('Voucher email skipped:', emailErr.message);
         }
+      })();
+
+      try {
+        await pool.query(
+          `INSERT INTO loan_status_cache (loan_id, last_status) VALUES (?, 'PENDING')
+           ON DUPLICATE KEY UPDATE last_status = 'PENDING'`,
+          [loan_id]
+        );
+      } catch (cacheErr: any) { console.warn("Status cache seed skipped:", cacheErr.message); }
+
+      res.status(201).json({
+        success: true,
+        message: "Your loan application has been submitted successfully.",
+        loan:    { loan_id, reference_no, total_payable, amount_per_term, status: "PENDING" },
       });
+    } catch (err: any) {
+      console.error("Loan apply error:", err);
+      res.status(500).json({ success: false, message: "Failed to submit loan application.", error: err.message });
+    }
+  });
 
   // ── Loans: List by Customer ────────────────────────────────────────────────
   app.get("/api/loans/:customerId", async (req, res) => {
