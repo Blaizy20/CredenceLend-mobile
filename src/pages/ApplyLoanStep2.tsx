@@ -55,15 +55,16 @@ const REASON_MESSAGES: Record<string, string> = {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface CoMakerForm {
-  first_name:   string;
-  last_name:    string;
-  contact_no:   string;
-  email:        string;
-  relationship: string; // ✅ added
-  province:     string;
-  city:         string;
-  barangay:     string;
-  street:       string;
+  first_name:         string;
+  last_name:          string;
+  contact_no:         string;
+  email:              string;
+  relationship:       string;
+  relationship_other: string; // ✅ added
+  province:           string;
+  city:               string;
+  barangay:           string;
+  street:             string;
 }
 
 interface UploadDoc {
@@ -92,15 +93,16 @@ export default function ApplyLoanStep2() {
   }, [step1]);
 
   const [formData, setFormData] = useState<CoMakerForm>({
-    first_name:   '',
-    last_name:    '',
-    contact_no:   '',
-    email:        '',
-    relationship: 'Co-maker', // ✅ sensible default
-    province:     '',
-    city:         '',
-    barangay:     '',
-    street:       '',
+    first_name:         '',
+    last_name:          '',
+    contact_no:         '',
+    email:              '',
+    relationship:       'Co-maker',
+    relationship_other: '', // ✅ added
+    province:           '',
+    city:               '',
+    barangay:           '',
+    street:             '',
   });
 
   const [comakerFiles, setComakerFiles] = useState<Record<string, File | null>>({
@@ -148,6 +150,11 @@ export default function ApplyLoanStep2() {
     if (errors[code]) setErrors(prev => ({ ...prev, [code]: '' }));
   };
 
+  // ── Resolved relationship value (used in submit + confirm sheet) ──────────
+  const resolvedRelationship = formData.relationship === 'Other'
+    ? formData.relationship_other.trim()
+    : formData.relationship;
+
   // ── Validation ────────────────────────────────────────────────────────────
 
   const validate = () => {
@@ -169,7 +176,11 @@ export default function ApplyLoanStep2() {
     else if (!/\S+@\S+\.\S+/.test(formData.email.trim()))
       newErrors.email = 'Please enter a valid email address.';
 
-    if (!formData.relationship) newErrors.relationship = 'Please select a relationship.'; // ✅
+    if (!formData.relationship) {
+      newErrors.relationship = 'Please select a relationship.';
+    } else if (formData.relationship === 'Other' && !formData.relationship_other.trim()) {
+      newErrors.relationship_other = 'Please specify the relationship.'; // ✅
+    }
 
     if (!formData.province.trim()) newErrors.province = 'Province is required.';
     if (!formData.city.trim())     newErrors.city     = 'City is required.';
@@ -262,7 +273,7 @@ export default function ApplyLoanStep2() {
         comakers: [{
           full_name:    `${formData.first_name} ${formData.last_name}`.trim(),
           phone_number: formData.contact_no,
-          relationship: formData.relationship, // ✅ was hardcoded 'Co-maker'
+          relationship: resolvedRelationship, // ✅ never sends the literal "Other"
           email:        formData.email,
           address:      `${formData.street}, ${formData.barangay}, ${formData.city}, ${formData.province}`,
         }],
@@ -448,14 +459,18 @@ export default function ApplyLoanStep2() {
             onChange={(e) => handleChange('email', e.target.value)}
             error={errors.email} />
 
-          {/* ✅ Relationship to Borrower */}
+          {/* ── Relationship to Borrower ── */}
           <div className="space-y-2">
             <label className="block text-[10px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">
               RELATIONSHIP TO BORROWER <span className="text-error">*</span>
             </label>
             <select
               value={formData.relationship}
-              onChange={(e) => handleChange('relationship', e.target.value)}
+              onChange={(e) => {
+                handleChange('relationship', e.target.value);
+                // ✅ clear the free-text field whenever they switch away from Other
+                if (e.target.value !== 'Other') handleChange('relationship_other', '');
+              }}
               className={`w-full bg-surface-container-highest border-none focus:ring-2 focus:ring-primary/50 rounded-xl py-4 px-4 text-on-surface font-medium transition-all appearance-none ${
                 errors.relationship ? 'ring-2 ring-error/50' : ''
               }`}
@@ -467,6 +482,27 @@ export default function ApplyLoanStep2() {
             {errors.relationship && (
               <p className="text-xs text-error ml-1">{errors.relationship}</p>
             )}
+
+            {/* ✅ Free-text field — only shown when Other is selected */}
+            <AnimatePresence>
+              {formData.relationship === 'Other' && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="overflow-hidden"
+                >
+                  <Input
+                    label="PLEASE SPECIFY"
+                    placeholder="e.g. Godparent, Neighbor, Employer…"
+                    value={formData.relationship_other}
+                    onChange={(e) => handleChange('relationship_other', e.target.value)}
+                    error={errors.relationship_other}
+                  />
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
         </section>
 
@@ -653,10 +689,10 @@ export default function ApplyLoanStep2() {
                     <span className="text-on-surface-variant">Email</span>
                     <span className="font-bold text-on-surface">{formData.email}</span>
                   </div>
-                  {/* ✅ Relationship shown in confirm sheet */}
+                  {/* ✅ Always shows the resolved value — never the literal "Other" */}
                   <div className="flex justify-between text-sm">
                     <span className="text-on-surface-variant">Relationship</span>
-                    <span className="font-bold text-on-surface">{formData.relationship}</span>
+                    <span className="font-bold text-on-surface">{resolvedRelationship}</span>
                   </div>
                 </div>
 
