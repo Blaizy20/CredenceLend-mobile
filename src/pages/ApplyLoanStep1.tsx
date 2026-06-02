@@ -9,7 +9,7 @@ import { loansAPI } from '../lib/api';
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const TERM_OPTIONS = [
-  { label: 'Daily',        apiValue: 'daily',       rate: 2.75, periodsPerMonth: 30   },
+  { label: 'Daily',        apiValue: 'daily',       rate: 2.75, periodsPerMonth: 23.5   },
   { label: 'Weekly',       apiValue: 'weekly',      rate: 3.0,  periodsPerMonth: 4    },
   { label: 'Semi-monthly', apiValue: 'semi_monthly',rate: 3.5,  periodsPerMonth: 2    },
   { label: 'Monthly',      apiValue: 'monthly',     rate: 4.0,  periodsPerMonth: 1    },
