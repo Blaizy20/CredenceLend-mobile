@@ -419,10 +419,10 @@ async function sendComakerEmail(
       through <strong>${brand}</strong>. Please keep this email for your records.
     </p>
     ${infoBlock(accent, [
-      { label: 'Borrower',      value: borrowerName                              },
-      { label: 'Reference No.', value: referenceNo                               },
-      { label: 'Loan Amount',   value: `&#8369;\${formattedAmount}\`, highlight: true },
-      { label: 'Status',        value: 'PENDING REVIEW'                          },
+      { label: 'Borrower',      value: borrowerName                                 },
+      { label: 'Reference No.', value: referenceNo                                  },
+      { label: 'Loan Amount',   value: '&#8369;' + formattedAmount, highlight: true },
+      { label: 'Status',        value: 'PENDING REVIEW'                             },
     ])}
     <p style="margin:20px 0 0;font-size:13px;color:#888;line-height:1.6;">
       As a co-maker, you are acknowledging that you are aware of this loan
